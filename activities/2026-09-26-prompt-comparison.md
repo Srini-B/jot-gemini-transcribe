@@ -51,6 +51,6 @@ with `.amp/in/callclean.sh` (latency 1.5–2.4 s each):
 `swift test --package-path VoiceIQCore`: 209 passed, 9 skipped.
 `./scripts/build.sh`: no errors.
 
-Not done: no notarized rebuild or reinstall of `/Applications/Voice IQ.app`, so
-the installed build (v0.4.0 build 9) still runs the previous prompt. Changes are
-committed locally and not pushed.
+Rebuilt the notarized release (`scripts/release.sh`, DMG accepted by
+`spctl`) and reinstalled `/Applications/Voice IQ.app` (v0.4.0, build number
+unchanged at 9). Changes are committed locally and not pushed.
