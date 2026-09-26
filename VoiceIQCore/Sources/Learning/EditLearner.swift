@@ -32,7 +32,12 @@ public final class EditLearner {
         let snapshot: FieldSnapshot
         var insertions: [Insertion]
         var lastInsertionAt: Date
+        /// Hash of the field value the last diff ran against.
         var lastValueHash: Int?
+        /// A value seen since then that has not yet held still long enough
+        /// to be diffed, and when it was first seen.
+        var pendingHash: Int?
+        var pendingSince: Date?
         var pollTask: Task<Void, Never>?
         var harvesting = false
     }
@@ -47,12 +52,20 @@ public final class EditLearner {
     private enum Harvest: Sendable {
         case fieldGone
         case unchanged
+        /// The field changed but is still being edited: `valueHash` is the
+        /// value seen now, to be diffed once it has held still.
+        case editing(valueHash: Int)
         case located([Located], valueHash: Int)
     }
 
     /// Fields above this size are not diffed; the harvest would cost more than
     /// the corrections are worth and the user is unlikely to be dictating there.
     nonisolated static let maximumFieldLength = 200_000
+
+    /// A changed field is diffed only after its value has stayed the same for
+    /// this long. Diffing mid-edit learned half-typed words ("Pastack" while
+    /// the user was on the way from "Paystack" to "pstack").
+    nonisolated static let settleSeconds: TimeInterval = 4
 
     private let dictionary: DictionaryStore
     private var fields: [FieldKey: TrackedField] = [:]
@@ -88,6 +101,8 @@ public final class EditLearner {
         }
         tracked.lastInsertionAt = now
         tracked.lastValueHash = nil
+        tracked.pendingHash = nil
+        tracked.pendingSince = nil
         tracked.pollTask?.cancel()
         tracked.pollTask = pollingTask(for: key)
         fields[key] = tracked
@@ -127,8 +142,15 @@ public final class EditLearner {
         let snapshot = tracked.snapshot
         let insertions = tracked.insertions.map { ($0.id, $0.text) }
         let previousHash = tracked.lastValueHash
+        let settled = tracked.pendingSince.map { now.timeIntervalSince($0) >= Self.settleSeconds } == true
+        let settledHash = settled ? tracked.pendingHash : nil
         let result = await Task.detached(priority: .utility) {
-            Self.compute(snapshot: snapshot, insertions: insertions, previousHash: previousHash)
+            Self.compute(
+                snapshot: snapshot,
+                insertions: insertions,
+                previousHash: previousHash,
+                settledHash: settledHash
+            )
         }.value
 
         guard var current = fields[key] else { return }
@@ -138,8 +160,16 @@ public final class EditLearner {
             forget(key)
         case .unchanged:
             fields[key] = current
+        case let .editing(valueHash):
+            if valueHash != current.pendingHash {
+                current.pendingHash = valueHash
+                current.pendingSince = now
+            }
+            fields[key] = current
         case let .located(located, valueHash):
             current.lastValueHash = valueHash
+            current.pendingHash = nil
+            current.pendingSince = nil
             let harvested = Set(insertions.map(\.0))
             let byID = Dictionary(uniqueKeysWithValues: located.map { ($0.id, $0) })
             current.insertions = current.insertions.compactMap { insertion in
@@ -166,11 +196,13 @@ public final class EditLearner {
     private nonisolated static func compute(
         snapshot: FieldSnapshot,
         insertions: [(UUID, String)],
-        previousHash: Int?
+        previousHash: Int?,
+        settledHash: Int?
     ) -> Harvest {
         guard let current = snapshot.currentValue(), current.count <= maximumFieldLength else { return .fieldGone }
         let valueHash = current.hashValue
         if valueHash == previousHash { return .unchanged }
+        guard valueHash == settledHash else { return .editing(valueHash: valueHash) }
         let matches = EditDiff.locateWindows(insertions: insertions.map(\.1), in: current)
         let located = zip(insertions, matches).compactMap { insertion, match -> Located? in
             guard let match else { return nil }
@@ -192,12 +224,18 @@ public final class EditLearner {
             guard !known.contains(where: {
                 let term = $0.term.lowercased()
                 let misspelling = $0.misspelling?.lowercased()
+                let learnedFrom = $0.learnedFrom?.lowercased()
                 return term == original || term == replacement
                     || misspelling == original || misspelling == replacement
+                    || learnedFrom == original
             }) else { continue }
+            // Learned as a word only, never as a wrong→right rule: a rule
+            // built from one edit ("stack" → "pstack") would rewrite every
+            // later "stack". The word rides in the vocabulary; `learnedFrom`
+            // records the transcript wording it replaced.
             guard dictionary.add(
                 term: correction.replacement,
-                misspelling: correction.original,
+                learnedFrom: correction.original,
                 source: .auto
             ) else { continue }
             if let entry = dictionary.entries().last(where: {

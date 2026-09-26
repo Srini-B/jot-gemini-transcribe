@@ -28,21 +28,31 @@ public struct DictionaryEntry: Codable, Equatable, Identifiable, Sendable {
     public var term: String
     /// Optional misspelling the model tends to produce ("cooper netties").
     public var misspelling: String?
+    /// For auto-learned words: the transcript wording the user replaced with
+    /// `term`. Informational only; never a replacement rule.
+    public var learnedFrom: String?
     public var starred: Bool
     public var createdAt: Date
     public var source: DictionarySource
 
-    public init(term: String, misspelling: String? = nil, starred: Bool = false, source: DictionarySource = .manual) {
+    public init(
+        term: String,
+        misspelling: String? = nil,
+        learnedFrom: String? = nil,
+        starred: Bool = false,
+        source: DictionarySource = .manual
+    ) {
         self.id = UUID()
         self.term = term
         self.misspelling = misspelling
+        self.learnedFrom = learnedFrom
         self.starred = starred
         self.createdAt = Date()
         self.source = source
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, term, misspelling, starred, createdAt, source
+        case id, term, misspelling, learnedFrom, starred, createdAt, source
     }
 
     public init(from decoder: Decoder) throws {
@@ -50,9 +60,16 @@ public struct DictionaryEntry: Codable, Equatable, Identifiable, Sendable {
         id = try container.decode(UUID.self, forKey: .id)
         term = try container.decode(String.self, forKey: .term)
         misspelling = try container.decodeIfPresent(String.self, forKey: .misspelling)
+        learnedFrom = try container.decodeIfPresent(String.self, forKey: .learnedFrom)
         starred = try container.decode(Bool.self, forKey: .starred)
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         source = try container.decodeIfPresent(DictionarySource.self, forKey: .source) ?? .manual
+        // Auto-learned entries used to be stored as wrong→right rules. Demote
+        // them to plain words so an old edit cannot rewrite unrelated text.
+        if source == .auto, let rule = misspelling {
+            learnedFrom = learnedFrom ?? rule
+            misspelling = nil
+        }
     }
 }
 
@@ -82,7 +99,12 @@ public struct DictionaryStore: Sendable {
     }
 
     @discardableResult
-    public func add(term: String, misspelling: String? = nil, source: DictionarySource) -> Bool {
+    public func add(
+        term: String,
+        misspelling: String? = nil,
+        learnedFrom: String? = nil,
+        source: DictionarySource
+    ) -> Bool {
         let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines)
         guard (1...60).contains(trimmed.count) else { return false }
         var current = entries()
@@ -90,6 +112,7 @@ public struct DictionaryStore: Sendable {
         current.append(DictionaryEntry(
             term: trimmed,
             misspelling: misspelling?.trimmingCharacters(in: .whitespacesAndNewlines),
+            learnedFrom: learnedFrom?.trimmingCharacters(in: .whitespacesAndNewlines),
             source: source
         ))
         save(current)

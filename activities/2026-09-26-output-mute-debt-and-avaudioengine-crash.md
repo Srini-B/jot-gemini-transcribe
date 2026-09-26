@@ -58,3 +58,20 @@ The first release build failed to migrate: the bulk `sed` had also rewritten the
 - Notarized release installed as `/Applications/VoiceiQ.app`; the old `Voice IQ.app` removed. Accessibility and the hotkey event tap survived the rename (`EventTapEngine: tap running (key=rightOption)`).
 - Launch moved `~/Library/Application Support/Voice IQ` to `VoiceiQ`; `history.sqlite` reports 108 dictations.
 - Onboarding how-to screen reads "Talk to VoiceiQ."; About pane shows icon, `VoiceiQ`, `Version 0.4.0 (9)`. Onboarding flag left true.
+
+# Same day — auto-learn: wait for the edit to finish, learn words not rules
+
+## Why
+
+Editing "Paystack" to "pstack" in Amp after a dictation produced two auto entries two seconds apart: `Paystack → Pastack` (learned while the word was half typed) and `stack → pstack`. Both were stored as wrong→right rules, which `ReplacementEngine` applies to every later transcript, so any future "stack" would have become "pstack".
+
+## Change
+
+- `EditLearner` diffs a changed field only after its value has stayed the same for 4 s (`settleSeconds`). Each poll that sees a new value records it as pending; the diff runs on the first poll after the value has held still. Insertion resets the pending state.
+- Learned corrections are stored as `DictionaryEntry(term: replacement, learnedFrom: original, source: .auto)` with no `misspelling`, so they join the vocabulary but never form a replacement rule or a prompt spelling hint. `DictionaryEntry.init(from:)` demotes existing auto rules the same way on load.
+- Dictionary rows show `Heard as "…"` for auto entries.
+- The user's stray `Pastack` entry was deleted; `stack → pstack` became the word `pstack` heard as "Paystack".
+
+## Verification
+
+Release build installed. Dictated via `say` into TextEdit (output mute temporarily off), then rewrote "latest" in three steps 2 s apart ("lat", "latte", "lattest"). No entry at 3.5 s and at 2.5 s after the last edit; one entry `lattest` (heard as "latest", no misspelling) 7 s after the last edit. Dictionary pane shows the `Heard as` line. Test entry removed afterwards; 193 package tests pass.

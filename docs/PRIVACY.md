@@ -62,9 +62,10 @@ Everything else stays on your Mac. The code is open — verify all of this.
 
 The auto-learn feature ("Learn from your edits") never sends anything. It
 re-reads the field VoiceiQ typed into, through the Accessibility API, for up to ten
-minutes after an insertion, and turns short replacements you made (one to
-three words) into Dictionary entries. Those entries then ride with your audio like any other
-dictionary term. Everything it reads stays on this Mac.
+minutes after an insertion, waits until you have stopped editing for a few
+seconds, and adds the short replacements you made (one to three words) to the
+Dictionary as words. They ride with your audio like any other dictionary term
+and are never applied as automatic text replacements. Everything it reads stays on this Mac.
 
 ## What never leaves
 

@@ -140,6 +140,10 @@ struct DictionaryView: View {
                     Text("\"\(misspelling)\" → \(entry.term)")
                         .font(VoiceIQUI.TypeScale.labelSmall(grad: grad))
                         .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
+                } else if let learnedFrom = entry.learnedFrom, !learnedFrom.isEmpty {
+                    Text("Heard as \"\(learnedFrom)\"")
+                        .font(VoiceIQUI.TypeScale.labelSmall(grad: grad))
+                        .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
                 }
             }
             Spacer()
