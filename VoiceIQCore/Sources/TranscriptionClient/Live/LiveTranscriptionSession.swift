@@ -30,6 +30,10 @@ public enum LiveOutcome: Equatable, Sendable {
     /// Clean: setup completed, nothing dropped, activityEnd acknowledged, a final
     /// transcript arrived before the deadline.
     case completed(String)
+    /// The server heard the whole recording and found no words in it. Not a
+    /// live failure: the batch path reports the same silence, so this is not
+    /// counted against live mode.
+    case silent
     /// Anything else. The batch path over the CAF takes over; the words are on
     /// disk regardless. The string is for the log, never for the user.
     case unusable(String)
@@ -247,7 +251,7 @@ public actor LiveTranscriptionSession {
 
         let joined = finals.joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !joined.isEmpty else { return .unusable("final transcript was empty") }
+        guard !joined.isEmpty else { return .silent }
         return .completed(joined)
     }
 

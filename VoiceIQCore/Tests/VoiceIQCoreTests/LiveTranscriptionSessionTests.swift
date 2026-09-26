@@ -300,14 +300,12 @@ final class LiveTranscriptionSessionTests: XCTestCase {
         }
     }
 
-    func testEmptyFinalIsUnusable() async throws {
+    func testEmptyFinalIsSilentNotAFailure() async throws {
         let transport = FakeTransport(script: [setupCompleteFrame(), finalFrame("   ")])
         let session = makeSession(transport)
         try await session.start()
         try await Task.sleep(nanoseconds: 120_000_000)
         let outcome = await session.finish(deadline: 0.5)
-        guard case .unusable = outcome else {
-            return XCTFail("whitespace-only text must not be inserted, got \(outcome)")
-        }
+        XCTAssertEqual(outcome, .silent, "whitespace-only text must not be inserted, and must not count against live mode")
     }
 }

@@ -36,7 +36,12 @@ struct MeetingsPane: View {
             }
             .overlay { if meetings.isEmpty { Text("No meetings yet").foregroundStyle(.secondary) } }
             .frame(width: 230)
-            Divider()
+            // Same as the main sidebar: Divider() stops below the transparent
+            // titlebar, a rectangle reaches the top edge.
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor))
+                .frame(width: 1)
+                .ignoresSafeArea(.container, edges: .top)
             VStack(spacing: 0) {
                 toolbar
                 if let meeting = selected { detail(meeting) } else { ContentUnavailableView("No Meeting Selected", systemImage: "person.2").frame(maxHeight: .infinity) }

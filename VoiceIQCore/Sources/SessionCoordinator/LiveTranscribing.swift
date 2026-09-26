@@ -96,9 +96,16 @@ public final class LiveTranscriber: LiveTranscribing, @unchecked Sendable {
     public func finish(deadline: TimeInterval, framesWritten: Int64) async -> TranscriptionResult? {
         let outcome = await session.finish(deadline: deadline)
         guard case .completed(let text) = outcome else {
-            if case .unusable(let why) = outcome {
+            switch outcome {
+            case .unusable(let why):
                 Log.transcription.info("live session unusable, falling back to upload: \(why, privacy: .public)")
                 stats.recordFallback(LiveStats.classify(why))
+            case .silent:
+                // The upload will say "empty" too. Counting silence as a live
+                // failure paused live mode after three quiet dictations.
+                Log.transcription.info("live session heard no speech — upload decides")
+            case .completed:
+                break
             }
             return nil
         }

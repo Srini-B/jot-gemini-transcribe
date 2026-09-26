@@ -537,7 +537,8 @@ struct AboutPane: View {
                     .accessibilityHidden(true)
             }
             VStack(spacing: 4) {
-                Text("Voice IQ")
+                // The wordmark spelling, not the bundle display name.
+                Text("VoiceiQ")
                     .font(VoiceIQUI.TypeScale.display())
                     .foregroundStyle(VoiceIQUI.Colors.onSurface)
                 Text(version)

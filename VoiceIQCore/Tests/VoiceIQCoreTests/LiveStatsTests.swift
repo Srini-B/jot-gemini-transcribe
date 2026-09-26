@@ -94,7 +94,6 @@ final class LiveStatsTests: XCTestCase {
         XCTAssertEqual(LiveStats.classify("setup never completed"), .neverOpened)
         XCTAssertEqual(LiveStats.classify("connect failed: offline"), .neverOpened)
         XCTAssertEqual(LiveStats.classify("no final transcript before deadline"), .noFinal)
-        XCTAssertEqual(LiveStats.classify("final transcript was empty"), .noFinal)
         XCTAssertEqual(LiveStats.classify("server sent goAway"), .droppedMidSession)
         XCTAssertEqual(LiveStats.classify("something nobody anticipated"), .droppedMidSession,
                        "an unknown reason must still be counted, not dropped")

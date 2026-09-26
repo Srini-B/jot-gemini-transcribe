@@ -48,6 +48,7 @@ public struct LiveStats: Sendable {
     private static let successesKey = "liveSuccesses"
     private static let reasonPrefix = "liveFallback_"
     private static let consecutiveKey = "liveConsecutiveFailures"
+    private static let lastFailureKey = "liveLastFailureAt"
 
     private let defaults: UserDefaults
     public init(defaults: UserDefaults = .standard) { self.defaults = defaults }
@@ -58,11 +59,12 @@ public struct LiveStats: Sendable {
         defaults.set(0, forKey: Self.consecutiveKey)
     }
 
-    public func recordFallback(_ reason: Fallback) {
+    public func recordFallback(_ reason: Fallback, at now: Date = Date()) {
         defaults.set(defaults.integer(forKey: Self.attemptsKey) + 1, forKey: Self.attemptsKey)
         let key = Self.reasonPrefix + reason.rawValue
         defaults.set(defaults.integer(forKey: key) + 1, forKey: key)
         defaults.set(defaults.integer(forKey: Self.consecutiveKey) + 1, forKey: Self.consecutiveKey)
+        defaults.set(now.timeIntervalSinceReferenceDate, forKey: Self.lastFailureKey)
     }
 
     public var attempts: Int { defaults.integer(forKey: Self.attemptsKey) }
@@ -78,11 +80,27 @@ public struct LiveStats: Sendable {
     /// Every failed attempt costs a handshake and then the full upload anyway, so
     /// a live path that is reliably broken makes every dictation slower than
     /// having the feature off. Three is enough to distinguish a bad afternoon
-    /// from a bad build. A single success clears it, so a flaky network heals
-    /// itself without the user touching anything.
+    /// from a bad build.
     public static let failureLimit = 3
 
-    public var shouldStopTrying: Bool { consecutiveFailures >= Self.failureLimit }
+    /// How long the pause lasts. A paused live path never gets the success that
+    /// would clear its streak, so without a retry the pause was permanent until
+    /// the user toggled the setting. After this long, one more attempt runs; a
+    /// success clears the streak, a failure starts another pause.
+    public static let retryAfter: TimeInterval = 10 * 60
+
+    public var shouldStopTrying: Bool { shouldStopTrying(at: Date()) }
+
+    public func shouldStopTrying(at now: Date) -> Bool {
+        guard consecutiveFailures >= Self.failureLimit else { return false }
+        guard let last = lastFailure else { return false }
+        return now.timeIntervalSince(last) < Self.retryAfter
+    }
+
+    public var lastFailure: Date? {
+        let raw = defaults.double(forKey: Self.lastFailureKey)
+        return raw == 0 ? nil : Date(timeIntervalSinceReferenceDate: raw)
+    }
 
     /// Clears the streak without clearing the history — used when the user turns
     /// live mode on again, which is an explicit "try once more".
@@ -94,6 +112,7 @@ public struct LiveStats: Sendable {
         defaults.removeObject(forKey: Self.attemptsKey)
         defaults.removeObject(forKey: Self.successesKey)
         defaults.removeObject(forKey: Self.consecutiveKey)
+        defaults.removeObject(forKey: Self.lastFailureKey)
         for reason in Fallback.allCases {
             defaults.removeObject(forKey: Self.reasonPrefix + reason.rawValue)
         }
@@ -115,6 +134,10 @@ public struct LiveStats: Sendable {
         if let worst, successes < attempts {
             line += " Most fell back because \(Self.phrase(for: worst.0))."
         }
+        if shouldStopTrying, let last = lastFailure {
+            let minutes = max(1, Int((Self.retryAfter - Date().timeIntervalSince(last)) / 60))
+            line += " Paused after \(consecutiveFailures) failures in a row; tries again in \(minutes) min."
+        }
         return line
     }
 
@@ -135,7 +158,7 @@ public struct LiveStats: Sendable {
         if lowered.contains("setup") || lowered.contains("connect") || lowered.contains("refused") {
             return .neverOpened
         }
-        if lowered.contains("no final") || lowered.contains("empty") { return .noFinal }
+        if lowered.contains("no final") { return .noFinal }
         return .droppedMidSession
     }
 }

@@ -22,6 +22,9 @@ import SwiftUI
 /// of the key, so the opposite twin never triggers.
 struct DictationKeySection: View {
     private let settings = SettingsStore()
+    // @State, not let: the struct is rebuilt on every render and a fresh UUID
+    // would no longer own the capture it started.
+    @State private var captureID = UUID()
     @State private var hotkey = SettingsStore().hotkeyKey
     @State private var doubleTapLock = SettingsStore().doubleTapLockEnabled
     @State private var isRecording = false
@@ -38,7 +41,18 @@ struct DictationKeySection: View {
                     .clipShape(Capsule())
                     .controlSize(.small)
 
+                    if isRecording {
+                        Button {
+                            stopRecording()
+                        } label: {
+                            Image(systemName: "xmark.circle")
+                        }
+                        .buttonStyle(.plain)
+                        .help("Cancel")
+                    }
+
                     Button {
+                        stopRecording()
                         apply(.fn)
                     } label: {
                         Image(systemName: "arrow.counterclockwise")
@@ -58,6 +72,9 @@ struct DictationKeySection: View {
             doubleTapLock = settings.doubleTapLockEnabled
         }
         .onDisappear { stopRecording() }
+        .onReceive(NotificationCenter.default.publisher(for: .voiceIQShortcutCaptureDidBegin)) { note in
+            if note.object as? UUID != captureID { stopRecording() }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .gtSettingDidChange).receive(on: RunLoop.main)) { note in
             switch note.object as? String {
             case "hotkeyKey": hotkey = settings.hotkeyKey
@@ -75,6 +92,7 @@ struct DictationKeySection: View {
     private func startRecording() {
         stopRecording()
         isRecording = true
+        ShortcutCapture.begin(owner: captureID)
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { event in
             if event.type == .keyDown, event.keyCode == 53 {
                 stopRecording()
@@ -94,6 +112,7 @@ struct DictationKeySection: View {
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
         isRecording = false
+        ShortcutCapture.end(owner: captureID)
     }
 }
 
@@ -132,8 +151,8 @@ private struct PermissionRow: View {
     var body: some View {
         LabeledContent(title) {
             HStack(spacing: 8) {
-                Image(systemName: granted ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                    .foregroundStyle(granted ? VoiceIQUI.Colors.success : VoiceIQUI.Colors.error)
+                Image(systemName: granted ? "checkmark.circle" : "xmark.circle.fill")
+                    .foregroundStyle(granted ? AnyShapeStyle(.secondary) : AnyShapeStyle(VoiceIQUI.Colors.error))
                 Text(granted ? "Granted" : "Not granted")
                     .foregroundStyle(.secondary)
                 if !granted {

@@ -193,7 +193,10 @@ public final class EventTapEngine {
         case .flagsChanged:
             lock.lock()
             let configured = key
-            guard keyCode == configured.keyCode else {
+            // While Settings records a shortcut the press belongs to that row,
+            // not to dictation. A key already held keeps its release so the
+            // edge detector is not stranded.
+            guard keyCode == configured.keyCode, !(ShortcutCapture.isActive && !keyIsDown) else {
                 lock.unlock()
                 return Unmanaged.passUnretained(event)
             }
@@ -220,6 +223,8 @@ public final class EventTapEngine {
             guard event.getIntegerValueField(.keyboardEventAutorepeat) == 0 else {
                 return Unmanaged.passUnretained(event)
             }
+            // A shortcut being recorded is the row's to consume, Esc included.
+            guard !ShortcutCapture.isActive else { return Unmanaged.passUnretained(event) }
             lock.lock()
             // Space while the dictation key is physically held = hands-free lock.
             // Timing-free by construction — both keys are simply down together.

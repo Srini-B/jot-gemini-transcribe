@@ -146,6 +146,14 @@ public final class GlobalShortcutEngine: @unchecked Sendable {
         }
 
         let keyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
+        if ShortcutCapture.isActive {
+            // The Settings window is recording a shortcut. Nothing matches and
+            // a held action is released, so its key-up never fires an action.
+            lock.lock()
+            activeActions.removeAll()
+            lock.unlock()
+            return Unmanaged.passUnretained(event)
+        }
         if type == .keyDown {
             guard event.getIntegerValueField(.keyboardEventAutorepeat) == 0 else {
                 lock.lock()

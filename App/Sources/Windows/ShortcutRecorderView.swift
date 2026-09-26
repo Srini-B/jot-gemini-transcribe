@@ -10,6 +10,9 @@ struct ShortcutRecorderRow: View {
     let action: ShortcutAction
 
     private let store = ShortcutStore()
+    // @State, not let: the struct is rebuilt on every render and a fresh UUID
+    // would no longer own the capture it started.
+    @State private var captureID = UUID()
     @State private var shortcut: KeyShortcut
     @State private var isRecording = false
     @State private var monitor: Any?
@@ -30,6 +33,16 @@ struct ShortcutRecorderRow: View {
                 .clipShape(Capsule())
                 .controlSize(.small)
 
+                if isRecording {
+                    Button {
+                        stopRecording()
+                    } label: {
+                        Image(systemName: "xmark.circle")
+                    }
+                    .buttonStyle(.plain)
+                    .help("Cancel")
+                }
+
                 Text("Side")
                 Picker("Side", selection: sideBinding) {
                     ForEach(KeyShortcut.Side.allCases, id: \.self) { side in
@@ -41,6 +54,7 @@ struct ShortcutRecorderRow: View {
                 .frame(width: 74)
 
                 Button {
+                    stopRecording()
                     store.reset(action)
                     shortcut = store.shortcut(for: action)
                 } label: {
@@ -53,6 +67,9 @@ struct ShortcutRecorderRow: View {
         .onReceive(NotificationCenter.default.publisher(for: .voiceIQShortcutDidChange)) { note in
             guard note.object as? ShortcutAction == action else { return }
             shortcut = store.shortcut(for: action)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .voiceIQShortcutCaptureDidBegin)) { note in
+            if note.object as? UUID != captureID { stopRecording() }
         }
         .onDisappear { stopRecording() }
     }
@@ -75,6 +92,7 @@ struct ShortcutRecorderRow: View {
     private func startRecording() {
         stopRecording()
         isRecording = true
+        ShortcutCapture.begin(owner: captureID)
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { event in
             guard event.type == .keyDown else { return event }
             if event.keyCode == 53 {
@@ -97,6 +115,7 @@ struct ShortcutRecorderRow: View {
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
         isRecording = false
+        ShortcutCapture.end(owner: captureID)
     }
 
     private static func modifiers(from flags: NSEvent.ModifierFlags) -> Set<KeyShortcut.Modifier> {
