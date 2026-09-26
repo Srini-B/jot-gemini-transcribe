@@ -38,9 +38,14 @@ The script performs this sequence:
 2. Builds Release with manual Developer ID signing, hardened runtime, and a secure timestamp.
 3. Verifies the app signature and rejects `get-task-allow`.
 4. Creates a ZIP with `ditto` and submits it to Apple notarization.
-5. Staples the app and checks it with Gatekeeper.
+5. Staples the app, checks it with Gatekeeper, and re-creates
+   `build/release/VoiceiQ-<version>.zip` from the stapled app.
 6. Builds `build/release/VoiceiQ-<version>.dmg` with `scripts/make-dmg.sh`.
 7. Signs, notarizes, staples, and Gatekeeper-checks the DMG.
+
+Both `VoiceiQ-<version>.zip` and `VoiceiQ-<version>.dmg` are shareable as they
+are: the app inside each carries a stapled notarization ticket, so testers can
+open it after the usual first-launch confirmation without an internet check.
 
 The bundle identifier is `io.blue.voiceiq`. Changing it resets the app's UserDefaults domain and requires users to grant microphone, Accessibility, and other TCC permissions again. `FileLayout` and `KeychainStore` migrate the previous VoiceiQ folder and API-key service, but macOS permissions cannot be migrated.
 

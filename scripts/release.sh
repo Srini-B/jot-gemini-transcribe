@@ -63,6 +63,10 @@ xcrun notarytool submit "$ZIP_PATH" \
   --wait
 xcrun stapler staple "$APP_PATH"
 spctl -a -t exec -vv "$APP_PATH"
+# Re-zip after stapling so the zip is shareable on its own: Gatekeeper on an
+# offline Mac reads the stapled ticket instead of asking Apple.
+rm -f "$ZIP_PATH"
+ditto -c -k --keepParent "$APP_PATH" "$ZIP_PATH"
 
 echo "▸ Building and signing DMG"
 APP_NAME="$APP_NAME" scripts/make-dmg.sh "$APP_PATH" "$DMG_PATH"
