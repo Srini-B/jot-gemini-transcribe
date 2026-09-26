@@ -148,6 +148,11 @@ public final class DictationCoordinator: ObservableObject {
     /// How loud the room is. Always measured, never in charge: what it feeds is
     /// gated on `noiseHandlingActive`, what it records is not.
     private var noiseFloor = NoiseFloorEstimator()
+    /// Whether the mic has heard anything louder than room tone this session.
+    /// Live partials are hidden until it has: fed silence, the stream model
+    /// guesses a dictionary term, and showing that guess reads as a transcript
+    /// of words nobody said.
+    private var speechHeard = false
     /// Why the last session ended with no speech — the pill copy differs, nothing
     /// else does, so this rides alongside the outcome instead of widening the
     /// state machine for a string.
@@ -349,6 +354,7 @@ public final class DictationCoordinator: ObservableObject {
             }
 
             noiseFloor = NoiseFloorEstimator()
+            speechHeard = false
             noiseHandlingActive = noiseHandlingEnabled()
 
             let capture = audioFactory()
@@ -429,6 +435,7 @@ public final class DictationCoordinator: ObservableObject {
                         // must not paint over the next one — same stale-session
                         // guard the transcript completion paths use.
                         guard self.session?.id == sessionID else { return }
+                        guard self.speechHeard else { continue }
                         self.lastInterim = text
                         self.partialTranscript = text
                     }
@@ -495,6 +502,7 @@ public final class DictationCoordinator: ObservableObject {
         if updatingMeter { micLevel = level }
         latestLevel = level
         noiseFloor.ingest(level: level)
+        if level >= Self.trailingSpeechThreshold { speechHeard = true }
     }
 
     /// The level below which the user has stopped talking.
@@ -675,7 +683,10 @@ public final class DictationCoordinator: ObservableObject {
                         // The live model only formats; the writing rules (late
                         // corrections, grammar-driven sentence boundaries, tone)
                         // are the cleanup pass, same as the batch path.
-                        let polished = await self.transcription.polish(liveResult, context: session.context)
+                        let polished = await self.transcription.polish(
+                            liveResult, context: session.context,
+                            audioURL: FileLayout.audioCAF(in: session.folder)
+                        )
                         guard !Task.isCancelled else { return }
                         await self.completeTranscription(
                             sessionID: sessionID, outcome: polished, startedAt: finalizeStartedAt

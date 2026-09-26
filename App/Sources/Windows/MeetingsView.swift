@@ -29,7 +29,8 @@ struct MeetingsPane: View {
         HStack(spacing: 0) {
             List(meetings, selection: $selection) { meeting in
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(meeting.title ?? meeting.startedAt.formatted(date: .abbreviated, time: .shortened)).font(VoiceIQUI.TypeScale.body())
+                    Text(title(meeting)).font(VoiceIQUI.TypeScale.body()).lineLimit(1)
+                    Text(timeRange(meeting)).font(VoiceIQUI.TypeScale.labelSmall()).foregroundStyle(.secondary)
                     Text("\(duration(meeting.durationSeconds)) · \(status(meeting.status))").font(VoiceIQUI.TypeScale.labelSmall()).foregroundStyle(.secondary)
                 }.tag(meeting.id)
             }
@@ -62,8 +63,8 @@ struct MeetingsPane: View {
 
     private func detail(_ meeting: MeetingMeta) -> some View {
         VStack(spacing: 0) {
-            Picker("View", selection: $tab) { Text("Notes").tag(0); Text("Transcript").tag(1) }
-                .pickerStyle(.segmented).padding(.horizontal, VoiceIQUI.Spacing.l)
+            Picker("", selection: $tab) { Text("Notes").tag(0); Text("Transcript").tag(1) }
+                .pickerStyle(.segmented).labelsHidden().padding(.horizontal, VoiceIQUI.Spacing.l)
             ScrollView { if tab == 0 { notesView } else { transcriptView(meeting) } }.padding(VoiceIQUI.Spacing.l)
         }
     }
@@ -100,6 +101,18 @@ struct MeetingsPane: View {
     private func loadSelection() { guard let id = selection else { return }; notes = try? store.loadNotes(id: id); transcript = (try? store.loadTranscript(id: id)) ?? [] }
     private func remove() { guard let id = selection else { return }; try? store.delete(id: id); selection = nil; reload() }
     private func export() { guard let id = selection, let folder = store.folder(for: id) else { return }; _ = try? store.exportMarkdown(id: id); NSWorkspace.shared.activateFileViewerSelecting([folder.appendingPathComponent("notes.md")]) }
+    private func title(_ meeting: MeetingMeta) -> String {
+        if let title = meeting.title, !title.isEmpty { return title }
+        return meeting.startedAt.formatted(date: .abbreviated, time: .shortened)
+    }
+    /// "26 Sep 2026, 2:23 – 2:24 PM", the same shape as a dictation's timestamp
+    /// plus the end time; a recording still in progress shows only its start.
+    private func timeRange(_ meeting: MeetingMeta) -> String {
+        let start = meeting.startedAt.formatted(date: .abbreviated, time: .shortened)
+        guard let end = meeting.endedAt else { return start }
+        let sameDay = Calendar.current.isDate(meeting.startedAt, inSameDayAs: end)
+        return "\(start) – \(end.formatted(date: sameDay ? .omitted : .abbreviated, time: .shortened))"
+    }
     private func duration(_ seconds: Double) -> String { seconds < 60 ? "\(Int(seconds))s" : "\(Int(seconds / 60))m" }
     private func status(_ value: MeetingStatus) -> String { switch value { case .recording: "Recording"; case .transcribing: "Transcribing"; case .summarizing: "Summarizing"; case .done: "Done"; case .failed: "Failed" } }
     private func actionSuffix(_ item: ActionItem) -> String { let values = [item.owner, item.deadline].compactMap { $0 }; return values.isEmpty ? "" : " · " + values.joined(separator: " · ") }

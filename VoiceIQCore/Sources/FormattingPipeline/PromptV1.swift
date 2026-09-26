@@ -19,66 +19,15 @@ import Foundation
 /// self-correction collapse, spoken punctuation, question-shaped speech preserved,
 /// instruction-injection transcribed not obeyed.
 public enum PromptV1 {
-    /// Per-app tone categories (fixed authored map — critic reconciliation #10).
-    public enum ToneCategory: String, CaseIterable, Sendable {
-        case email
-        case workChat
-        case personalChat
-        case code
-        case aiAssistant
-        case neutral
-
-        var block: String {
-            switch self {
-            case .aiAssistant:
-                return "Destination: an AI assistant; the speaker is dictating a prompt. Clean the request into a clear prompt and keep every constraint, detail, and observation. When the speaker makes several distinct requests or reports several distinct problems, number them, one per item, and keep any sentences before the first request as prose above the list. Do not invent a lead-in sentence, headings, or wording the speaker did not say. A single question or request stays prose."
-            case .email:
-                return "Tone: professional email. Complete sentences; keep greetings and sign-offs as spoken."
-            case .workChat:
-                return "Tone: casual-professional chat message. No trailing period on a single-sentence message."
-            case .personalChat:
-                return "Tone: informal message. Keep contractions and slang as spoken. No trailing period."
-            case .code:
-                return "Technical dictation. Preserve identifiers, file names, and casing conventions like camelCase or snake_case exactly as spoken."
-            case .neutral:
-                return ""
-            }
-        }
-    }
-
-    /// Fixed authored bundle-id → tone map (v1: no editor UI; Other = neutral).
-    public static func toneCategory(forBundleID bundleID: String?) -> ToneCategory {
-        guard let bundleID else { return .neutral }
-        switch bundleID {
-        case "com.apple.mail", "com.google.Gmail", "com.readdle.smartemail-Mac",
-             "com.superhuman.electron", "com.microsoft.Outlook":
-            return .email
-        case "com.tinyspeck.slackmacgap", "com.microsoft.teams2", "com.hnc.Discord",
-             "ru.keepcoder.Telegram", "net.whatsapp.WhatsApp", "com.facebook.archon":
-            return .workChat
-        case "com.apple.MobileSMS":
-            return .personalChat
-        case "com.apple.dt.Xcode", "com.microsoft.VSCode", "com.todesktop.230313mzl4w4u92",
-             "com.googlecode.iterm2", "com.apple.Terminal", "dev.warp.Warp-Stable",
-             "com.exafunction.windsurf", "com.google.android.studio", "com.jetbrains.intellij":
-            return .code
-        case "com.ampcode.amp.macos", "com.anthropic.claudefordesktop", "com.openai.chat",
-             "com.openai.codex", "ai.perplexity.mac":
-            return .aiAssistant
-        default:
-            return .neutral
-        }
-    }
-
     /// Builds the full cleanup prompt for a raw transcript.
     /// Static-prefix-first ordering keeps the cacheable part stable.
     public static func cleanupPrompt(
         raw: String,
-        tone: ToneCategory,
         vocabulary: [String] = [],
         spellings: [(wrong: String, right: String)] = [],
         instructions: String? = nil,
-        imagesAttached: Bool = false
+        imagesAttached: Bool = false,
+        audioAttached: Bool = false
     ) -> String {
         var sections: [String] = [rules]
         // The user's writing rules sit between the fixed rules and the examples
@@ -107,10 +56,10 @@ public enum PromptV1 {
         if imagesAttached {
             sections.append("SCREEN CONTEXT:\nThe attached screenshots show what the user was looking at while dictating. Use them only to resolve the spelling of names, identifiers, file paths, URLs, and terms that appear on screen. Never add screen content that the user did not speak.")
         }
-        sections.append(examples)
-        if !tone.block.isEmpty {
-            sections.append(tone.block)
+        if audioAttached {
+            sections.append("AUDIO:\nThe attached recording is the dictation itself and is authoritative for the words. RAW is a machine transcript of that recording and can contain recognition errors, wrong sentence boundaries, and merged or split words; where the audio clearly says something different, follow the audio. Still output only the cleaned text.")
         }
+        sections.append(examples)
         sections.append("RAW: \(raw)\nCLEAN:")
         return sections.joined(separator: "\n\n")
     }
@@ -131,6 +80,7 @@ public enum PromptV1 {
     - Write numbers, dates, times, currency, email addresses, and URLs in conventional written form when unambiguous, such as "twenty five dollars" → "$25", "three thirty p m" → "3:30 PM", and "name at example dot com" → "name@example.com". Preserve the speaker's intended precision and locale when clear.
     - Join explicitly spelled characters into the intended word or identifier: "capital B, e, e" → "Bee". Preserve casing the speaker states and stay conservative with names, product names, acronyms, filenames, code, and technical identifiers. Honor exact spellings supplied in the Vocabulary and Spellings sections.
     - Keep every language the speaker used, including code-switching within a sentence. Do not translate or replace non-English speech. Apply the same conservative punctuation, correction, and cleanup rules in that language.
+    - Work out what kind of text this is from the speech alone: a chat message, an email, notes, a request or set of instructions for someone or for an AI assistant, or technical text. Format for that intent. When the dictation gives several distinct requests, tasks, or reported problems to whoever will read it, number them, one per item. Sentences spoken before the first request stay as prose above the list, and the list starts directly after them: never add a lead-in such as "Here is what needs to be done" or any heading or wording the speaker did not say. A single request, an update, or a description stays prose. A short conversational message keeps a light touch: no list, no trailing period on a single sentence. Technical text keeps identifiers, file names, and casing such as camelCase or snake_case exactly as spoken.
     """
 
     static let examples = """

@@ -22,11 +22,13 @@ public protocol TranscriptionServicing: Sendable {
     /// Runs the cleanup pass (writing rules, tone, dictionary) over a transcript
     /// that was produced elsewhere, e.g. by a live stream. Never throws: on any
     /// failure the input comes back unchanged.
-    func polish(_ result: TranscriptionResult, context: DictationContext) async -> TranscriptionResult
+    /// `audioURL` is the CAF the stream was fed from, so the pass can listen
+    /// again where the stream misheard.
+    func polish(_ result: TranscriptionResult, context: DictationContext, audioURL: URL?) async -> TranscriptionResult
 }
 
 public extension TranscriptionServicing {
-    func polish(_ result: TranscriptionResult, context: DictationContext) async -> TranscriptionResult { result }
+    func polish(_ result: TranscriptionResult, context: DictationContext, audioURL: URL?) async -> TranscriptionResult { result }
 }
 
 public struct TranscriptionResult: Equatable, Sendable {

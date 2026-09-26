@@ -110,6 +110,7 @@ public actor GeminiClient {
     public func cleanup(
         prompt: String,
         images: [Data] = [],
+        audioFLAC: Data? = nil,
         model: String,
         endpoint: URL,
         deadline: TimeInterval
@@ -121,6 +122,9 @@ public actor GeminiClient {
         parts.append(contentsOf: images.map {
             ["inline_data": ["mime_type": "image/jpeg", "data": $0.base64EncodedString()]]
         })
+        if let audioFLAC {
+            parts.append(["inline_data": ["mime_type": "audio/flac", "data": audioFLAC.base64EncodedString()]])
+        }
         let body: [String: Any] = [
             "contents": [[
                 "role": "user",

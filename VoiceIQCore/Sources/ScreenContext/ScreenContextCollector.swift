@@ -107,6 +107,7 @@ public final class ScreenContextCollector {
                 }.value
                 guard let self, self.isRunning, let data else { return }
                 self.append(data)
+                Log.screen.info("captured screen context (\(data.count, privacy: .public) bytes, \(self.images.count, privacy: .public) kept)")
             } catch is CancellationError {
             } catch {
                 Log.screen.info("screen context capture failed: \(String(describing: error), privacy: .public)")

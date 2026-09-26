@@ -83,9 +83,14 @@ import Foundation
                 mic.pcmSink = { [weak preview] pcm in preview?.pushMic(pcm) }
                 system.pcmSink = { [weak preview] pcm in preview?.pushSystem(pcm) }
             }
-            // System tap first so its aggregate device exists before the mic IOProc starts.
-            try system.start()
-            do { try mic.start() } catch { _ = system.stop(); throw error }
+            // Mic first. MEASURED 2026-09-26 (macOS 26.5, built-in mic): with the
+            // tap's aggregate device already running, `AudioDeviceStart` on the
+            // mic blocked the main thread for 9 s to forever while coreaudiod
+            // retried "StartIOThread ... Error: 0x3C" every 14 s (4 of 7 runs).
+            // Mic-then-tap started in 40 ms in every run and the tap still
+            // delivered system audio.
+            try mic.start()
+            do { try system.start() } catch { _ = mic.stop(); throw error }
             self.mic = mic; self.system = system; self.preview = preview
             currentFolder = folder; currentMeta = meta; livePreview = ""
             preview?.start()
@@ -115,16 +120,41 @@ import Foundation
             let mixed = folder.appendingPathComponent("mixed.caf")
             if remix { meta.durationSeconds = try AudioMixer.mixToMono(micURL: folder.appendingPathComponent("mic.caf"), systemURL: folder.appendingPathComponent("system.caf"), outputURL: mixed) }
             let cfg = config(), model = transcribeModel ?? cfg.transcribeModel
+            let stats = try AudioMixer.speechStats(url: mixed)
+            guard stats.hasSpeech else {
+                Log.meeting.info("no speech in recording (\(String(format: "%.1f", stats.activeSeconds), privacy: .public)s active, \(String(format: "%.1f", stats.spreadDB), privacy: .public) dB spread) — skipping transcription")
+                try finish(id: id, meta: &meta, transcript: [], notes: Self.emptyNotes(reason: "No speech was recorded."))
+                return
+            }
             meta.status = .transcribing; try store.save(meta: meta)
             let transcript = try await MeetingTranscriber(client: client).transcribe(cafURL: mixed, model: model, endpoint: cfg.endpoint, deadline: 1800)
+            let words = transcript.reduce(0) { $0 + $1.text.split(whereSeparator: \.isWhitespace).count }
+            guard words >= Self.minimumSummarizableWords else {
+                Log.meeting.info("transcript too short to summarize (\(words, privacy: .public) words)")
+                try finish(id: id, meta: &meta, transcript: transcript, notes: Self.emptyNotes(reason: "Not enough speech to summarize."))
+                return
+            }
             try store.save(transcript: transcript, id: id)
             meta.status = .summarizing; try store.save(meta: meta)
             let text = transcript.map { "\($0.speaker): \($0.text)" }.joined(separator: "\n")
             let notes = try await client.summarizeMeeting(transcript: text, model: summaryModel, endpoint: cfg.endpoint, deadline: 300)
-            try store.save(notes: notes, id: id)
-            meta.title = notes.title; meta.status = .done; try store.save(meta: meta)
-            phase = .idle; currentFolder = nil; currentMeta = nil; onNotice?("Meeting notes ready")
+            try finish(id: id, meta: &meta, transcript: transcript, notes: notes)
         } catch { meta.status = .failed(String(describing: error)); try? store.save(meta: meta); fail(id, error) }
+    }
+
+    /// Fewer words than this and the notes model has nothing to work with; it
+    /// would write a summary saying so, in whatever language the fragment is.
+    static let minimumSummarizableWords = 8
+
+    static func emptyNotes(reason: String) -> MeetingNotes {
+        MeetingNotes(title: "No speech recorded", summary: reason, decisions: [], actions: [], notes: [])
+    }
+
+    private func finish(id: MeetingID, meta: inout MeetingMeta, transcript: [TranscriptSegment], notes: MeetingNotes) throws {
+        try store.save(transcript: transcript, id: id)
+        try store.save(notes: notes, id: id)
+        meta.title = notes.title; meta.status = .done; try store.save(meta: meta)
+        phase = .idle; currentFolder = nil; currentMeta = nil; onNotice?("Meeting notes ready")
     }
 
     /// Detection only ever offers. A recording in progress is never stopped by

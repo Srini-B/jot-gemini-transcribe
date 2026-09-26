@@ -115,7 +115,7 @@ struct DictationPane: View {
             } header: {
                 Text("Writing rules")
             } footer: {
-                Text("A second model rewrites the transcript by these rules: corrections you speak later fix what you said earlier, sentences are split by grammar rather than pauses, and the tone follows the app you're in.")
+                Text("A second model rewrites the transcript by these rules: corrections you speak later fix what you said earlier, sentences are split by grammar rather than pauses, and the layout follows what you said: a message stays a message, several requests become a numbered list.")
             }
 
             Section {

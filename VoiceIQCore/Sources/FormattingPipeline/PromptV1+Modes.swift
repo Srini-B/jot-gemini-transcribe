@@ -7,7 +7,6 @@ public extension PromptV1 {
     static func askAnythingPrompt(
         instruction: String,
         selectedText: String?,
-        tone: PromptV1.ToneCategory,
         vocabulary: [String],
         webContext: WebContext? = nil
     ) -> String {
@@ -24,7 +23,7 @@ public extension PromptV1 {
         You are a direct writing assistant. The spoken transcript below is an instruction.
         \(context)
         Output only the resulting text with no preamble. Be concise and use plain text. Use Markdown only when the user asks for a list or code, or to list sources.
-        Match this tone: \(tone.rawValue).
+        Match the register of the instruction and of the selected text.
         Preserve these names and terms when relevant: \(vocabulary.joined(separator: ", ")).
         \(web)
         <instruction>

@@ -17,10 +17,12 @@ Everything else stays on your Mac. The code is open — verify all of this.
    spellings are sent — never the misspellings you record. They ride on every
    dictation, including with Smart transcription off.
 3. **The writing-rules prompt**, while "Apply writing rules" is on in
-   Settings → Dictation — on by default. It contains the transcript being
+   Settings → Dictation — on by default. The dictation audio is attached to
+   this request too (FLAC, up to 12 MB), so the writing model checks the words
+   against what you said instead of trusting the live transcript. It contains the transcript being
    formatted, the built-in formatting rules, your custom instructions from the
-   same pane, a coarse tone category derived from the frontmost app's
-   *category* (e.g. "chat message"), and your dictionary terms. With that
+   same pane, the frontmost app's name, and your dictionary terms. No tone or
+   category is derived from the app; the model reads intent from your speech. With that
    setting off, your transcript text never leaves this Mac after transcription.
 4. **Screen context**, while "Screen context" is on in Settings → Dictation — on
    by default. Voice IQ captures the main display when dictation starts and when

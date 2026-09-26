@@ -131,13 +131,24 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
     /// Live output has already had dictionary rules applied by `LiveTranscriber`;
     /// the pass here works from the raw transcript so the gate has a true
     /// reference, and re-applies the rules on whatever comes back.
-    public func polish(_ result: TranscriptionResult, context: DictationContext) async -> TranscriptionResult {
+    public func polish(_ result: TranscriptionResult, context: DictationContext, audioURL: URL?) async -> TranscriptionResult {
         guard context.mode == .dictate else { return result }
         guard settings.formattingPolicy.cleanupPass else { return result }
         let config = settings.geminiConfig
         let raw = result.rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else { return result }
-        let cleaned = await cleanupOrFallback(raw: raw, context: context, config: config)
+        // The live model hears the audio once and cannot be asked again; the
+        // cleanup model can. Sending the recording along lets it settle words the
+        // stream misheard ("have a look at it" vs "I will look at it") instead of
+        // polishing the error. MEASURED 2026-09-26: +1.4 s on a 99 s dictation.
+        let audio = audioURL.flatMap { url -> Data? in
+            let flacURL = url.deletingLastPathComponent().appendingPathComponent("audio-polish.flac")
+            guard let encoded = try? FLACEncoder.encode(cafURL: url, flacURL: flacURL) else { return nil }
+            defer { try? FileManager.default.removeItem(at: encoded.url) }
+            guard encoded.byteCount <= Self.maxPolishAudioBytes else { return nil }
+            return try? Data(contentsOf: encoded.url)
+        }
+        let cleaned = await cleanupOrFallback(raw: raw, context: context, config: config, audio: audio)
         return TranscriptionResult(
             rawTranscript: result.rawTranscript,
             cleanedTranscript: cleaned,
@@ -167,7 +178,6 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
             prompt = PromptV1.askAnythingPrompt(
                 instruction: raw,
                 selectedText: selectedText,
-                tone: PromptV1.toneCategory(forBundleID: context.targetAppBundleID),
                 vocabulary: dictionary.sanitizedVocabulary(),
                 webContext: webContext
             )
@@ -293,25 +303,32 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
         }
     }
 
-    private func cleanupOrFallback(raw: String, context: DictationContext, config: GeminiConfig) async -> String {
-        let tone = PromptV1.toneCategory(forBundleID: context.targetAppBundleID)
+    /// Inline request parts are capped at 20 MB by the API; a 10-minute mono
+    /// 16 kHz FLAC is about 8 MB, so this only trips on an override.
+    static let maxPolishAudioBytes = 12_000_000
+
+    private func cleanupOrFallback(
+        raw: String, context: DictationContext, config: GeminiConfig, audio: Data? = nil
+    ) async -> String {
         let dictionary = DictionaryStore()
         let prompt = PromptV1.cleanupPrompt(
             raw: raw,
-            tone: tone,
             vocabulary: dictionary.sanitizedVocabulary(),
             spellings: dictionary.spellings(),
             instructions: settings.customInstructions,
-            imagesAttached: !context.screenshots.isEmpty
+            imagesAttached: !context.screenshots.isEmpty,
+            audioAttached: audio != nil
         )
         do {
             let deadline = min(
                 60,
-                Self.cleanupDeadline(forCharacters: raw.count) + Double(context.screenshots.count * 2)
+                Self.cleanupDeadline(forCharacters: raw.count)
+                    + Double(context.screenshots.count * 2)
+                    + (audio.map { Double($0.count) / 400_000 } ?? 0)
             )
             let response = try await client.cleanup(
-                prompt: prompt, images: context.screenshots, model: config.cleanupModel,
-                endpoint: config.endpoint, deadline: deadline
+                prompt: prompt, images: context.screenshots, audioFLAC: audio,
+                model: config.cleanupModel, endpoint: config.endpoint, deadline: deadline
             )
             let cleaned = ValidationGate.stripArtifacts(response)
             let verdict = ValidationGate.validate(raw: raw, cleaned: cleaned)
@@ -337,6 +354,6 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
         guard trips >= 3, settings.smartCleanupPassEnabled else { return }
         settings.setSmartCleanupPass(false)
         NotificationCenter.default.post(name: .gtSmartFormattingAutoDegraded, object: nil)
-        Log.transcription.warning("cleanup unreliable (3 gate trips in 24h) — tone pass auto-disabled; smart transcription unaffected")
+        Log.transcription.warning("cleanup unreliable (3 gate trips in 24h) — cleanup pass auto-disabled; smart transcription unaffected")
     }
 }

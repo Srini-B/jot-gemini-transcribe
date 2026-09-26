@@ -114,11 +114,24 @@ final class MeetingHUDController {
             hud.model.meetingPreview = ""
             if !dictationIsActive() { setPill(.meetingRecording(since: since)) }
         case .processing:
+            // Same bars the dictation pill shows while it works; the notes
+            // take a while, so the "still working" copy comes on straight away.
             hud.model.meetingPreview = ""
-            if !dictationIsActive() { notice("Making meeting notes…") }
+            if !dictationIsActive() {
+                setPill(.processing)
+                hud.model.slow = true
+            }
         case .idle, .failed:
             hud.model.meetingPreview = ""
-            if case .meetingRecording = hud.model.state, !dictationIsActive() { setPill(restingPill()) }
+            if !dictationIsActive() {
+                switch hud.model.state {
+                case .meetingRecording, .processing:
+                    hud.model.slow = false
+                    setPill(restingPill())
+                default:
+                    break
+                }
+            }
         case .callDetected:
             break
         }
