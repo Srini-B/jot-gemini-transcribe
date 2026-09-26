@@ -31,7 +31,7 @@ struct MeetingsPane: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title(meeting)).font(VoiceIQUI.TypeScale.body()).lineLimit(1)
                     Text(timeRange(meeting)).font(VoiceIQUI.TypeScale.labelSmall()).foregroundStyle(.secondary)
-                    Text("\(duration(meeting.durationSeconds)) · \(status(meeting.status))").font(VoiceIQUI.TypeScale.labelSmall()).foregroundStyle(.secondary)
+                    Text(durationLine(meeting)).font(VoiceIQUI.TypeScale.labelSmall()).foregroundStyle(.secondary)
                 }.tag(meeting.id)
             }
             .overlay { if meetings.isEmpty { Text("No meetings yet").foregroundStyle(.secondary) } }
@@ -119,7 +119,17 @@ struct MeetingsPane: View {
         return "\(start) – \(end.formatted(date: sameDay ? .omitted : .abbreviated, time: .shortened))"
     }
     private func duration(_ seconds: Double) -> String { seconds < 60 ? "\(Int(seconds))s" : "\(Int(seconds / 60))m" }
-    private func status(_ value: MeetingStatus) -> String { switch value { case .recording: "Recording"; case .transcribing: "Transcribing"; case .summarizing: "Summarizing"; case .done: "Done"; case .failed: "Failed" } }
+    /// A finished meeting shows only its length; anything still in flight or failed says so.
+    private func durationLine(_ meeting: MeetingMeta) -> String {
+        let length = duration(meeting.durationSeconds)
+        switch meeting.status {
+        case .done: return length
+        case .recording: return "\(length) · Recording"
+        case .transcribing: return "\(length) · Transcribing"
+        case .summarizing: return "\(length) · Making notes"
+        case .failed: return "\(length) · Failed"
+        }
+    }
     private func actionSuffix(_ item: ActionItem) -> String { let values = [item.owner, item.deadline].compactMap { $0 }; return values.isEmpty ? "" : " · " + values.joined(separator: " · ") }
 }
 

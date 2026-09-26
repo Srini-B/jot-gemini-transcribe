@@ -458,8 +458,17 @@ public actor GeminiClient {
             throw TranscriptionError.safetyBlocked
         }
         let parts = (first["content"] as? [String: Any])?["parts"] as? [[String: Any]] ?? []
-        let text = parts.compactMap { $0["text"] as? String }.joined()
-        return text
+        let texts = parts
+            .filter { ($0["thought"] as? Bool) != true }
+            .compactMap { $0["text"] as? String }
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        // MEASURED 2026-09-26: with a FLAC attached, gemini-3.8-flash sometimes
+        // returns two text parts, the first its working ("The speaker says: …
+        // Let's re-listen at 01:21 …"), the second the answer. Neither carries
+        // `thought: true`. Joining them made the output 2.7× the raw length, so
+        // the gate rejected it and the raw transcript was pasted. The answer is
+        // always the last part.
+        return texts.last ?? ""
     }
 
     /// The two endpoints do NOT share an error envelope, measured 2026-08-20:
