@@ -59,7 +59,7 @@ public enum LegacyMigration {
     /// Settings + dictionary lived in the old bundle id's defaults domain.
     private static func migrateDefaultsDomain() {
         let keys = [
-            "smartFormatting", "doubleTapLock", "showIdleIndicator", "soundsEnabled",
+            "smartFormatting", "showIdleIndicator", "soundsEnabled",
             "hotkeyKey", "endpointOverride", "transcribeModelOverride", "cleanupModelOverride",
             "audioRetentionDays", "gateTrips", "dictionaryEntries", "hasCompletedOnboarding",
             "experimentalNoiseHandling", "smartTranscription", "smartCleanupPass",

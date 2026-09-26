@@ -218,11 +218,9 @@ public final class DictationCoordinator: ObservableObject {
 
     // MARK: - Hotkey entry point
 
-    static let coachTip = "Hold to talk · tap Space while holding for hands-free"
-
     /// Returns whether the intent was ACCEPTED — a refused .begin (secure field,
-    /// session already active) must reach the hotkey grammar, or a Space-lock on
-    /// the refused session strands it in .locked and eats the next dictation.
+    /// session already active) must reach the hotkey grammar, or the next press
+    /// of the key would read as a stop.
     @discardableResult
     public func handle(_ intent: HotkeyIntent) -> Bool {
         handle(intent, mode: .dictate)
@@ -252,53 +250,23 @@ public final class DictationCoordinator: ObservableObject {
         case .cancel:
             cancelSession(hint: nil)
             return true
-        case .shortTapHint:
-            handleShortTap()
-            return true
         case .abortAccidental:
             handleAccidentalChord()
             return true
         }
     }
 
-    /// An accidental chord is context-sensitive for the same reason as a short
-    /// tap (audit #1 — a chord must NEVER destroy someone else's session):
-    ///  - hands-free recording → the fn press was a stop gesture on a UI-started
-    ///    session (grammar-locked sessions finalize on key-down and never reach
-    ///    here) — finalize, don't destroy the words
-    ///  - the chord's own young session (warming / unlocked) → silent cancel
-    ///    (the original accidental-chord guard, unchanged)
-    ///  - a session in flight → ignored; the transcript is sacred
+    /// The grammar only reports a chord within a second of its own press, so
+    /// the session is young and cancelling it silently loses nothing. A session
+    /// already in flight is never touched; the transcript is sacred.
     private func handleAccidentalChord() {
         switch state {
-        case .recording(locked: true):
-            finalizeSession()
         case .warming, .recording:
             cancelSession(hint: nil)
         case .finalizing, .transcribing, .inserting:
             Log.session.info("accidental chord ignored — session in flight")
         default:
             break
-        }
-    }
-
-    /// A quick tap is context-sensitive (audit finding #1 — a tap must NEVER
-    /// destroy someone else's session):
-    ///  - hands-free recording → the tap STOPS it (finalize)
-    ///  - the tap's own young session (warming / unlocked recording) → cancel + coach
-    ///  - a session in flight (finalizing/transcribing/inserting) → ignored;
-    ///    the transcript is sacred
-    ///  - idle/terminal → just the coaching hint
-    private func handleShortTap() {
-        switch state {
-        case .recording(locked: true):
-            finalizeSession()
-        case .warming, .recording:
-            cancelSession(hint: Self.coachTip)
-        case .finalizing, .transcribing, .inserting:
-            Log.session.info("short tap ignored — session in flight")
-        default:
-            coachingHint = Self.coachTip
         }
     }
 

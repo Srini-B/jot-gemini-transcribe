@@ -55,7 +55,6 @@ public final class EventTapEngine {
     private var tapPort: CFMachPort?
     private var runLoop: CFRunLoop?
     private let timerQueue = DispatchQueue(label: "io.blue.voiceiq.hotkey.timer")
-    private var doubleTapTimer: DispatchSourceTimer?
     private var healthTimer: DispatchSourceTimer?
 
     public init(key: HotkeyKey = .fn) {
@@ -76,12 +75,6 @@ public final class EventTapEngine {
             key = newKey
             keyIsDown = false
         }
-        lock.unlock()
-    }
-
-    public func setDoubleTapLockEnabled(_ enabled: Bool) {
-        lock.lock()
-        processor.doubleTapLockEnabled = enabled
         lock.unlock()
     }
 
@@ -128,7 +121,6 @@ public final class EventTapEngine {
     }
 
     public func stop() {
-        doubleTapTimer?.cancel(); doubleTapTimer = nil
         healthTimer?.cancel(); healthTimer = nil
         if let runLoop { CFRunLoopStop(runLoop) }
         if let tapPort { CGEvent.tapEnable(tap: tapPort, enable: false) }
@@ -226,14 +218,6 @@ public final class EventTapEngine {
             // A shortcut being recorded is the row's to consume, Esc included.
             guard !ShortcutCapture.isActive else { return Unmanaged.passUnretained(event) }
             lock.lock()
-            // Space while the dictation key is physically held = hands-free lock.
-            // Timing-free by construction — both keys are simply down together.
-            if keyCode == 49, processor.isKeyHeld {
-                let fx = processor.handle(.spaceLock, at: now)
-                lock.unlock()
-                apply(fx)
-                return nil // the Space is a gesture, not typing
-            }
             // Esc cancels grammar sessions AND externally-tracked ones
             // (in-flight transcription, UI-started hands-free).
             if keyCode == 53, externalSessionActive, !processor.isSessionActive {
@@ -262,29 +246,6 @@ public final class EventTapEngine {
     }
 
     private func apply(_ fx: HotkeyProcessor.Effects) {
-        // Timer lifecycle is confined to timerQueue — apply() runs on the tap
-        // thread AND the timer queue, and unsynchronized DispatchSourceTimer
-        // mutation is a crash (audit L17).
-        if fx.disarmTimer || fx.armTimer != nil {
-            let delay = fx.armTimer
-            timerQueue.async { [weak self] in
-                guard let self else { return }
-                self.doubleTapTimer?.cancel()
-                self.doubleTapTimer = nil
-                guard let delay else { return }
-                let timer = DispatchSource.makeTimerSource(queue: self.timerQueue)
-                timer.schedule(deadline: .now() + delay)
-                timer.setEventHandler { [weak self] in
-                    guard let self else { return }
-                    self.lock.lock()
-                    let fx = self.processor.handle(.doubleTapTimeout, at: ProcessInfo.processInfo.systemUptime)
-                    self.lock.unlock()
-                    self.apply(fx)
-                }
-                timer.resume()
-                self.doubleTapTimer = timer
-            }
-        }
         for intent in fx.intents {
             onIntent?(intent)
         }

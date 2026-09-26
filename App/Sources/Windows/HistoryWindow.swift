@@ -363,7 +363,7 @@ struct HistoryPane: View {
             }
             Text("Nothing here yet")
                 .font(VoiceIQUI.TypeScale.title(grad: grad))
-            Text("Hold fn and say hello.")
+            Text("Press \(SettingsStore().hotkeyKey.displayName) and say hello.")
                 .font(VoiceIQUI.TypeScale.body(grad: grad))
                 .foregroundStyle(.secondary)
             Spacer()

@@ -26,13 +26,12 @@ struct DictationKeySection: View {
     // would no longer own the capture it started.
     @State private var captureID = UUID()
     @State private var hotkey = SettingsStore().hotkeyKey
-    @State private var doubleTapLock = SettingsStore().doubleTapLockEnabled
     @State private var isRecording = false
     @State private var monitor: Any?
 
     var body: some View {
         Section("Dictation key") {
-            LabeledContent("Hold to dictate") {
+            LabeledContent("Press to start and stop") {
                 HStack(spacing: 8) {
                     Button(isRecording ? "Press a key…" : hotkey.displayName) {
                         isRecording ? stopRecording() : startRecording()
@@ -61,16 +60,8 @@ struct DictationKeySection: View {
                     .help("Reset to fn")
                 }
             }
-            Toggle("Double-tap to lock hands-free", isOn: $doubleTapLock)
-                .onChange(of: doubleTapLock) { _, enabled in
-                    guard enabled != settings.doubleTapLockEnabled else { return }
-                    settings.setDoubleTapLock(enabled)
-                }
         }
-        .onAppear {
-            hotkey = settings.hotkeyKey
-            doubleTapLock = settings.doubleTapLockEnabled
-        }
+        .onAppear { hotkey = settings.hotkeyKey }
         .onDisappear { stopRecording() }
         .onReceive(NotificationCenter.default.publisher(for: .voiceIQShortcutCaptureDidBegin)) { note in
             if note.object as? UUID != captureID { stopRecording() }
@@ -78,7 +69,6 @@ struct DictationKeySection: View {
         .onReceive(NotificationCenter.default.publisher(for: .gtSettingDidChange).receive(on: RunLoop.main)) { note in
             switch note.object as? String {
             case "hotkeyKey": hotkey = settings.hotkeyKey
-            case "doubleTapLock": doubleTapLock = settings.doubleTapLockEnabled
             default: break
             }
         }

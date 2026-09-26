@@ -846,20 +846,18 @@ private struct GlobeKeyScreen: View {
     }
 }
 
-/// Teach the product, not just prove it works (dogfood): the three gestures,
+/// Teach the product, not just prove it works (dogfood): the two gestures,
 /// with the user's ACTUAL configured key, before the hands-on Try It.
 private struct HowToScreen: View {
     let onNext: () -> Void
     private let keyName = SettingsStore().hotkeyKey.displayName
 
     var body: some View {
-        ScreenScaffold("Talk to Voice IQ.", "Three gestures — that's the whole product.") {
+        ScreenScaffold("Talk to Voice IQ.", "Two gestures — that's the whole product.") {
             VStack(spacing: VoiceIQUI.Spacing.m) {
                 VStack(alignment: .leading, spacing: VoiceIQUI.Spacing.s) {
-                    gestureRow(keys: [keyName], title: "Hold and talk",
-                               detail: "Release, and polished text lands at your cursor.")
-                    gestureRow(keys: [keyName, "space"], title: "Go hands-free",
-                               detail: "Tap Space while holding — talk as long as you like, tap \(keyName) to finish.")
+                    gestureRow(keys: [keyName], title: "Press and talk",
+                               detail: "Talk as long as you like. Press \(keyName) again and polished text lands at your cursor.")
                     gestureRow(keys: ["esc"], title: "Changed your mind",
                                detail: "Cancels the dictation. Long recordings are kept in History.")
                 }
@@ -922,7 +920,7 @@ private struct TryItScreen: View {
     private static let script = "Let's schedule the meeting for 1pm — actually, no, make it 2pm."
 
     var body: some View {
-        ScreenScaffold("Try it.", "Click into the field, hold \(keyName), and change your mind mid-sentence:") {
+        ScreenScaffold("Try it.", "Click into the field, press \(keyName), and change your mind mid-sentence:") {
             VStack(spacing: VoiceIQUI.Spacing.s) {
                 if revealRaw == nil {
                     Text("“\(Self.script)”")

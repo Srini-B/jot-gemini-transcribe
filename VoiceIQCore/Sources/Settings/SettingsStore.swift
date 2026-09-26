@@ -80,17 +80,6 @@ public struct SettingsStore: Sendable {
         return config
     }
 
-    /// Double-tap the dictation key to lock hands-free. OFF by default: firm taps
-    /// routinely exceed the hold threshold, misreading tap-tap as hold→finalize
-    /// (dogfood). The timing-free gesture is Space-while-holding.
-    public var doubleTapLockEnabled: Bool {
-        Self.defaults.object(forKey: "doubleTapLock") as? Bool ?? false
-    }
-
-    public func setDoubleTapLock(_ enabled: Bool) {
-        Self.set(enabled, forKey: "doubleTapLock")
-    }
-
     /// Show the resting dot at the bottom of the screen when idle. Off = the pill
     /// only appears while dictating.
     public var showIdleIndicator: Bool {

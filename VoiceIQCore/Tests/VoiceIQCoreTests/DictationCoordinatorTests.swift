@@ -342,18 +342,17 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertFalse(statuses.contains(.failed), "no false Failed row from the double stop")
     }
 
-    // Production pass 2 P0: a rolled fn+letter chord during a hands-free session
-    // must STOP it (the fn press is a stop gesture), never silently destroy it.
+    // A chord only reaches the coordinator within a second of the press, so
+    // the session it cancels is the chord's own, hands-free or not.
 
-    func testAccidentalChordFinalizesHandsFreeSession() async {
+    func testAccidentalChordCancelsYoungHandsFreeSession() async {
         let c = makeCoordinator()
         c.handle(.begin)
         c.handle(.lockIn)
         await pump()
         XCTAssertEqual(c.state, .recording(locked: true))
         c.handle(.abortAccidental)
-        await settle()
-        XCTAssertEqual(c.state, .done(.inserted), "chord acts as stop — words land")
+        XCTAssertEqual(c.state, .cancelled)
     }
 
     func testAccidentalChordStillCancelsOwnYoungSession() async {
@@ -388,38 +387,18 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertNil(inserter.insertedText)
     }
 
-    func testShortTapHintSetsCoaching() {
-        let c = makeCoordinator()
-        c.handle(.begin)
-        c.handle(.shortTapHint)
-        XCTAssertEqual(c.state, .cancelled)
-        XCTAssertEqual(c.coachingHint, "Hold to talk · tap Space while holding for hands-free")
-    }
+    // Audit #1: a stray begin must never destroy an in-flight session.
 
-    // Audit #1: a quick tap must never destroy an in-flight session.
-
-    func testTapDuringTranscriptionDoesNotCancelIt() async {
+    func testBeginDuringTranscriptionDoesNotCancelIt() async {
         var t = FakeTranscription()
         t.delayNanos = 60_000_000 // 60ms in flight
         let c = makeCoordinator(transcription: t)
         c.handle(.begin)
         c.handle(.finalize)
-        // The phantom tap lands while the transcript is in flight:
-        c.handle(.begin)        // ignored (session active)
-        c.handle(.shortTapHint) // must NOT cancel
+        XCTAssertFalse(c.handle(.begin), "refused: session active")
         await settle()
         XCTAssertEqual(c.state, .done(.inserted), "the in-flight transcript is sacred")
         XCTAssertEqual(inserter.insertedText, "clean")
-    }
-
-    func testTapStopsUIStartedHandsFree() async {
-        let c = makeCoordinator()
-        c.handle(.begin)
-        c.handle(.lockIn) // UI-started hands-free (dot/menu)
-        await pump()      // engine comes up, latched lock applies
-        c.handle(.shortTapHint) // natural quick tap = stop
-        await settle()
-        XCTAssertEqual(c.state, .done(.inserted), "a tap finalizes hands-free instead of cancelling it")
     }
 
     func testCancelDuringInsertingRejectedCleanly() async {

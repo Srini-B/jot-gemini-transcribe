@@ -22,7 +22,7 @@ final class SettingsLiveUpdateTests: XCTestCase {
     private let settings = SettingsStore()
 
     override func tearDown() {
-        for key in ["showIdleIndicator", "soundsEnabled", "doubleTapLock", "gateTrips",
+        for key in ["showIdleIndicator", "soundsEnabled", "gateTrips",
                     "experimentalNoiseHandling", "smartTranscription", "smartCleanupPass",
                     "legacyTranscribeEndpoint", "liveTranscription", "liveModelOverride"] {
             UserDefaults.standard.removeObject(forKey: key)
@@ -49,7 +49,6 @@ final class SettingsLiveUpdateTests: XCTestCase {
         expectChange(forKey: "smartTranscription") { settings.setSmartTranscription(false) }
         expectChange(forKey: "smartCleanupPass") { settings.setSmartCleanupPass(false) }
         expectChange(forKey: "legacyTranscribeEndpoint") { settings.setLegacyTranscribeEndpoint(true) }
-        expectChange(forKey: "doubleTapLock") { settings.setDoubleTapLock(true) }
         expectChange(forKey: "hotkeyKey") { settings.setHotkeyKey(.fn) }
         expectChange(forKey: "audioRetentionDays") { settings.setAudioRetentionDays(7) }
         expectChange(forKey: "experimentalNoiseHandling") { settings.setExperimentalNoiseHandling(true) }

@@ -164,7 +164,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch key {
         case "showIdleIndicator": settings.setShowIdleIndicator(value)
         case "soundsEnabled": settings.setSoundsEnabled(value)
-        case "doubleTapLock": settings.setDoubleTapLock(value)
         case "experimentalNoiseHandling": settings.setExperimentalNoiseHandling(value)
         case "smartTranscription": settings.setSmartTranscription(value)
         case "smartCleanupPass": settings.setSmartCleanupPass(value)

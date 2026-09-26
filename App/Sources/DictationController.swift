@@ -179,10 +179,14 @@ final class DictationController {
                 }
                 let accepted = self.coordinator.handle(intent)
                 if !accepted, intent == .begin {
-                    // Refused begin (secure field / busy): the grammar armed a
-                    // phantom session — snap it back or a Space-lock on it
-                    // strands .locked and eats the next dictation.
+                    // Refused begin: the grammar armed a phantom session, so
+                    // snap it back or the next press would read as a stop. When
+                    // the refusal is a session the pill started (dot click, menu
+                    // item), the press is that session's stop.
                     self.engine.resetGrammar()
+                    if case .recording = self.coordinator.state {
+                        self.coordinator.handle(.finalize)
+                    }
                 }
             }
         }
@@ -320,7 +324,7 @@ final class DictationController {
                 onStatusChange?("Add your Gemini API key in Settings → Advanced")
                 onStatusItemState?(.attention)
             } else {
-                onStatusChange?("Ready — hold \(SettingsStore().hotkeyKey.displayName) to dictate")
+                onStatusChange?("Ready — press \(SettingsStore().hotkeyKey.displayName) to dictate")
                 // Clear a lingering attention icon (auth failure, missing key).
                 onStatusItemState?(.idle)
                 warmEngines.prewarmNext()
@@ -389,7 +393,6 @@ final class DictationController {
     func applyHotkeySettings() {
         let settings = SettingsStore()
         engine.setKey(settings.hotkeyKey)
-        engine.setDoubleTapLockEnabled(settings.doubleTapLockEnabled)
     }
 
     private func applySettingChange(key: String?) {
@@ -400,12 +403,12 @@ final class DictationController {
             if hud.model.state == .idleDot || hud.model.state == .hidden {
                 setPill(.idleDot)
             }
-        case "hotkeyKey", "doubleTapLock":
+        case "hotkeyKey":
             applyHotkeySettings()
             // The menu-bar status line names the key — keep it truthful, but
             // never overwrite an attention message ("Grant Accessibility…").
             if engineActive, KeychainStore.loadAPIKey() != nil {
-                onStatusChange?("Ready — hold \(SettingsStore().hotkeyKey.displayName) to dictate")
+                onStatusChange?("Ready — press \(SettingsStore().hotkeyKey.displayName) to dictate")
             }
         case "meetingDetection":
             meetings.autoDetect = SettingsStore().meetingDetectionEnabled
@@ -552,9 +555,9 @@ final class DictationController {
         mainWindow?.show(section: section)
     }
 
-    /// UI-initiated hands-free session (idle-dot click, menu item). Note: the
-    /// hotkey engine's grammar stays idle for these, so ending the session is via
-    /// the pill's stop button or a press-and-release of the dictation key.
+    /// UI-initiated hands-free session (idle-dot click, menu item). The hotkey
+    /// grammar stays idle for these; the pill's stop button ends them, and so
+    /// does a press of the dictation key (its refused begin becomes the stop).
     func startHandsFree() {
         // No session without a visible pill and a working stop path: before the
         // engine is active there is no pill surface and no fn stop gesture — a
