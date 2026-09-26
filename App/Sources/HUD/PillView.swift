@@ -34,7 +34,7 @@ struct PillView: View {
 
     private var hasInteractiveControls: Bool {
         switch model.state {
-        case .idleDot, .listening(locked: true), .answer: return true
+        case .idleDot, .listening(locked: true), .answer, .meetingPrompt, .meetingRecording: return true
         default: return false
         }
     }
@@ -127,6 +127,16 @@ struct PillView: View {
 
         case .error(let message):
             errorChip(message: message)
+
+        case .meetingPrompt(let name):
+            pillSurface(width: nil) {
+                MeetingPromptContent(name: name)
+            }
+
+        case .meetingRecording(let since):
+            pillSurface(width: model.meetingPreview.isEmpty ? 300 : 560) {
+                MeetingRecordingContent(since: since, preview: model.meetingPreview)
+            }
         }
     }
 
@@ -219,6 +229,8 @@ struct PillView: View {
         case .notice(let message): return message
         case .answer: return "Answer"
         case .error(let message): return "Error — \(message)"
+        case .meetingPrompt(let name): return "Meeting detected in \(name)"
+        case .meetingRecording: return "Recording meeting"
         }
     }
 }
@@ -360,4 +372,7 @@ private struct CheckmarkShape: Shape {
 extension Notification.Name {
     static let pillStopTapped = Notification.Name("io.blue.voiceiq.pill.stop")
     static let pillDotTapped = Notification.Name("io.blue.voiceiq.pill.dot")
+    static let pillMeetingAccepted = Notification.Name("io.blue.voiceiq.pill.meeting.accept")
+    static let pillMeetingDismissed = Notification.Name("io.blue.voiceiq.pill.meeting.dismiss")
+    static let pillMeetingStopTapped = Notification.Name("io.blue.voiceiq.pill.meeting.stop")
 }

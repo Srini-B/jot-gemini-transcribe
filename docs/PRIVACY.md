@@ -38,15 +38,18 @@ Everything else stays on your Mac. The code is open — verify all of this.
    text go only to Google; TinyFish receives the search query and the page
    URLs. The fetched page text is placed in the Gemini prompt and discarded.
    Remove the key to stop this entirely.
-5. **Meeting audio**, while "Record calls for meeting notes" is on in
-   Settings → Dictation — on by default. When a calling app (Zoom, Teams,
-   FaceTime, WhatsApp, Slack, Discord, Webex) or a browser tab on a meeting
-   site is using your microphone, Voice IQ records your mic and the system audio,
-   and on hang-up sends the mixed recording to Gemini for a speaker-labelled
-   transcript, then sends that transcript back for a summary and action items.
-   Both stay under `~/Library/Application Support/Voice IQ/meetings/`. Turn the
-   setting off and nothing is recorded; you can also start and stop a meeting
-   recording by hand from Settings → Meetings.
+5. **Meeting audio**, only after you start a recording. With "Offer to record
+   calls" on in Settings → Dictation (on by default), Voice IQ watches whether a
+   calling app (Zoom, Teams, FaceTime, WhatsApp, Slack, Discord, Webex) or a
+   browser tab on a meeting site is using your microphone, and shows an offer
+   in the pill. Nothing is recorded until you accept it, press the meeting
+   shortcut (⌥M by default), or start one from Settings → Meetings. While
+   recording, mic and system audio are streamed to the Gemini Live API for the
+   live transcript shown in the pill and written to
+   `~/Library/Application Support/Voice IQ/meetings/`. Recording stops only
+   when you stop it; the mixed recording is then sent to Gemini for a
+   speaker-labelled transcript, and that transcript is sent back for a summary
+   and action items. Turn the setting off and no call detection runs.
 6. **The selected text, when you use Ask Anything** (⌃⌥A by default). At the
    moment you press the shortcut, Voice IQ reads the text selected in the
    frontmost app through the Accessibility API and sends it with your spoken

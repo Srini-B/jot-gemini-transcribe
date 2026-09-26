@@ -25,10 +25,13 @@ public enum PromptV1 {
         case workChat
         case personalChat
         case code
+        case aiAssistant
         case neutral
 
         var block: String {
             switch self {
+            case .aiAssistant:
+                return "Destination: an AI assistant; the speaker is dictating a prompt. Clean the request into a clear prompt and keep every constraint, detail, and observation. When the speaker makes several distinct requests or reports several distinct problems, number them, one per item, and keep any sentences before the first request as prose above the list. Do not invent a lead-in sentence, headings, or wording the speaker did not say. A single question or request stays prose."
             case .email:
                 return "Tone: professional email. Complete sentences; keep greetings and sign-offs as spoken."
             case .workChat:
@@ -57,9 +60,11 @@ public enum PromptV1 {
             return .personalChat
         case "com.apple.dt.Xcode", "com.microsoft.VSCode", "com.todesktop.230313mzl4w4u92",
              "com.googlecode.iterm2", "com.apple.Terminal", "dev.warp.Warp-Stable",
-             "com.exafunction.windsurf", "com.google.android.studio", "com.jetbrains.intellij",
-             "com.anthropic.claudefordesktop":
+             "com.exafunction.windsurf", "com.google.android.studio", "com.jetbrains.intellij":
             return .code
+        case "com.ampcode.amp.macos", "com.anthropic.claudefordesktop", "com.openai.chat",
+             "com.openai.codex", "ai.perplexity.mac":
+            return .aiAssistant
         default:
             return .neutral
         }

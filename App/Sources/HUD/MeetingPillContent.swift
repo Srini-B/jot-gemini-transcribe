@@ -1,0 +1,97 @@
+// Copyright 2026 Google LLC
+// Licensed under the Apache License, Version 2.0.
+
+import SwiftUI
+import VoiceIQCore
+
+/// "Meeting detected" offer. Nothing records until Start is pressed.
+struct MeetingPromptContent: View {
+    let name: String
+
+    var body: some View {
+        HStack(spacing: VoiceIQUI.Spacing.s) {
+            Image(systemName: "person.2.wave.2.fill")
+                .font(.system(size: 13))
+                .foregroundStyle(VoiceIQUI.Colors.primary)
+            Text("Meeting in \(name) — record it?")
+                .font(VoiceIQUI.TypeScale.label())
+                .foregroundStyle(VoiceIQUI.Colors.onSurface)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+            Button("Start") {
+                NotificationCenter.default.post(name: .pillMeetingAccepted, object: nil)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .tint(VoiceIQUI.Colors.primary)
+            .accessibilityLabel("Start recording the meeting")
+            Button {
+                NotificationCenter.default.post(name: .pillMeetingDismissed, object: nil)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Not this time")
+        }
+    }
+}
+
+/// Recording: elapsed time, working bars, the live preview tail, and Stop.
+/// The timer is a `TimelineView` over the start date, so no published tick is needed.
+struct MeetingRecordingContent: View {
+    let since: Date
+    let preview: String
+
+    var body: some View {
+        HStack(spacing: VoiceIQUI.Spacing.s) {
+            Image(systemName: "record.circle")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(VoiceIQUI.Colors.error)
+            TimelineView(.periodic(from: since, by: 1)) { context in
+                Text(Self.clock(context.date.timeIntervalSince(since)))
+                    .font(VoiceIQUI.TypeScale.numeric())
+                    .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
+            }
+            WaveformView(processing: true)
+            if !preview.isEmpty {
+                Text(preview)
+                    .font(VoiceIQUI.TypeScale.labelSmall())
+                    .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .animation(nil, value: preview)
+                    .accessibilityHidden(true)
+            } else {
+                Text("Recording meeting")
+                    .font(VoiceIQUI.TypeScale.label())
+                    .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            Button {
+                NotificationCenter.default.post(name: .pillMeetingStopTapped, object: nil)
+            } label: {
+                ZStack {
+                    Circle().fill(VoiceIQUI.Colors.primary)
+                    RoundedRectangle(cornerRadius: 2.5)
+                        .fill(VoiceIQUI.Colors.onPrimary)
+                        .frame(width: 10, height: 10)
+                }
+                .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Stop recording and make meeting notes")
+        }
+    }
+
+    private static func clock(_ seconds: TimeInterval) -> String {
+        let total = max(0, Int(seconds))
+        if total >= 3600 {
+            return String(format: "%d:%02d:%02d", total / 3600, (total % 3600) / 60, total % 60)
+        }
+        return String(format: "%d:%02d", total / 60, total % 60)
+    }
+}

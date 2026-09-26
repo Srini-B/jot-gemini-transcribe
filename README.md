@@ -86,10 +86,12 @@ mix them mid-sentence, and the text stays in the language you used.
 after (switch it off in Settings → Dictation). Pick a preferred microphone or
 leave it on system default and get a one-time notice when a new one appears.
 
-**Meeting notes, hands-free.** When Zoom, Teams, FaceTime, WhatsApp, Slack,
-Discord, Webex, or a Meet/Teams/Zoom tab in any browser is on a call, Voice IQ
-records both sides, and on hang-up produces a speaker-labelled transcript plus a
-summary, decisions, and owned action items under Settings → Meetings.
+**Meeting notes.** When Zoom, Teams, FaceTime, WhatsApp, Slack, Discord,
+Webex, or a Meet/Teams/Zoom tab in any browser starts a call, the pill offers to
+record it. Accept, or press ⌥M at any time, and Voice IQ records both sides with
+a live transcript in the pill. Press ⌥M again (or the pill's stop button) to
+finish: you get a speaker-labelled transcript plus a summary, decisions, and
+owned action items under Settings → Meetings. Recording never stops on its own.
 
 ## Install
 

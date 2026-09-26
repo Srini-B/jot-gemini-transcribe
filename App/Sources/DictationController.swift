@@ -34,6 +34,7 @@ final class DictationController {
     private let historyStore: HistoryStore?
     private let learner = EditLearner()
     private let meetings: MeetingEngine
+    private lazy var meetingHUD = MeetingHUDController(meetings: meetings, hud: hud)
     private var recoveryScanner: RecoveryScanner?
     private var retryQueue: RetryQueue?
     private var mainWindow: MainWindowController?
@@ -91,6 +92,22 @@ final class DictationController {
             session: session,
             modelID: liveModel,
             replacementRules: { DictionaryStore().replacementRules() }
+        )
+    }
+
+    /// Live socket for the meeting pill's preview. Verbatim: the text is a
+    /// scrolling tail for several speakers, and the saved transcript comes from
+    /// the recording afterwards. Nil when there is no key, so the preview is
+    /// simply absent and the recording is unaffected.
+    nonisolated private static func makeMeetingPreviewSession() -> LiveTranscriptionSession? {
+        guard let key = KeychainStore.loadAPIKey(), !key.isEmpty else { return nil }
+        return LiveTranscriptionSession(
+            transport: WebSocketTransport(apiKey: { key }),
+            setup: LiveSetup(
+                model: SettingsStore().geminiConfig.liveModel,
+                smart: false,
+                customVocabulary: DictionaryStore().vocabulary()
+            )
         )
     }
 
@@ -183,7 +200,7 @@ final class DictationController {
         NotificationCenter.default.addObserver(forName: .pillAnswerDismissed, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
-                self.setPill(Self.restingPill(for: self.coordinator.state))
+                self.setPill(self.restingPill(for: self.coordinator.state))
             }
         }
         // Settings must take effect the moment they're flipped — not on the next
@@ -216,6 +233,22 @@ final class DictationController {
         meetings.onNotice = { [weak self] message in
             self?.showBackgroundNotice(message, for: 4.0, sound: nil)
         }
+        meetings.makeLiveSession = { Self.makeMeetingPreviewSession() }
+        meetingHUD.setPill = { [weak self] state in self?.setPill(state) }
+        meetingHUD.dictationIsActive = { [weak self] in
+            guard let self else { return false }
+            switch self.coordinator.state {
+            case .idle, .done, .cancelled, .failed: return false
+            default: return true
+            }
+        }
+        meetingHUD.restingPill = { [weak self] in
+            self.map { $0.restingPill(for: $0.coordinator.state) } ?? .idleDot
+        }
+        meetingHUD.notice = { [weak self] message in
+            self?.showBackgroundNotice(message, for: 4.0, sound: nil)
+        }
+        meetingHUD.bind()
         meetings.autoDetect = SettingsStore().meetingDetectionEnabled
 
         // A prewarmed graph is bound to the device it was built for — rebuild it
@@ -561,6 +594,8 @@ final class DictationController {
                 self.handleModeShortcutDown(
                     .translate(target: SettingsStore().translationTargetLanguage)
                 )
+            case .meetingToggle:
+                self.meetingHUD.toggle()
             }
         }
         globalShortcutEngine.onKeyUp = { [weak self] action in
@@ -571,6 +606,8 @@ final class DictationController {
                 self.pasteLastTranscript()
             case .askAnything, .translate:
                 self.handleModeShortcutUp()
+            case .meetingToggle:
+                break
             }
         }
     }
@@ -738,8 +775,9 @@ final class DictationController {
 
         switch state {
         case .idle:
-            setPill(.idleDot)
+            setPill(restingPill(for: .idle))
             onStatusItemState?(.idle)
+            meetingHUD.dictationBecameIdle()
 
         case .warming:
             sessionStartedAt = Date()
@@ -783,7 +821,7 @@ final class DictationController {
             if let startedAt = sessionStartedAt, Date().timeIntervalSince(startedAt) > 0.5 {
                 earcons.play(.cancel)
             }
-            setPill(.idleDot)
+            setPill(restingPill(for: .idle))
 
         case .failed(let failure):
             clearSlowTimer()
@@ -932,16 +970,18 @@ final class DictationController {
             // Re-derive from coordinator state — a hardcoded .idleDot after the
             // 9-min cap warning stranded a HOT MIC behind the resting dot
             // (production pass 2, P0). Terminal/idle states still land on the dot.
-            self.setPill(Self.restingPill(for: self.coordinator.state))
+            self.setPill(self.restingPill(for: self.coordinator.state))
         }
     }
 
-    private static func restingPill(for state: DictationState) -> PillState {
+    /// A recording meeting stands in for the idle dot; a dictation in flight
+    /// always wins over it.
+    private func restingPill(for state: DictationState) -> PillState {
         switch state {
         case .warming: return .listening(locked: false)
         case .recording(let locked): return .listening(locked: locked)
         case .finalizing, .transcribing, .inserting: return .processing
-        default: return .idleDot
+        default: return meetingHUD.restingState ?? .idleDot
         }
     }
 

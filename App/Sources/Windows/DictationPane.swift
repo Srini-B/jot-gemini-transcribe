@@ -44,6 +44,7 @@ struct DictationPane: View {
                 ShortcutRecorderRow(title: "Paste last transcript", action: .pasteLastTranscript)
                 ShortcutRecorderRow(title: "Ask Anything", action: .askAnything)
                 ShortcutRecorderRow(title: "Translate", action: .translate)
+                ShortcutRecorderRow(title: "Meeting recording", action: .meetingToggle)
                 LabeledContent("Translation language") {
                     Button(translationTarget) { showingLanguages.toggle() }
                         .popover(isPresented: $showingLanguages, arrowEdge: .trailing) {
@@ -125,10 +126,10 @@ struct DictationPane: View {
                         guard enabled != settings.screenContextEnabled else { return }
                         settings.setScreenContextEnabled(enabled)
                     }
-                Toggle("Record calls for meeting notes", isOn: $meetingDetection)
+                Toggle("Offer to record calls", isOn: $meetingDetection)
                     .onChange(of: meetingDetection) { _, enabled in settings.setMeetingDetection(enabled) }
             } footer: {
-                Text("Words you change after a dictation lands are added to the Dictionary. Screen context sends a snapshot of what you're looking at, taken when dictation starts and when you switch apps, so names and paths on screen are spelled right. Calls are detected when a call app or a meeting tab is using the microphone; notes appear under Meetings.")
+                Text("Words you change after a dictation lands are added to the Dictionary. Screen context sends a snapshot of what you're looking at, taken when dictation starts and when you switch apps, so names and paths on screen are spelled right. When a call app or a meeting tab is using the microphone, the pill asks before recording; the Meeting recording shortcut starts and stops a recording at any time. Notes appear under Meetings.")
             }
 
             Section {

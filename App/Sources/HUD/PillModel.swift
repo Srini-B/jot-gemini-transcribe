@@ -28,6 +28,10 @@ enum PillState: Equatable {
     case answer(String)
     /// Error styling: errorContainer surface + "saved to History" framing.
     case error(String)
+    /// A call was noticed; the pill offers to record it. The string names the app or site.
+    case meetingPrompt(String)
+    /// A meeting is recording: timer, waveform, live preview, stop.
+    case meetingRecording(since: Date)
 }
 
 /// Microphone level for the waveform. A plain reference, not published: the
@@ -51,5 +55,8 @@ final class PillModel: ObservableObject {
     /// only: this is a guess the model is still revising, and it is never what
     /// gets inserted.
     @Published var partial: String = ""
+    /// Meeting live preview. Separate from `partial`, which dictation clears on
+    /// every begin and would wipe the meeting text mid-call.
+    @Published var meetingPreview: String = ""
     let level = LevelSource()
 }

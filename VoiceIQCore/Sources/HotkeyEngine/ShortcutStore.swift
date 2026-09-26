@@ -7,6 +7,7 @@ public enum ShortcutAction: String, CaseIterable, Sendable {
     case pasteLastTranscript
     case askAnything
     case translate
+    case meetingToggle
 }
 
 public extension Notification.Name {
@@ -49,6 +50,8 @@ public final class ShortcutStore: @unchecked Sendable {
             return KeyShortcut(keyCode: 0, modifiers: [.control, .option])
         case .translate:
             return KeyShortcut(keyCode: 17, modifiers: [.control, .option])
+        case .meetingToggle:
+            return KeyShortcut(keyCode: 46, modifiers: [.option])
         }
     }
 

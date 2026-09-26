@@ -17,8 +17,16 @@ import Foundation
 
 @MainActor public final class MeetingEngine: ObservableObject {
     @Published public private(set) var phase: MeetingPhase = .idle
+    /// Live preview text while recording; empty otherwise. Display only.
+    @Published public private(set) var livePreview: String = ""
     public var onNotice: ((String) -> Void)?
+    /// A call was noticed while idle. The caller decides whether to record; nothing starts on its own.
+    public var onCallDetected: ((CallSource) -> Void)?
+    /// The noticed call went away before anyone accepted it.
+    public var onCallEnded: (() -> Void)?
     public var autoDetect: Bool = false { didSet { autoDetect ? detector.start() : detector.stop() } }
+    /// Builds the live socket for the on-pill preview; nil turns the preview off.
+    public var makeLiveSession: MeetingLivePreview.SessionFactory?
 
     public let store: MeetingStore
     private let client: GeminiClient
@@ -27,7 +35,10 @@ import Foundation
     private let summaryModel: String
     private lazy var detector = CallDetector()
     private var mic: MicTap?, system: SystemAudioTap?
+    private var preview: MeetingLivePreview?
     private var currentFolder: URL?, currentMeta: MeetingMeta?
+    /// The call the detector currently sees, whether or not it was accepted.
+    public private(set) var detectedSource: CallSource?
 
     public init(client: GeminiClient, store: MeetingStore = MeetingStore(), config: @escaping () -> GeminiConfig,
                 transcribeModel: String? = nil, summaryModel: String = "gemini-3.8-flash") {
@@ -36,18 +47,49 @@ import Foundation
         detector.onChange = { [weak self] source in self?.detected(source) }
     }
 
+    public var isRecording: Bool { if case .recording = phase { return true }; return false }
+
+    /// Option-M: start when nothing is recording, stop when something is.
+    public func toggleRecording() {
+        switch phase {
+        case .recording: stopRecording()
+        case .idle, .callDetected, .failed: startRecording(source: detectedSource)
+        case .processing: onNotice?("Meeting notes are still being made")
+        }
+    }
+
+    /// The pill's Accept button.
+    public func acceptDetectedCall() {
+        guard case let .callDetected(source) = phase else { return }
+        startRecording(source: source)
+    }
+
+    /// The pill's dismiss. The same call is not offered again; the next one is.
+    public func dismissDetectedCall() {
+        guard case .callDetected = phase else { return }
+        phase = .idle
+    }
+
     public func startRecording(source: CallSource? = nil) {
-        guard case .idle = phase else { return }
+        switch phase { case .idle, .callDetected, .failed: break; default: return }
         let id = MeetingID(), now = Date(), meta = MeetingMeta(id: id, startedAt: now, source: source)
         do {
             let folder = try store.create(meta: meta)
             let mic = MicTap(url: folder.appendingPathComponent("mic.caf"))
             let system = SystemAudioTap(url: folder.appendingPathComponent("system.caf"))
+            let preview = makeLiveSession.map { MeetingLivePreview(makeSession: $0) }
+            if let preview {
+                preview.onText = { [weak self] text in Task { @MainActor in self?.livePreview = text } }
+                mic.pcmSink = { [weak preview] pcm in preview?.pushMic(pcm) }
+                system.pcmSink = { [weak preview] pcm in preview?.pushSystem(pcm) }
+            }
             // System tap first so its aggregate device exists before the mic IOProc starts.
             try system.start()
             do { try mic.start() } catch { _ = system.stop(); throw error }
-            self.mic = mic; self.system = system; currentFolder = folder; currentMeta = meta
-            phase = .recording(id, since: now); onNotice?("Recording meeting\(source.map { " (\(Self.name($0)))" } ?? "")")
+            self.mic = mic; self.system = system; self.preview = preview
+            currentFolder = folder; currentMeta = meta; livePreview = ""
+            preview?.start()
+            phase = .recording(id, since: now)
         } catch { fail(id, error) }
     }
 
@@ -55,6 +97,8 @@ import Foundation
         guard case let .recording(id, _) = phase, let folder = currentFolder, var meta = currentMeta else { return }
         let micDuration = mic?.stop() ?? 0, systemDuration = system?.stop() ?? 0
         mic = nil; system = nil; phase = .processing(id)
+        if let preview { self.preview = nil; Task { await preview.stop() } }
+        livePreview = ""
         meta.endedAt = Date(); meta.durationSeconds = max(micDuration, systemDuration); meta.status = .transcribing
         currentMeta = meta; try? store.save(meta: meta)
         Task { await process(id: id, folder: folder, meta: meta, remix: true) }
@@ -83,10 +127,20 @@ import Foundation
         } catch { meta.status = .failed(String(describing: error)); try? store.save(meta: meta); fail(id, error) }
     }
 
+    /// Detection only ever offers. A recording in progress is never stopped by
+    /// the detector losing sight of the call (muting in Meet drops the mic
+    /// capture it watches), and nothing starts until someone accepts.
     private func detected(_ source: CallSource?) {
-        if let source, case .idle = phase { phase = .callDetected(source); phase = .idle; startRecording(source: source) }
-        else if source == nil, case .recording = phase { stopRecording() }
+        detectedSource = source
+        if let source {
+            guard case .idle = phase else { return }
+            phase = .callDetected(source)
+            onCallDetected?(source)
+        } else if case .callDetected = phase {
+            phase = .idle
+            onCallEnded?()
+        }
     }
     private func fail(_ id: MeetingID, _ error: Error) { phase = .failed(id, String(describing: error)); onNotice?("Meeting recording failed") }
-    private static func name(_ source: CallSource) -> String { switch source { case let .app(_, name): return name; case let .browser(_, host): return host } }
+    public static func name(_ source: CallSource) -> String { switch source { case let .app(_, name): return name; case let .browser(_, host): return host } }
 }
