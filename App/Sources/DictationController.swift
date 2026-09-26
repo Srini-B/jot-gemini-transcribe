@@ -16,7 +16,7 @@ import AppKit
 import ApplicationServices
 import AVFoundation
 import Combine
-import JotCore
+import VoiceIQCore
 
 /// App-side glue: EventTapEngine → DictationCoordinator → pill HUD + earcons +
 /// status item. All HUD timing lives here (experience spec is canonical).
@@ -55,7 +55,7 @@ final class DictationController {
     /// Builds a live session, or nil — which is the normal answer, since live is
     /// experimental and off by default.
     ///
-    /// It lives here rather than in JotCore because it is the one place that
+    /// It lives here rather than in VoiceIQCore because it is the one place that
     /// needs both the Keychain and the Dictionary, and the coordinator should
     /// know about neither.
     @MainActor
@@ -150,6 +150,16 @@ final class DictationController {
         Task { @MainActor [weak self] in
             for await intent in intentStream {
                 guard let self else { break }
+                // The dictation key also ends an Ask Anything or Translate
+                // session, so the user has one key that always means "stop".
+                if intent == .begin, self.shortcutMode != nil {
+                    Log.hotkey.info("dictation key ends mode session")
+                    self.coordinator.handle(.finalize)
+                    self.shortcutMode = nil
+                    self.shortcutDownAt = nil
+                    self.engine.resetGrammar()
+                    continue
+                }
                 let accepted = self.coordinator.handle(intent)
                 if !accepted, intent == .begin {
                     // Refused begin (secure field / busy): the grammar armed a
@@ -215,13 +225,13 @@ final class DictationController {
         AudioInputDevices.startMonitoringDeviceChanges()
         rememberCurrentInputDevices()
         applyPreferredInputDevice()
-        NotificationCenter.default.addObserver(forName: .jotDefaultInputChanged, object: nil, queue: .main) { [weak self] _ in
+        NotificationCenter.default.addObserver(forName: .voiceIQDefaultInputChanged, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 Log.audio.info("default input changed — refreshing the warm capture graph")
                 self?.warmEngines.refresh()
             }
         }
-        NotificationCenter.default.addObserver(forName: .jotInputDevicesChanged, object: nil, queue: .main) { [weak self] _ in
+        NotificationCenter.default.addObserver(forName: .voiceIQInputDevicesChanged, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.handleInputDevicesChanged() }
         }
 
@@ -450,7 +460,7 @@ final class DictationController {
     }
 
     func openSettings(section: String? = nil) {
-        openMainWindow(section: section.flatMap(MainSection.init(rawValue:)) ?? .general)
+        openMainWindow(section: section.flatMap(MainSection.init(rawValue:)) ?? .dictation)
     }
 
     func openDictionary() {
@@ -656,12 +666,6 @@ final class DictationController {
 
     // MARK: - State → HUD/earcons (frame-synced: sound fires on the same tick)
 
-    /// Matches GeminiSweep's duration — the finished sentence stays up exactly
-    /// as long as the sweep across it takes.
-    private static let correctionHold: TimeInterval = 1.5
-    private var correctionHoldUntil = Date.distantPast
-    private var correctionDeferral: DispatchWorkItem?
-
     private func bind() {
         coordinator.$state
             .receive(on: DispatchQueue.main)
@@ -673,7 +677,7 @@ final class DictationController {
         coordinator.$micLevel
             .receive(on: DispatchQueue.main)
             .sink { [weak self] level in
-                self?.hud.model.level = level
+                self?.hud.model.level.value = level
             }
             .store(in: &cancellables)
 
@@ -692,37 +696,7 @@ final class DictationController {
         coordinator.$partialTranscript
             .receive(on: DispatchQueue.main)
             .sink { [weak self] text in
-                guard let self else { return }
-                // The session ends immediately after the correction lands, which
-                // clears this — and clearing it mid-sweep means the animation the
-                // whole treatment exists for is never actually seen. How long the
-                // finished sentence stays on screen is a display decision, so the
-                // display layer makes it: ignore the clear until the sweep is done.
-                if text.isEmpty, Date() < self.correctionHoldUntil { return }
-                self.hud.model.partial = text
-            }
-            .store(in: &cancellables)
-
-        coordinator.$correctedTranscript
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] text in
-                guard let self, !text.isEmpty else { return }
-                self.hud.model.corrected = text
-                self.hud.model.correction = self.coordinator.correctionSegments
-                // An edit needs longer on screen than a plain swap: the marked
-                // words have to be readable before they collapse.
-                let hold = self.coordinator.correctionSegments.isEmpty
-                    ? Self.correctionHold
-                    : CorrectionView.total + 0.35
-                self.correctionHoldUntil = Date().addingTimeInterval(hold)
-                // Clear it ourselves once the sweep has run, so the pill does not
-                // carry the last dictation's words into the next one.
-                DispatchQueue.main.asyncAfter(deadline: .now() + hold) { [weak self] in
-                    guard let self, self.coordinator.partialTranscript.isEmpty else { return }
-                    self.hud.model.partial = ""
-                    self.hud.model.corrected = ""
-                    self.hud.model.correction = []
-                }
+                self?.hud.model.partial = text
             }
             .store(in: &cancellables)
     }
@@ -736,7 +710,11 @@ final class DictationController {
         } else {
             outputMute.unmute()
         }
-        if state.isTerminal || state == .idle {
+        // Only terminal states clear the mode. The coordinator re-publishes
+        // `.idle` at the start of every begin, and this sink delivers it after
+        // handleModeShortcutDown already set shortcutMode — clearing on `.idle`
+        // wiped the mode and let the dictation key fall through to "begin ignored".
+        if state.isTerminal {
             shortcutMode = nil
             shortcutDownAt = nil
         }
@@ -764,9 +742,6 @@ final class DictationController {
             onStatusItemState?(.idle)
 
         case .warming:
-            correctionDeferral?.cancel()
-            correctionDeferral = nil
-            correctionHoldUntil = .distantPast
             sessionStartedAt = Date()
             earcons.play(.start)
             hud.repositionToActiveScreen() // follow the dictation display (audit L14)
@@ -784,6 +759,9 @@ final class DictationController {
         case .finalizing:
             earcons.play(.stop)
             stopElapsedTimer()
+            // The running guess is not shown while working, and must not
+            // reappear in the next session's pill.
+            hud.model.partial = ""
             setPill(.processing)
             armSlowTimer()
             onStatusItemState?(.processing)
@@ -795,21 +773,7 @@ final class DictationController {
         case .done(let outcome):
             clearSlowTimer()
             onStatusItemState?(.idle)
-            // The text has ALREADY landed at the cursor by now — insertion is not
-            // waiting on anything here. What waits is the pill: a correction that
-            // just fired needs its sweep to finish, and jumping straight to the
-            // success badge cuts it off mid-travel, which is exactly the "it just
-            // switched back and showed the new text" complaint. Only the visual
-            // is deferred, never the words.
-            let remaining = correctionHoldUntil.timeIntervalSinceNow
-            if remaining > 0 {
-                let work = DispatchWorkItem { [weak self] in self?.handleOutcome(outcome) }
-                correctionDeferral?.cancel()
-                correctionDeferral = work
-                DispatchQueue.main.asyncAfter(deadline: .now() + remaining, execute: work)
-            } else {
-                handleOutcome(outcome)
-            }
+            handleOutcome(outcome)
 
         case .cancelled:
             clearSlowTimer()

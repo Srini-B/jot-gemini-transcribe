@@ -13,7 +13,7 @@
 .env
 .swiftpm/
 DerivedData/
-Jot.xcodeproj/
+VoiceIQ.xcodeproj/
 Package.resolved
 build/
 xcuserdata/

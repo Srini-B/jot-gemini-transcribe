@@ -19,7 +19,9 @@ import SwiftUI
 /// idle undulation. Processing state: bars freeze into a silhouette and run the
 /// four-color traveling sweep — the only place the brand quad animates.
 struct WaveformView: View {
-    var level: Float
+    /// Read inside the Canvas at each timeline tick, so level changes never
+    /// invalidate the SwiftUI view tree.
+    var level: LevelSource = .silent
     var processing: Bool
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -87,7 +89,7 @@ struct WaveformView: View {
                 let hue = (Double(index) / 5.0 + sweep).truncatingRemainder(dividingBy: 1.0)
                 context.fill(path, with: .color(quadColor(at: hue)))
             } else {
-                context.fill(path, with: .color(JotUI.Colors.gBlue))
+                context.fill(path, with: .color(VoiceIQUI.Colors.gBlue))
             }
         }
     }
@@ -102,7 +104,7 @@ struct WaveformView: View {
         // smoother gives it fast attack (bars leap with your voice) and slow
         // release (they fall like a VU meter, not a strobe).
         let shimmer = sin(time * 2 * .pi * (2.4 + Double(index) * 0.55) + Self.phases[index] * 2)
-        let target = CGFloat(level) * Self.weights[index] * (1 + CGFloat(shimmer) * 0.35)
+        let target = CGFloat(level.value) * Self.weights[index] * (1 + CGFloat(shimmer) * 0.35)
         let smoothed = smoother.step(bar: index, toward: min(1, max(0, target)))
         // Idle breathing keeps the pill alive between phrases.
         let idle = sin(time * 2 * .pi * 0.8 + Self.phases[index]) * 2
@@ -112,22 +114,24 @@ struct WaveformView: View {
 
     private func quadColor(at position: Double) -> Color {
         // Blue → Red → Yellow → Green loop.
-        let colors = JotUI.Colors.brandQuad
+        let colors = VoiceIQUI.Colors.brandQuad
         let scaled = position * Double(colors.count)
         return colors[Int(scaled) % colors.count]
     }
 
     /// Reduce Motion: static 5-bar level meter, opacity-only response.
     private var staticBars: some View {
-        HStack(spacing: Self.gap) {
-            ForEach(0..<5, id: \.self) { index in
-                RoundedRectangle(cornerRadius: Self.barWidth / 2)
-                    .fill(processing ? JotUI.Colors.brandQuad[index % 4] : JotUI.Colors.gBlue)
-                    .frame(
-                        width: Self.barWidth,
-                        height: Self.minHeight + Self.weights[index] * 14
-                    )
-                    .opacity(processing ? 0.8 : 0.4 + Double(level) * 0.6)
+        TimelineView(.periodic(from: .now, by: 1.0 / 12.0)) { _ in
+            HStack(spacing: Self.gap) {
+                ForEach(0..<5, id: \.self) { index in
+                    RoundedRectangle(cornerRadius: Self.barWidth / 2)
+                        .fill(processing ? VoiceIQUI.Colors.brandQuad[index % 4] : VoiceIQUI.Colors.gBlue)
+                        .frame(
+                            width: Self.barWidth,
+                            height: Self.minHeight + Self.weights[index] * 14
+                        )
+                        .opacity(processing ? 0.8 : 0.4 + Double(level.value) * 0.6)
+                }
             }
         }
         .frame(height: Self.maxHeight)

@@ -34,7 +34,7 @@ source ~/.zshrc
 
 The script performs this sequence:
 
-1. Regenerates `Jot.xcodeproj` with XcodeGen.
+1. Regenerates `VoiceIQ.xcodeproj` with XcodeGen.
 2. Builds Release with manual Developer ID signing, hardened runtime, and a secure timestamp.
 3. Verifies the app signature and rejects `get-task-allow`.
 4. Creates a ZIP with `ditto` and submits it to Apple notarization.
@@ -42,7 +42,7 @@ The script performs this sequence:
 6. Builds `build/release/Voice-IQ-<version>.dmg` with `scripts/make-dmg.sh`.
 7. Signs, notarizes, staples, and Gatekeeper-checks the DMG.
 
-The bundle identifier is `io.blue.voiceiq`. Changing it resets the app's UserDefaults domain and requires users to grant microphone, Accessibility, and other TCC permissions again. `FileLayout` and `KeychainStore` migrate the previous Jot folder and API-key service, but macOS permissions cannot be migrated.
+The bundle identifier is `io.blue.voiceiq`. Changing it resets the app's UserDefaults domain and requires users to grant microphone, Accessibility, and other TCC permissions again. `FileLayout` and `KeychainStore` migrate the previous Voice IQ folder and API-key service, but macOS permissions cannot be migrated.
 
 ## Verification
 

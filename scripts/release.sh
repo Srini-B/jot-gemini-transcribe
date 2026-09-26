@@ -32,8 +32,8 @@ xcodegen generate
 echo "▸ Building Developer ID Release"
 env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.bareRepository GIT_CONFIG_VALUE_0=all \
   xcodebuild build \
-    -project Jot.xcodeproj \
-    -scheme Jot \
+    -project VoiceIQ.xcodeproj \
+    -scheme VoiceIQ \
     -configuration Release \
     -destination 'platform=macOS' \
     -derivedDataPath "$DERIVED_DATA" \

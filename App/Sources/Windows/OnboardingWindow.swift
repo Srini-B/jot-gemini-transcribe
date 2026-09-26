@@ -16,7 +16,7 @@ import AppKit
 import ApplicationServices
 import AVFoundation
 import SwiftUI
-import JotCore
+import VoiceIQCore
 
 /// First-launch onboarding: welcome → key → mic → accessibility → Globe key →
 /// try it → done. Warm, plain-spoken, one screen at a time (experience spec §5).
@@ -68,8 +68,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
 }
 
 extension Notification.Name {
-    static let onboardingWindowClosed = Notification.Name("com.ammaar.jot.onboarding.closed")
-    static let onboardingJumpToScreen = Notification.Name("com.ammaar.jot.onboarding.jump")
+    static let onboardingWindowClosed = Notification.Name("io.blue.voiceiq.onboarding.closed")
+    static let onboardingJumpToScreen = Notification.Name("io.blue.voiceiq.onboarding.jump")
 }
 
 private struct OnboardingFlow: View {
@@ -90,7 +90,7 @@ private struct OnboardingFlow: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Spacer(minLength: JotUI.Spacing.l)
+            Spacer(minLength: VoiceIQUI.Spacing.l)
             currentScreen
                 .frame(maxWidth: 480)
                 .transition(.asymmetric(
@@ -100,28 +100,28 @@ private struct OnboardingFlow: View {
                 .id(screen)
             Spacer()
             progressDots
-                .padding(.bottom, JotUI.Spacing.l)
+                .padding(.bottom, VoiceIQUI.Spacing.l)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(JotUI.Colors.windowBackground)
+        .background(VoiceIQUI.Colors.windowBackground)
         .overlay(alignment: .topLeading) {
             if !backStack.isEmpty {
                 Button(action: goBack) {
                     Label("Back", systemImage: "chevron.left")
-                        .font(JotUI.TypeScale.body())
-                        .foregroundStyle(JotUI.Colors.onSurfaceVariant)
-                        .padding(.horizontal, JotUI.Spacing.s)
+                        .font(VoiceIQUI.TypeScale.body())
+                        .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
+                        .padding(.horizontal, VoiceIQUI.Spacing.s)
                         .padding(.vertical, 6)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .keyboardShortcut("[", modifiers: .command)
-                .padding(.leading, JotUI.Spacing.s)
-                .padding(.top, JotUI.Spacing.s)
+                .padding(.leading, VoiceIQUI.Spacing.s)
+                .padding(.top, VoiceIQUI.Spacing.s)
                 .transition(.opacity)
             }
         }
-        .animation(JotMotion.expressiveDefaultSpatial, value: screen)
+        .animation(VoiceIQMotion.expressiveDefaultSpatial, value: screen)
         // voiceiq://onboarding/<n> — deep-link to a screen (automation + UI checks).
         .onReceive(NotificationCenter.default.publisher(for: .onboardingJumpToScreen)) { note in
             if let index = note.object as? Int, let target = Screen(rawValue: index) {
@@ -161,10 +161,10 @@ private struct OnboardingFlow: View {
     }
 
     private var progressDots: some View {
-        HStack(spacing: JotUI.Spacing.xs) {
+        HStack(spacing: VoiceIQUI.Spacing.xs) {
             ForEach(Screen.allCases, id: \.rawValue) { s in
                 Circle()
-                    .fill(s == screen ? JotUI.Colors.primary : JotUI.Colors.outlineVariant)
+                    .fill(s == screen ? VoiceIQUI.Colors.primary : VoiceIQUI.Colors.outlineVariant)
                     .frame(width: 6, height: 6)
             }
         }
@@ -186,14 +186,14 @@ private struct ScreenScaffold<Content: View>: View {
     }
 
     var body: some View {
-        VStack(spacing: JotUI.Spacing.l) {
+        VStack(spacing: VoiceIQUI.Spacing.l) {
             Text(headline)
-                .font(JotUI.TypeScale.display(grad: scheme == .dark ? 25 : 0))
-                .foregroundStyle(JotUI.Colors.onSurface)
+                .font(VoiceIQUI.TypeScale.display(grad: scheme == .dark ? 25 : 0))
+                .foregroundStyle(VoiceIQUI.Colors.onSurface)
                 .multilineTextAlignment(.center)
             Text(body_)
-                .font(JotUI.TypeScale.body(grad: scheme == .dark ? 25 : 0))
-                .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                .font(VoiceIQUI.TypeScale.body(grad: scheme == .dark ? 25 : 0))
+                .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
             content
@@ -209,7 +209,7 @@ private struct PrimaryButton: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(JotUI.TypeScale.title())
+                .font(VoiceIQUI.TypeScale.title())
                 // Disabled needs its OWN pair. Keeping onPrimary (a dark navy in
                 // dark mode) over a grey container put dark text on a dark pill:
                 // 1.37:1, effectively invisible — reported from the wild.
@@ -217,12 +217,12 @@ private struct PrimaryButton: View {
                 // particular button is what a first-time user stares at while
                 // they go and fetch their API key, so it is legible on purpose:
                 // 4.2:1 dark / 3.4:1 light, still obviously inactive.
-                .foregroundStyle(disabled ? JotUI.Colors.onSurface.opacity(0.55) : JotUI.Colors.onPrimary)
-                .padding(.horizontal, JotUI.Spacing.xl)
-                .padding(.vertical, JotUI.Spacing.s)
+                .foregroundStyle(disabled ? VoiceIQUI.Colors.onSurface.opacity(0.55) : VoiceIQUI.Colors.onPrimary)
+                .padding(.horizontal, VoiceIQUI.Spacing.xl)
+                .padding(.vertical, VoiceIQUI.Spacing.s)
                 .background(Capsule().fill(disabled
-                    ? JotUI.Colors.onSurface.opacity(0.14)
-                    : JotUI.Colors.primary))
+                    ? VoiceIQUI.Colors.onSurface.opacity(0.14)
+                    : VoiceIQUI.Colors.primary))
         }
         .buttonStyle(.plain)
         .disabled(disabled)
@@ -237,28 +237,28 @@ private struct PermissionCard: View {
     let action: () -> Void
 
     var body: some View {
-        HStack(spacing: JotUI.Spacing.s) {
+        HStack(spacing: VoiceIQUI.Spacing.s) {
             Image(systemName: icon)
                 .font(.system(size: 18))
-                .foregroundStyle(granted ? JotUI.Colors.success : JotUI.Colors.primary)
+                .foregroundStyle(granted ? VoiceIQUI.Colors.success : VoiceIQUI.Colors.primary)
                 .frame(width: 28)
             Text(title)
-                .font(JotUI.TypeScale.body())
-                .foregroundStyle(JotUI.Colors.onSurface)
+                .font(VoiceIQUI.TypeScale.body())
+                .foregroundStyle(VoiceIQUI.Colors.onSurface)
             Spacer()
             if granted {
                 Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(JotUI.Colors.success)
+                    .foregroundStyle(VoiceIQUI.Colors.success)
                     .transition(.scale.combined(with: .opacity))
             } else {
                 Button(actionTitle, action: action)
                     .buttonStyle(.bordered)
             }
         }
-        .padding(JotUI.Spacing.m)
-        .background(RoundedRectangle(cornerRadius: JotUI.Radius.large).fill(JotUI.Colors.surface))
-        .overlay(RoundedRectangle(cornerRadius: JotUI.Radius.large).strokeBorder(JotUI.Colors.outlineVariant.opacity(0.3), lineWidth: 1))
-        .animation(JotMotion.expressiveFastSpatial, value: granted)
+        .padding(VoiceIQUI.Spacing.m)
+        .background(RoundedRectangle(cornerRadius: VoiceIQUI.Radius.large).fill(VoiceIQUI.Colors.surface))
+        .overlay(RoundedRectangle(cornerRadius: VoiceIQUI.Radius.large).strokeBorder(VoiceIQUI.Colors.outlineVariant.opacity(0.3), lineWidth: 1))
+        .animation(VoiceIQMotion.expressiveFastSpatial, value: granted)
     }
 }
 
@@ -267,7 +267,7 @@ private struct PermissionCard: View {
 private struct WelcomeScreen: View {
     let onNext: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var demoLevel: Float = 0
+    @State private var demoLevel = LevelSource()
     @State private var heardShown = ""
     @State private var cleanShown = ""
     @State private var demoTask: Task<Void, Never>?
@@ -278,10 +278,10 @@ private struct WelcomeScreen: View {
 
     var body: some View {
         ScreenScaffold("Speak. It types.", "Hold a key, say the thing, and polished text lands wherever your cursor is.") {
-            VStack(spacing: JotUI.Spacing.m) {
+            VStack(spacing: VoiceIQUI.Spacing.m) {
                 WaveformView(level: demoLevel, processing: false)
                     .frame(width: 200, height: 48)
-                    .background(Capsule().fill(JotUI.Colors.surface).shadow(color: .black.opacity(0.15), radius: 10, y: 2))
+                    .background(Capsule().fill(VoiceIQUI.Colors.surface).shadow(color: .black.opacity(0.15), radius: 10, y: 2))
                 demoText
                     .frame(width: 420, height: 48)
                 PrimaryButton(title: "Get started", action: onNext)
@@ -299,22 +299,22 @@ private struct WelcomeScreen: View {
         if reduceMotion {
             VStack(spacing: 2) {
                 Text("“\(Self.heardLine)”")
-                    .font(JotUI.TypeScale.labelSmall())
+                    .font(VoiceIQUI.TypeScale.labelSmall())
                     .italic()
-                    .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                    .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
                 Text(Self.cleanLine)
-                    .font(JotUI.TypeScale.body())
-                    .foregroundStyle(JotUI.Colors.onSurface)
+                    .font(VoiceIQUI.TypeScale.body())
+                    .foregroundStyle(VoiceIQUI.Colors.onSurface)
             }
         } else {
             VStack(spacing: 2) {
                 Text(heardShown.isEmpty ? " " : "“\(heardShown)”")
-                    .font(JotUI.TypeScale.labelSmall())
+                    .font(VoiceIQUI.TypeScale.labelSmall())
                     .italic()
-                    .foregroundStyle(JotUI.Colors.onSurfaceVariant.opacity(cleanShown.isEmpty ? 1 : 0.45))
+                    .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant.opacity(cleanShown.isEmpty ? 1 : 0.45))
                 Text(cleanShown.isEmpty ? " " : cleanShown)
-                    .font(JotUI.TypeScale.body())
-                    .foregroundStyle(JotUI.Colors.onSurface)
+                    .font(VoiceIQUI.TypeScale.body())
+                    .foregroundStyle(VoiceIQUI.Colors.onSurface)
             }
             // The typewriter IS the animation — inherited implicit animations
             // crossfade every character and ghost the previous loop's text.
@@ -331,10 +331,10 @@ private struct WelcomeScreen: View {
                 for char in Self.heardLine {
                     guard !Task.isCancelled else { return }
                     heardShown.append(char)
-                    demoLevel = Float.random(in: 0.35...0.8)
+                    demoLevel.value = Float.random(in: 0.35...0.8)
                     try? await Task.sleep(nanoseconds: 38_000_000)
                 }
-                demoLevel = 0.08
+                demoLevel.value = 0.08
                 try? await Task.sleep(nanoseconds: 450_000_000)
                 // "Writing": the clean line lands, correction already applied.
                 for char in Self.cleanLine {
@@ -370,11 +370,11 @@ private struct APIKeyScreen: View {
 
     var body: some View {
         ScreenScaffold("Bring your own key.", "Voice IQ uses your Gemini API key. It's stored in your Mac's Keychain and only ever sent to Google.") {
-            VStack(spacing: JotUI.Spacing.s) {
+            VStack(spacing: VoiceIQUI.Spacing.s) {
                 if !showingField {
                     Label("Key already in your Keychain", systemImage: "checkmark.circle.fill")
-                        .font(JotUI.TypeScale.body())
-                        .foregroundStyle(JotUI.Colors.success)
+                        .font(VoiceIQUI.TypeScale.body())
+                        .foregroundStyle(VoiceIQUI.Colors.success)
                     // Without this the only way out of a stored-but-wrong key was
                     // to uninstall the app (dogfood).
                     Button("Use a different key") {
@@ -385,44 +385,44 @@ private struct APIKeyScreen: View {
                         noModelAccess = false
                     }
                     .buttonStyle(.plain)
-                    .font(JotUI.TypeScale.labelSmall())
-                    .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                    .font(VoiceIQUI.TypeScale.labelSmall())
+                    .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
                 } else {
                     SecureField("Paste your key", text: $key)
                         .textFieldStyle(.roundedBorder)
-                        .font(JotUI.TypeScale.code)
+                        .font(VoiceIQUI.TypeScale.code)
                         .frame(width: 320)
                     if failed {
                         Text(rejection.map { "That key was rejected: \($0)" }
                              ?? "That key didn't work — check it in AI Studio.")
-                            .font(JotUI.TypeScale.labelSmall())
-                            .foregroundStyle(JotUI.Colors.error)
+                            .font(VoiceIQUI.TypeScale.labelSmall())
+                            .foregroundStyle(VoiceIQUI.Colors.error)
                             .multilineTextAlignment(.center)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: 320)
                     }
                     if unverified {
                         Text("Couldn't reach Google to check this key — saved it anyway. Your first dictation will tell you for sure.")
-                            .font(JotUI.TypeScale.labelSmall())
-                            .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                            .font(VoiceIQUI.TypeScale.labelSmall())
+                            .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
                             .multilineTextAlignment(.center)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: 320)
                     }
                     if saveFailed {
                         Text("Couldn't save to your Mac's Keychain — try again.")
-                            .font(JotUI.TypeScale.labelSmall())
-                            .foregroundStyle(JotUI.Colors.error)
+                            .font(VoiceIQUI.TypeScale.labelSmall())
+                            .foregroundStyle(VoiceIQUI.Colors.error)
                     }
                     if noModelAccess {
                         Text("That key works, but it can't reach Voice IQ's transcription model yet. Setup continues — ask for access, then try a dictation.")
-                            .font(JotUI.TypeScale.labelSmall())
-                            .foregroundStyle(JotUI.Colors.error)
+                            .font(VoiceIQUI.TypeScale.labelSmall())
+                            .foregroundStyle(VoiceIQUI.Colors.error)
                             .multilineTextAlignment(.center)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     Link("Get a key in Google AI Studio", destination: URL(string: "https://aistudio.google.com/apikey")!)
-                        .font(JotUI.TypeScale.labelSmall())
+                        .font(VoiceIQUI.TypeScale.labelSmall())
                 }
                 if validating {
                     ProgressView().controlSize(.small)
@@ -436,8 +436,8 @@ private struct APIKeyScreen: View {
                         // the menu bar nudges toward Settings → Advanced until one exists.
                         Button("I'll add it later", action: onNext)
                             .buttonStyle(.plain)
-                            .font(JotUI.TypeScale.labelSmall())
-                            .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                            .font(VoiceIQUI.TypeScale.labelSmall())
+                            .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
                     }
                 }
             }
@@ -504,6 +504,7 @@ private struct MicScreen: View {
     let onNext: () -> Void
     @State private var granted = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
     @State private var level: Float = 0
+    @State private var meterLevel = LevelSource()
     @State private var meter: AudioCaptureEngine?
     @State private var heard = false
     @State private var advancing = false
@@ -546,22 +547,22 @@ private struct MicScreen: View {
 
     var body: some View {
         ScreenScaffold(headline, sub) {
-            VStack(spacing: JotUI.Spacing.m) {
+            VStack(spacing: VoiceIQUI.Spacing.m) {
                 if granted {
                     ZStack {
-                        WaveformView(level: level, processing: false)
+                        WaveformView(level: meterLevel, processing: false)
                             .opacity(heard ? 0 : 1)
                         if heard {
                             Image(systemName: "checkmark.circle.fill")
                                 .font(.system(size: 26))
-                                .foregroundStyle(JotUI.Colors.success)
+                                .foregroundStyle(VoiceIQUI.Colors.success)
                                 .transition(.scale.combined(with: .opacity))
                         }
                     }
                     .frame(width: 200, height: 48)
-                    .background(Capsule().fill(JotUI.Colors.surface).shadow(color: .black.opacity(0.15), radius: 10, y: 2))
-                    .animation(JotMotion.expressiveDefaultSpatial, value: heard)
-        .animation(JotMotion.defaultEffects, value: maxLevel >= 0.06)
+                    .background(Capsule().fill(VoiceIQUI.Colors.surface).shadow(color: .black.opacity(0.15), radius: 10, y: 2))
+                    .animation(VoiceIQMotion.expressiveDefaultSpatial, value: heard)
+        .animation(VoiceIQMotion.defaultEffects, value: maxLevel >= 0.06)
                     .onAppear(perform: startMeter)
                     .onDisappear(perform: stopMeter)
                     .onReceive(NotificationCenter.default.publisher(for: .onboardingWindowClosed)) { _ in
@@ -572,8 +573,8 @@ private struct MicScreen: View {
                     // never answer "is this working?".
                     if let status = micStatus {
                         Text(status.text)
-                            .font(JotUI.TypeScale.labelSmall())
-                            .foregroundStyle(status.bad ? JotUI.Colors.error : JotUI.Colors.onSurfaceVariant)
+                            .font(VoiceIQUI.TypeScale.labelSmall())
+                            .foregroundStyle(status.bad ? VoiceIQUI.Colors.error : VoiceIQUI.Colors.onSurfaceVariant)
                             .multilineTextAlignment(.center)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: 340)
@@ -606,15 +607,15 @@ private struct MicScreen: View {
                         .labelsHidden()
                         .pickerStyle(.menu)
                         .frame(maxWidth: 260)
-                        .font(JotUI.TypeScale.labelSmall())
+                        .font(VoiceIQUI.TypeScale.labelSmall())
                     }
 
                     // Speaking IS the continue gesture; the quiet link remains for
                     // silent environments and users who can't speak.
                     Button("Continue without speaking") { advance() }
                         .buttonStyle(.plain)
-                        .font(JotUI.TypeScale.labelSmall())
-                        .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                        .font(VoiceIQUI.TypeScale.labelSmall())
+                        .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
                 } else {
                     PermissionCard(
                         icon: "mic.fill",
@@ -638,8 +639,8 @@ private struct MicScreen: View {
                     // saying what is still missing.
                     Button("Skip for now", action: { advance() })
                         .buttonStyle(.plain)
-                        .font(JotUI.TypeScale.labelSmall())
-                        .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                        .font(VoiceIQUI.TypeScale.labelSmall())
+                        .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
                 }
             }
         }
@@ -647,7 +648,7 @@ private struct MicScreen: View {
             inputs = AudioInputDevices.list()
             selectedInput = AudioInputDevices.currentDefaultID()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .jotDefaultInputChanged).receive(on: RunLoop.main)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .voiceIQDefaultInputChanged).receive(on: RunLoop.main)) { _ in
             inputs = AudioInputDevices.list()
             selectedInput = AudioInputDevices.currentDefaultID()
         }
@@ -721,6 +722,7 @@ private struct MicScreen: View {
         engine.onLevel = { value in
             Task { @MainActor in
                 level = value
+                meterLevel.value = value
                 meterTicks += 1
                 maxLevel = max(maxLevel, value)
             }
@@ -751,7 +753,7 @@ private struct AccessibilityScreen: View {
 
     var body: some View {
         ScreenScaffold("Let it type for you.", "macOS needs your OK before Voice IQ can place text at your cursor.") {
-            VStack(spacing: JotUI.Spacing.m) {
+            VStack(spacing: VoiceIQUI.Spacing.m) {
                 PermissionCard(icon: "keyboard", title: "Accessibility", granted: granted) {
                     let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
                     _ = AXIsProcessTrustedWithOptions(options)
@@ -759,8 +761,8 @@ private struct AccessibilityScreen: View {
                 }
                 if slowGrant && !granted {
                     Text("Granted but not detected? A relaunch may be needed.")
-                        .font(JotUI.TypeScale.labelSmall())
-                        .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                        .font(VoiceIQUI.TypeScale.labelSmall())
+                        .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
                 }
                 PrimaryButton(title: "Continue", disabled: !granted, action: onNext)
             }
@@ -798,22 +800,22 @@ private struct GlobeKeyScreen: View {
 
     var body: some View {
         ScreenScaffold("Make the 🌐 key yours.", "macOS currently uses the Globe key for its own shortcut. One switch and it's your dictation key.") {
-            VStack(spacing: JotUI.Spacing.m) {
-                VStack(alignment: .leading, spacing: JotUI.Spacing.xs) {
+            VStack(spacing: VoiceIQUI.Spacing.m) {
+                VStack(alignment: .leading, spacing: VoiceIQUI.Spacing.xs) {
                     Text("In Keyboard settings, set:")
-                        .font(JotUI.TypeScale.labelSmall())
-                        .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                        .font(VoiceIQUI.TypeScale.labelSmall())
+                        .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
                     Text("Press 🌐 key to  →  Do Nothing")
-                        .font(JotUI.TypeScale.title())
-                        .foregroundStyle(JotUI.Colors.onSurface)
+                        .font(VoiceIQUI.TypeScale.title())
+                        .foregroundStyle(VoiceIQUI.Colors.onSurface)
                 }
-                .padding(JotUI.Spacing.m)
-                .background(RoundedRectangle(cornerRadius: JotUI.Radius.large).fill(JotUI.Colors.surface))
+                .padding(VoiceIQUI.Spacing.m)
+                .background(RoundedRectangle(cornerRadius: VoiceIQUI.Radius.large).fill(VoiceIQUI.Colors.surface))
 
                 if fixed {
                     Label("Done — the Globe key is yours", systemImage: "checkmark.circle.fill")
-                        .font(JotUI.TypeScale.body())
-                        .foregroundStyle(JotUI.Colors.success)
+                        .font(VoiceIQUI.TypeScale.body())
+                        .foregroundStyle(VoiceIQUI.Colors.success)
                 } else {
                     Button("Open Keyboard Settings") {
                         NSWorkspace.shared.open(FnUsageAdvisor.keyboardSettingsURL)
@@ -823,8 +825,8 @@ private struct GlobeKeyScreen: View {
 
                 if FnUsageAdvisor.karabinerIsPresent() {
                     Text("Karabiner-Elements is running — if fn doesn't respond, add Voice IQ to its exclusions.")
-                        .font(JotUI.TypeScale.labelSmall())
-                        .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                        .font(VoiceIQUI.TypeScale.labelSmall())
+                        .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
                         .multilineTextAlignment(.center)
                 }
 
@@ -852,8 +854,8 @@ private struct HowToScreen: View {
 
     var body: some View {
         ScreenScaffold("Talk to Voice IQ.", "Three gestures — that's the whole product.") {
-            VStack(spacing: JotUI.Spacing.m) {
-                VStack(alignment: .leading, spacing: JotUI.Spacing.s) {
+            VStack(spacing: VoiceIQUI.Spacing.m) {
+                VStack(alignment: .leading, spacing: VoiceIQUI.Spacing.s) {
                     gestureRow(keys: [keyName], title: "Hold and talk",
                                detail: "Release, and polished text lands at your cursor.")
                     gestureRow(keys: [keyName, "space"], title: "Go hands-free",
@@ -861,8 +863,8 @@ private struct HowToScreen: View {
                     gestureRow(keys: ["esc"], title: "Changed your mind",
                                detail: "Cancels the dictation. Long recordings are kept in History.")
                 }
-                .padding(JotUI.Spacing.m)
-                .background(RoundedRectangle(cornerRadius: JotUI.Radius.large).fill(JotUI.Colors.surface)
+                .padding(VoiceIQUI.Spacing.m)
+                .background(RoundedRectangle(cornerRadius: VoiceIQUI.Radius.large).fill(VoiceIQUI.Colors.surface)
                     .shadow(color: .black.opacity(0.1), radius: 12, y: 2))
                 PrimaryButton(title: "Got it", action: onNext)
             }
@@ -870,7 +872,7 @@ private struct HowToScreen: View {
     }
 
     private func gestureRow(keys: [String], title: String, detail: String) -> some View {
-        HStack(alignment: .top, spacing: JotUI.Spacing.s) {
+        HStack(alignment: .top, spacing: VoiceIQUI.Spacing.s) {
             HStack(spacing: 4) {
                 ForEach(keys, id: \.self) { key in
                     keycap(key)
@@ -879,11 +881,11 @@ private struct HowToScreen: View {
             .frame(width: 132, alignment: .leading)
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
-                    .font(JotUI.TypeScale.body())
-                    .foregroundStyle(JotUI.Colors.onSurface)
+                    .font(VoiceIQUI.TypeScale.body())
+                    .foregroundStyle(VoiceIQUI.Colors.onSurface)
                 Text(detail)
-                    .font(JotUI.TypeScale.labelSmall())
-                    .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                    .font(VoiceIQUI.TypeScale.labelSmall())
+                    .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -891,15 +893,15 @@ private struct HowToScreen: View {
 
     private func keycap(_ label: String) -> some View {
         Text(label)
-            .font(JotUI.TypeScale.code)
-            .foregroundStyle(JotUI.Colors.onSurface)
+            .font(VoiceIQUI.TypeScale.code)
+            .foregroundStyle(VoiceIQUI.Colors.onSurface)
             .fixedSize()
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
             .background(
                 RoundedRectangle(cornerRadius: 5)
-                    .fill(JotUI.Colors.surfaceContainer)
-                    .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(JotUI.Colors.outlineVariant.opacity(0.6), lineWidth: 1))
+                    .fill(VoiceIQUI.Colors.surfaceContainer)
+                    .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(VoiceIQUI.Colors.outlineVariant.opacity(0.6), lineWidth: 1))
             )
     }
 }
@@ -921,32 +923,32 @@ private struct TryItScreen: View {
 
     var body: some View {
         ScreenScaffold("Try it.", "Click into the field, hold \(keyName), and change your mind mid-sentence:") {
-            VStack(spacing: JotUI.Spacing.s) {
+            VStack(spacing: VoiceIQUI.Spacing.s) {
                 if revealRaw == nil {
                     Text("“\(Self.script)”")
-                        .font(JotUI.TypeScale.body())
+                        .font(VoiceIQUI.TypeScale.body())
                         .italic()
-                        .foregroundStyle(JotUI.Colors.onSurface)
-                        .padding(.horizontal, JotUI.Spacing.m)
-                        .padding(.vertical, JotUI.Spacing.xs)
-                        .background(Capsule().fill(JotUI.Colors.surfaceContainer))
+                        .foregroundStyle(VoiceIQUI.Colors.onSurface)
+                        .padding(.horizontal, VoiceIQUI.Spacing.m)
+                        .padding(.vertical, VoiceIQUI.Spacing.xs)
+                        .background(Capsule().fill(VoiceIQUI.Colors.surfaceContainer))
                     Text("(or say anything you like)")
-                        .font(JotUI.TypeScale.labelSmall())
-                        .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                        .font(VoiceIQUI.TypeScale.labelSmall())
+                        .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
                 }
                 ZStack(alignment: .topLeading) {
                     TextEditor(text: $text)
-                        .font(JotUI.TypeScale.bodyLarge())
+                        .font(VoiceIQUI.TypeScale.bodyLarge())
                         .scrollContentBackground(.hidden)
-                        .padding(JotUI.Spacing.s)
+                        .padding(VoiceIQUI.Spacing.s)
                         .frame(width: 400, height: 96)
-                        .background(RoundedRectangle(cornerRadius: JotUI.Radius.large).fill(JotUI.Colors.surface))
-                        .overlay(RoundedRectangle(cornerRadius: JotUI.Radius.large).strokeBorder(JotUI.Colors.outlineVariant.opacity(0.4), lineWidth: 1))
+                        .background(RoundedRectangle(cornerRadius: VoiceIQUI.Radius.large).fill(VoiceIQUI.Colors.surface))
+                        .overlay(RoundedRectangle(cornerRadius: VoiceIQUI.Radius.large).strokeBorder(VoiceIQUI.Colors.outlineVariant.opacity(0.4), lineWidth: 1))
                     if text.isEmpty {
                         Text("Your words will land here.")
-                            .font(JotUI.TypeScale.bodyLarge())
-                            .foregroundStyle(JotUI.Colors.onSurfaceVariant.opacity(0.6))
-                            .padding(JotUI.Spacing.m)
+                            .font(VoiceIQUI.TypeScale.bodyLarge())
+                            .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant.opacity(0.6))
+                            .padding(VoiceIQUI.Spacing.m)
                             .allowsHitTesting(false)
                     }
                 }
@@ -958,16 +960,16 @@ private struct TryItScreen: View {
                         revealRow(label: "You said", value: raw, emphasized: false)
                         revealRow(label: "Voice IQ wrote", value: clean, emphasized: true)
                     }
-                    .padding(JotUI.Spacing.s)
+                    .padding(VoiceIQUI.Spacing.s)
                     .frame(width: 400, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: JotUI.Radius.medium).fill(JotUI.Colors.surfaceContainer))
+                    .background(RoundedRectangle(cornerRadius: VoiceIQUI.Radius.medium).fill(VoiceIQUI.Colors.surfaceContainer))
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 } else if celebrated {
                     ConfettiBurst()
                         .frame(height: 40)
                     Text("You just dictated \(text.split(separator: " ").count) words. That's the whole trick.")
-                        .font(JotUI.TypeScale.body())
-                        .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                        .font(VoiceIQUI.TypeScale.body())
+                        .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
                 }
                 // Words in the field = the moment to move forward. Skipping is a
                 // quiet option only while it's empty (dogfood: "Skip for now"
@@ -977,12 +979,12 @@ private struct TryItScreen: View {
                 } else {
                     Button("Skip for now", action: onNext)
                         .buttonStyle(.plain)
-                        .font(JotUI.TypeScale.body())
-                        .foregroundStyle(JotUI.Colors.onSurfaceVariant)
-                        .padding(.vertical, JotUI.Spacing.s)
+                        .font(VoiceIQUI.TypeScale.body())
+                        .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
+                        .padding(.vertical, VoiceIQUI.Spacing.s)
                 }
             }
-            .animation(JotMotion.expressiveDefaultSpatial, value: revealRaw)
+            .animation(VoiceIQMotion.expressiveDefaultSpatial, value: revealRaw)
         }
         .onChange(of: text) { _, newValue in
             if !celebrated, newValue.split(separator: " ").count >= 2 {
@@ -999,15 +1001,15 @@ private struct TryItScreen: View {
     }
 
     private func revealRow(label: String, value: String, emphasized: Bool) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: JotUI.Spacing.xs) {
+        HStack(alignment: .firstTextBaseline, spacing: VoiceIQUI.Spacing.xs) {
             Text(label)
-                .font(JotUI.TypeScale.labelSmall())
-                .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                .font(VoiceIQUI.TypeScale.labelSmall())
+                .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
                 .frame(width: 62, alignment: .trailing)
             Text(value)
-                .font(emphasized ? JotUI.TypeScale.body() : JotUI.TypeScale.labelSmall())
+                .font(emphasized ? VoiceIQUI.TypeScale.body() : VoiceIQUI.TypeScale.labelSmall())
                 .italic(!emphasized)
-                .foregroundStyle(emphasized ? JotUI.Colors.onSurface : JotUI.Colors.onSurfaceVariant)
+                .foregroundStyle(emphasized ? VoiceIQUI.Colors.onSurface : VoiceIQUI.Colors.onSurfaceVariant)
                 .lineLimit(2)
         }
     }
@@ -1075,14 +1077,14 @@ private struct DoneScreen: View {
 
     var body: some View {
         ScreenScaffold("You're set.", "Voice IQ lives in your menu bar now. Hold \(SettingsStore().hotkeyKey.displayName) anywhere and start talking.") {
-            VStack(spacing: JotUI.Spacing.m) {
+            VStack(spacing: VoiceIQUI.Spacing.m) {
                 // Same voice as the scaffold's subtitle — two type sizes on the
                 // page total (display + body), never three.
                 // "strips your ums" read as jargon to a first-time user (Kat,
                 // from the wild) — name the filler words plainly instead.
                 Text("It removes filler words like \"umm\" and \"uhh\", follows your change of mind, and takes \"new paragraph\" literally. Teach it your jargon in Settings → Dictionary.")
-                    .font(JotUI.TypeScale.body())
-                    .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                    .font(VoiceIQUI.TypeScale.body())
+                    .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: 480)
@@ -1118,7 +1120,7 @@ private struct ConfettiBurst: View {
         if reduceMotion {
             HStack(spacing: 4) {
                 ForEach(0..<4, id: \.self) { i in
-                    Circle().fill(JotUI.Colors.brandQuad[i]).frame(width: 8, height: 8)
+                    Circle().fill(VoiceIQUI.Colors.brandQuad[i]).frame(width: 8, height: 8)
                 }
             }
         } else {
@@ -1126,7 +1128,7 @@ private struct ConfettiBurst: View {
                 ZStack {
                     ForEach(0..<24, id: \.self) { i in
                         Circle()
-                            .fill(JotUI.Colors.brandQuad[i % 4])
+                            .fill(VoiceIQUI.Colors.brandQuad[i % 4])
                             .frame(width: 6, height: 6)
                             .offset(
                                 x: animate ? CGFloat((i * 37) % 200) - 100 : 0,

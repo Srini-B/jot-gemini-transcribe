@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import AppKit
-import JotCore
+import VoiceIQCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItemController: StatusItemController?
@@ -26,7 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let others = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
             .filter { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
         if !others.isEmpty {
-            Log.session.warning("another Jot instance is already running — quitting this one")
+            Log.session.warning("another Voice IQ instance is already running — quitting this one")
             NSApp.terminate(nil)
             return
         }

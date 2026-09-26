@@ -16,7 +16,7 @@ import AppKit
 import Combine
 import ServiceManagement
 import SwiftUI
-import JotCore
+import VoiceIQCore
 
 /// The one app window — System Settings idiom: icon-tile sidebar, grouped detail.
 /// Your data (History, Dictionary) on top; app configuration below.
@@ -69,7 +69,7 @@ final class MainWindowController: NSWindowController {
 
 enum MainSection: String, CaseIterable, Identifiable {
     case history, meetings, dictionary
-    case general, dictation, privacy, advanced
+    case dictation, privacy, advanced
     case about
     var id: String { rawValue }
 
@@ -78,7 +78,6 @@ enum MainSection: String, CaseIterable, Identifiable {
         case .history: return "History"
         case .meetings: return "Meetings"
         case .dictionary: return "Dictionary"
-        case .general: return "General"
         case .dictation: return "Dictation"
         case .privacy: return "Privacy & Storage"
         case .advanced: return "Advanced"
@@ -91,7 +90,6 @@ enum MainSection: String, CaseIterable, Identifiable {
         case .history: return "clock.arrow.circlepath"
         case .meetings: return "person.2.wave.2.fill"
         case .dictionary: return "character.book.closed.fill"
-        case .general: return "gearshape.fill"
         case .dictation: return "waveform"
         case .privacy: return "hand.raised.fill"
         case .advanced: return "wrench.and.screwdriver.fill"
@@ -101,10 +99,9 @@ enum MainSection: String, CaseIterable, Identifiable {
 
     var tileColor: Color {
         switch self {
-        case .history: return JotUI.Colors.gBlue
+        case .history: return VoiceIQUI.Colors.gBlue
         case .meetings: return Color(nsColor: .systemPurple)
         case .dictionary: return Color(nsColor: .systemOrange)
-        case .general: return Color(nsColor: .systemGray)
         case .dictation: return Color(nsColor: .systemTeal)
         case .privacy: return Color(nsColor: .systemGreen)
         case .advanced: return Color(nsColor: .systemIndigo)
@@ -113,7 +110,7 @@ enum MainSection: String, CaseIterable, Identifiable {
     }
 
     static let dataSections: [MainSection] = [.history, .meetings, .dictionary]
-    static let settingsSections: [MainSection] = [.general, .dictation, .privacy, .advanced, .about]
+    static let settingsSections: [MainSection] = [.dictation, .privacy, .advanced, .about]
 }
 
 @MainActor
@@ -132,7 +129,12 @@ private struct MainView: View {
     var body: some View {
         HStack(spacing: 0) {
             sidebar
-            Divider()
+            // Divider() stops at the safe-area top, so the line ended below the
+            // transparent titlebar. A rectangle can extend into it.
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor))
+                .frame(width: 1)
+                .ignoresSafeArea(.container, edges: .top)
             detail
         }
         .frame(minWidth: 880, minHeight: 580)
@@ -156,7 +158,7 @@ private struct MainView: View {
                 }
             }
             Text("Settings")
-                .font(JotUI.TypeScale.labelSmall())
+                .font(VoiceIQUI.TypeScale.labelSmall())
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 14)
                 .padding(.top, 16)
@@ -190,8 +192,6 @@ private struct MainView: View {
                 MeetingsPane(engine: meetings, store: meetings.store)
             case .dictionary:
                 DictionaryView()
-            case .general:
-                GeneralPane().formStyle(.grouped)
             case .dictation:
                 DictationPane().formStyle(.grouped)
             case .privacy:
@@ -225,16 +225,16 @@ private struct SidebarRow: View {
                     .frame(width: 22, height: 22)
                     .background(RoundedRectangle(cornerRadius: 6).fill(section.tileColor))
                 Text(section.title)
-                    .font(JotUI.TypeScale.body())
-                    .foregroundStyle(selected ? JotUI.Colors.onPrimary : .primary)
+                    .font(VoiceIQUI.TypeScale.body())
+                    .foregroundStyle(selected ? VoiceIQUI.Colors.onPrimary : .primary)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
             .background(
-                RoundedRectangle(cornerRadius: JotUI.Radius.small)
-                    .fill(selected ? JotUI.Colors.primary
-                          : hovering ? Color.primary.opacity(JotUI.StateLayer.hover)
+                RoundedRectangle(cornerRadius: VoiceIQUI.Radius.small)
+                    .fill(selected ? VoiceIQUI.Colors.primary
+                          : hovering ? Color.primary.opacity(VoiceIQUI.StateLayer.hover)
                           : .clear)
             )
         }
@@ -244,34 +244,17 @@ private struct SidebarRow: View {
     }
 }
 
-// MARK: - General
+// MARK: - Privacy & Storage
 
-struct GeneralPane: View {
+struct PrivacyPane: View {
+    let onDeleteAllHistory: () -> Void
     private let settings = SettingsStore()
-
-    @State private var hotkey = SettingsStore().hotkeyKey
-    @State private var doubleTapLock = SettingsStore().doubleTapLockEnabled
+    @State private var retentionDays = SettingsStore().audioRetentionDays
+    @State private var confirmingDelete = false
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
 
     var body: some View {
         Form {
-            Section {
-                Picker("Dictation key", selection: $hotkey) {
-                    ForEach(HotkeyKey.allCases, id: \.self) { key in
-                        Text(key.displayName).tag(key)
-                    }
-                }
-                .onChange(of: hotkey) { _, newKey in
-                    settings.setHotkeyKey(newKey)
-                }
-                Toggle("Double-tap to lock hands-free", isOn: $doubleTapLock)
-                    .onChange(of: doubleTapLock) { _, enabled in
-                        settings.setDoubleTapLock(enabled)
-                    }
-            } footer: {
-                Text("Hold to talk. Tap Space while holding to go hands-free. Esc cancels.")
-            }
-
             Section {
                 Toggle("Start Voice IQ at login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, enabled in
@@ -291,40 +274,7 @@ struct GeneralPane: View {
                         }
                     }
             }
-        }
-        // Login-item state lives in macOS, not in our defaults, so it can change
-        // with the app running — System Settings › General › Login Items turns it
-        // off without telling us. A stale ON toggle is worse than cosmetic here:
-        // the onChange guard above compares against the REAL status, so tapping
-        // the stale toggle decides nothing changed and silently does nothing.
-        // Re-reading on appear also covers reopening the window.
-        .onAppear {
-            launchAtLogin = SMAppService.mainApp.status == .enabled
-            hotkey = settings.hotkeyKey
-            doubleTapLock = settings.doubleTapLockEnabled
-        }
-        // The other panes guard the same way; these two can move under us from
-        // the DEBUG voiceiq://set driver.
-        .onReceive(NotificationCenter.default.publisher(for: .gtSettingDidChange).receive(on: RunLoop.main)) { note in
-            switch note.object as? String {
-            case "hotkeyKey": hotkey = settings.hotkeyKey
-            case "doubleTapLock": doubleTapLock = settings.doubleTapLockEnabled
-            default: break
-            }
-        }
-    }
-}
 
-// MARK: - Privacy & Storage
-
-struct PrivacyPane: View {
-    let onDeleteAllHistory: () -> Void
-    private let settings = SettingsStore()
-    @State private var retentionDays = SettingsStore().audioRetentionDays
-    @State private var confirmingDelete = false
-
-    var body: some View {
-        Form {
             Section {
                 Picker("Keep audio recordings", selection: $retentionDays) {
                     Text("Never (disables Retry)").tag(-1)
@@ -372,6 +322,10 @@ struct PrivacyPane: View {
                 }
             }
         }
+        // Login-item state lives in macOS, not in our defaults, so it can change
+        // with the app running — System Settings › General › Login Items turns it
+        // off without telling us. Re-reading on appear covers reopening the window.
+        .onAppear { launchAtLogin = SMAppService.mainApp.status == .enabled }
     }
 }
 
@@ -405,24 +359,27 @@ struct AdvancedPane: View {
         Form {
             Section {
                 HStack {
-                    SecureField("API key", text: $apiKey,
-                                prompt: Text(hasStoredKey ? "••••••••  (stored in Keychain)" : "Paste your key"))
-                        .font(JotUI.TypeScale.code)
+                    LabeledContent("API key") {
+                        SecureField("", text: $apiKey, prompt: Text(hasStoredKey ? "••••••••  (stored in Keychain)" : "Paste your key"))
+                            .labelsHidden()
+                            .font(VoiceIQUI.TypeScale.code)
+                            .multilineTextAlignment(.trailing)
+                    }
                     keyStatusBadge
                 }
                 if keyStatus == .invalid, KeychainStore.loadAPIKey() != nil {
                     Text("That key didn't work — your saved key is unchanged.")
-                        .font(JotUI.TypeScale.labelSmall())
-                        .foregroundStyle(JotUI.Colors.error)
+                        .font(VoiceIQUI.TypeScale.labelSmall())
+                        .foregroundStyle(VoiceIQUI.Colors.error)
                 }
                 if keyStatus == .saveFailed {
                     Text("The key validated but couldn't be saved to your Keychain — try again.")
-                        .font(JotUI.TypeScale.labelSmall())
-                        .foregroundStyle(JotUI.Colors.error)
+                        .font(VoiceIQUI.TypeScale.labelSmall())
+                        .foregroundStyle(VoiceIQUI.Colors.error)
                 }
                 if keyStatus == .savedOffline {
                     Text("You look offline — key saved; it'll be checked on your first dictation.")
-                        .font(JotUI.TypeScale.labelSmall())
+                        .font(VoiceIQUI.TypeScale.labelSmall())
                         .foregroundStyle(.secondary)
                 }
                 HStack {
@@ -433,7 +390,7 @@ struct AdvancedPane: View {
                     }
                     Spacer()
                     Link("Get a key in Google AI Studio", destination: URL(string: "https://aistudio.google.com/apikey")!)
-                        .font(JotUI.TypeScale.labelSmall())
+                        .font(VoiceIQUI.TypeScale.labelSmall())
                 }
             } header: {
                 Text("Gemini API key")
@@ -444,39 +401,51 @@ struct AdvancedPane: View {
             TinyFishKeySection()
 
             Section {
-                TextField("Endpoint", text: $endpoint,
-                          prompt: Text(Self.defaultConfig.endpoint.absoluteString))
-                    .font(JotUI.TypeScale.code)
-                    .onChange(of: endpoint) { _, value in
-                        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-                        settings.setEndpointOverride(trimmed.isEmpty ? nil : trimmed)
-                    }
+                LabeledContent("Endpoint") {
+                    TextField("", text: $endpoint, prompt: Text(Self.defaultConfig.endpoint.absoluteString))
+                        .labelsHidden()
+                        .font(VoiceIQUI.TypeScale.code)
+                        .multilineTextAlignment(.trailing)
+                }
+                .onChange(of: endpoint) { _, value in
+                    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                    settings.setEndpointOverride(trimmed.isEmpty ? nil : trimmed)
+                }
                 if endpointLooksBroken {
                     Text("Not a valid http(s) URL — the default endpoint is being used.")
-                        .font(JotUI.TypeScale.labelSmall())
-                        .foregroundStyle(JotUI.Colors.error)
+                        .font(VoiceIQUI.TypeScale.labelSmall())
+                        .foregroundStyle(VoiceIQUI.Colors.error)
                 }
-                TextField("Transcription model", text: $transcribeModel,
-                          prompt: Text(Self.defaultConfig.transcribeModel))
-                    .font(JotUI.TypeScale.code)
-                    .onChange(of: transcribeModel) { _, value in
-                        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-                        settings.setTranscribeModelOverride(trimmed.isEmpty ? nil : trimmed)
-                    }
-                TextField("Live transcription model", text: $liveModel,
-                          prompt: Text(Self.defaultConfig.liveModel))
-                    .font(JotUI.TypeScale.code)
-                    .onChange(of: liveModel) { _, value in
-                        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-                        settings.setLiveModelOverride(trimmed.isEmpty ? nil : trimmed)
-                    }
-                TextField("Formatting model", text: $cleanupModel,
-                          prompt: Text(Self.defaultConfig.cleanupModel))
-                    .font(JotUI.TypeScale.code)
-                    .onChange(of: cleanupModel) { _, value in
-                        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-                        settings.setCleanupModelOverride(trimmed.isEmpty ? nil : trimmed)
-                    }
+                LabeledContent("Transcription model") {
+                    TextField("", text: $transcribeModel, prompt: Text(Self.defaultConfig.transcribeModel))
+                        .labelsHidden()
+                        .font(VoiceIQUI.TypeScale.code)
+                        .multilineTextAlignment(.trailing)
+                }
+                .onChange(of: transcribeModel) { _, value in
+                    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                    settings.setTranscribeModelOverride(trimmed.isEmpty ? nil : trimmed)
+                }
+                LabeledContent("Live transcription model") {
+                    TextField("", text: $liveModel, prompt: Text(Self.defaultConfig.liveModel))
+                        .labelsHidden()
+                        .font(VoiceIQUI.TypeScale.code)
+                        .multilineTextAlignment(.trailing)
+                }
+                .onChange(of: liveModel) { _, value in
+                    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                    settings.setLiveModelOverride(trimmed.isEmpty ? nil : trimmed)
+                }
+                LabeledContent("Formatting model") {
+                    TextField("", text: $cleanupModel, prompt: Text(Self.defaultConfig.cleanupModel))
+                        .labelsHidden()
+                        .font(VoiceIQUI.TypeScale.code)
+                        .multilineTextAlignment(.trailing)
+                }
+                .onChange(of: cleanupModel) { _, value in
+                    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                    settings.setCleanupModelOverride(trimmed.isEmpty ? nil : trimmed)
+                }
             } header: {
                 Text("Model overrides")
             } footer: {
@@ -511,9 +480,9 @@ struct AdvancedPane: View {
         case .validating:
             ProgressView().controlSize(.small)
         case .valid:
-            Image(systemName: "checkmark.circle.fill").foregroundStyle(JotUI.Colors.success)
+            Image(systemName: "checkmark.circle").foregroundStyle(VoiceIQUI.Colors.success)
         case .invalid, .saveFailed:
-            Image(systemName: "xmark.circle.fill").foregroundStyle(JotUI.Colors.error)
+            Image(systemName: "xmark.circle.fill").foregroundStyle(VoiceIQUI.Colors.error)
         }
     }
 
@@ -559,7 +528,7 @@ struct AboutPane: View {
     }
 
     var body: some View {
-        VStack(spacing: JotUI.Spacing.m) {
+        VStack(spacing: VoiceIQUI.Spacing.m) {
             Spacer()
             if let icon = NSApp.applicationIconImage ?? NSImage(named: NSImage.applicationIconName) {
                 Image(nsImage: icon)
@@ -569,11 +538,11 @@ struct AboutPane: View {
             }
             VStack(spacing: 4) {
                 Text("Voice IQ")
-                    .font(JotUI.TypeScale.display())
-                    .foregroundStyle(JotUI.Colors.onSurface)
+                    .font(VoiceIQUI.TypeScale.display())
+                    .foregroundStyle(VoiceIQUI.Colors.onSurface)
                 Text(version)
-                    .font(JotUI.TypeScale.body())
-                    .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                    .font(VoiceIQUI.TypeScale.body())
+                    .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
             }
             Spacer()
         }

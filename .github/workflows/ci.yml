@@ -21,12 +21,12 @@ on:
 
 jobs:
   core-tests:
-    name: JotCore tests
+    name: VoiceIQCore tests
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - name: Run package tests
-        run: swift test --package-path JotCore
+        run: swift test --package-path VoiceIQCore
 
   app-build:
     name: App build
@@ -40,8 +40,8 @@ jobs:
       - name: Build (unsigned)
         run: |
           xcodebuild build \
-            -project Jot.xcodeproj \
-            -scheme Jot \
+            -project VoiceIQ.xcodeproj \
+            -scheme VoiceIQ \
             -configuration Debug \
             -destination 'platform=macOS' \
             CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM= \

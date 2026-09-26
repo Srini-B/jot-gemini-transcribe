@@ -14,7 +14,7 @@
 
 import AVFoundation
 import Foundation
-import JotCore
+import VoiceIQCore
 
 /// Keeps one capture graph built and prepared while the app is idle, so a key
 /// press pays only `engine.start()`.

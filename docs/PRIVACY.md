@@ -107,8 +107,8 @@ the clipboard.
 - Watch traffic with Little Snitch or `nettop` — you'll see exactly one host
   (two TinyFish hosts appear only after you add a TinyFish key).
 - Read the prompts: they are source files. The writing-rules pass is
-  [PromptV1.swift](../JotCore/Sources/FormattingPipeline/PromptV1.swift) plus
+  [PromptV1.swift](../VoiceIQCore/Sources/FormattingPipeline/PromptV1.swift) plus
   the default custom instructions in
-  [DictationRulesSeed.swift](../JotCore/Sources/FormattingPipeline/DictationRulesSeed.swift);
+  [DictationRulesSeed.swift](../VoiceIQCore/Sources/FormattingPipeline/DictationRulesSeed.swift);
   meeting transcription and summarising are in
-  [GeminiClient+Meetings.swift](../JotCore/Sources/TranscriptionClient/GeminiClient+Meetings.swift).
+  [GeminiClient+Meetings.swift](../VoiceIQCore/Sources/TranscriptionClient/GeminiClient+Meetings.swift).

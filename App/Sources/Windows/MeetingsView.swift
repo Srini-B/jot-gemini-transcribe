@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import AppKit
-import JotCore
+import VoiceIQCore
 import SwiftUI
 
 struct MeetingsPane: View {
@@ -29,8 +29,8 @@ struct MeetingsPane: View {
         HStack(spacing: 0) {
             List(meetings, selection: $selection) { meeting in
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(meeting.title ?? meeting.startedAt.formatted(date: .abbreviated, time: .shortened)).font(.headline)
-                    Text("\(duration(meeting.durationSeconds)) · \(status(meeting.status))").font(.caption).foregroundStyle(.secondary)
+                    Text(meeting.title ?? meeting.startedAt.formatted(date: .abbreviated, time: .shortened)).font(VoiceIQUI.TypeScale.body())
+                    Text("\(duration(meeting.durationSeconds)) · \(status(meeting.status))").font(VoiceIQUI.TypeScale.labelSmall()).foregroundStyle(.secondary)
                 }.tag(meeting.id)
             }
             .overlay { if meetings.isEmpty { Text("No meetings yet").foregroundStyle(.secondary) } }
@@ -54,24 +54,27 @@ struct MeetingsPane: View {
             Spacer()
             Button("Export", systemImage: "square.and.arrow.up") { export() }.disabled(selection == nil)
             Button("Delete", systemImage: "trash", role: .destructive) { remove() }.disabled(selection == nil)
-        }.padding()
+        }
+        .padding(.horizontal, VoiceIQUI.Spacing.l)
+        .padding(.top, VoiceIQUI.Spacing.l)
+        .padding(.bottom, VoiceIQUI.Spacing.s)
     }
 
     private func detail(_ meeting: MeetingMeta) -> some View {
         VStack(spacing: 0) {
             Picker("View", selection: $tab) { Text("Notes").tag(0); Text("Transcript").tag(1) }
-                .pickerStyle(.segmented).padding(.horizontal)
-            ScrollView { if tab == 0 { notesView } else { transcriptView(meeting) } }.padding()
+                .pickerStyle(.segmented).padding(.horizontal, VoiceIQUI.Spacing.l)
+            ScrollView { if tab == 0 { notesView } else { transcriptView(meeting) } }.padding(VoiceIQUI.Spacing.l)
         }
     }
 
     private var notesView: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(notes?.title ?? "Meeting").font(.title2.bold())
+            Text(notes?.title ?? "Meeting").font(VoiceIQUI.TypeScale.title())
             section("Summary", notes.map { [$0.summary] } ?? [])
             section("Decisions", notes?.decisions ?? [])
             if let actions = notes?.actions, !actions.isEmpty {
-                VStack(alignment: .leading, spacing: 8) { Text("Action items").font(.headline); ForEach(Array(actions.enumerated()), id: \.offset) { _, item in Text("• \(item.text)\(actionSuffix(item))") } }
+                VStack(alignment: .leading, spacing: 8) { Text("Action items").font(VoiceIQUI.TypeScale.labelSmall()).foregroundStyle(.secondary); ForEach(Array(actions.enumerated()), id: \.offset) { _, item in Text("• \(item.text)\(actionSuffix(item))") } }
             }
             section("Notes", notes?.notes ?? [])
         }.frame(maxWidth: .infinity, alignment: .leading)
@@ -89,7 +92,7 @@ struct MeetingsPane: View {
     }
 
     private func section(_ title: String, _ items: [String]) -> some View {
-        Group { if !items.isEmpty { VStack(alignment: .leading, spacing: 8) { Text(title).font(.headline); ForEach(items, id: \.self) { Text(items.count == 1 ? $0 : "• \($0)") } } } }
+        Group { if !items.isEmpty { VStack(alignment: .leading, spacing: 8) { Text(title).font(VoiceIQUI.TypeScale.labelSmall()).foregroundStyle(.secondary); ForEach(items, id: \.self) { Text(items.count == 1 ? $0 : "• \($0)") } } } }
     }
     private var selected: MeetingMeta? { meetings.first { $0.id == selection } }
     private var recording: Bool { if case .recording = engine.phase { return true }; return false }

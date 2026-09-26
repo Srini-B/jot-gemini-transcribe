@@ -148,7 +148,7 @@ A few decisions worth knowing about, because they are what make it feel solid:
   It never blind-pastes into an app that stole focus mid-flight.
 - **A validation gate** guards the writing-rules pass, catching the classic failure where the model *answers*
   your audio instead of transcribing it, and falls back to the raw transcript.
-- **The paths that can lose words are tested.** `JotCore` is a headless Swift
+- **The paths that can lose words are tested.** `VoiceIQCore` is a headless Swift
   package holding the state machine, hotkey grammar, audio, transcription,
   formatting, insertion and history — so the failure modes above are exercised
   without launching the app.
@@ -164,8 +164,8 @@ The `.xcodeproj` is generated, not checked in.
 ```bash
 brew install xcodegen
 ./scripts/build.sh          # xcodegen generate + xcodebuild
-./scripts/test.sh           # swift test on JotCore
-open Jot.xcodeproj          # or work in Xcode
+./scripts/test.sh           # swift test on VoiceIQCore
+open VoiceIQ.xcodeproj          # or work in Xcode
 ```
 
 Debug builds sign ad-hoc, so a clean clone needs no Apple account, certificate,
@@ -175,7 +175,7 @@ builds (`scripts/release.sh`) need a real Developer ID.
 
 ```
 App/            menu bar item, HUD pill, windows, design tokens, icon + sounds
-JotCore/        all engine logic, headless and testable
+VoiceIQCore/        all engine logic, headless and testable
   HotkeyEngine/     CGEventTap + the pure hold/lock/cancel grammar
   AudioEngine/      crash-safe CAF capture, device changes, prewarming
   TranscriptionClient/  Gemini calls, timeouts, retries, FLAC
@@ -190,7 +190,7 @@ Useful while hacking:
 
 ```bash
 # every surface is reachable headlessly
-open "voiceiq://settings/about"      # or /general /dictation /privacy /advanced
+open "voiceiq://settings/about"      # or /dictation /privacy /advanced
 open "voiceiq://history"  "voiceiq://dictionary"  "voiceiq://onboarding/5"
 
 # watch it work

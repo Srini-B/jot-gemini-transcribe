@@ -14,7 +14,7 @@
 
 import AppKit
 import CoreAudio
-import JotCore
+import VoiceIQCore
 
 /// Owns the NSStatusItem. Plain NSStatusItem (not MenuBarExtra) so the template
 /// icon can pulse for listening and processing states.
@@ -53,7 +53,7 @@ final class StatusItemController: NSObject {
         self.templateImage = Self.loadTemplateImage()
         super.init()
 
-        statusItem.button?.image = renderedTemplate(alpha: 1)
+        statusItem.button?.image = templateImage
         statusItem.button?.toolTip = "Voice IQ"
         statusItem.menu = makeMenu()
     }
@@ -67,11 +67,14 @@ final class StatusItemController: NSObject {
 
         switch newState {
         case .idle:
-            statusItem.button?.image = renderedTemplate(alpha: 1)
+            statusItem.button?.alphaValue = 1
         case .attention:
-            statusItem.button?.image = renderedTemplate(alpha: 0.4)
+            statusItem.button?.alphaValue = 0.4
         case .listening, .processing:
-            animationTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+            // Pulse the button's alpha rather than redrawing the image: a fresh
+            // NSImage per frame at 30 fps made the status item re-measure and
+            // recommit its scene on every tick for the whole dictation.
+            animationTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 15.0, repeats: true) { [weak self] _ in
                 self?.tickAnimation()
             }
             tickAnimation()
@@ -81,24 +84,13 @@ final class StatusItemController: NSObject {
     private func tickAnimation() {
         let duration = state == .listening ? 0.7 : 1.2
         let phase = Date().timeIntervalSince(animationStartedAt) / duration * 2 * Double.pi
-        let alpha = 0.725 + 0.275 * CGFloat(sin(phase))
-        statusItem.button?.image = renderedTemplate(alpha: alpha)
+        statusItem.button?.alphaValue = 0.725 + 0.275 * CGFloat(sin(phase))
     }
 
     private static func loadTemplateImage() -> NSImage {
         guard let bundled = Bundle.main.image(forResource: "MenuBarIcon"),
               let image = bundled.copy() as? NSImage else { return NSImage(size: NSSize(width: 18, height: 18)) }
         image.size = NSSize(width: 18, height: 18)
-        image.isTemplate = true
-        return image
-    }
-
-    private func renderedTemplate(alpha: CGFloat) -> NSImage {
-        let size = NSSize(width: 18, height: 18)
-        let image = NSImage(size: size, flipped: false) { _ in
-            self.templateImage.draw(in: NSRect(origin: .zero, size: size), from: .zero, operation: .sourceOver, fraction: alpha)
-            return true
-        }
         image.isTemplate = true
         return image
     }

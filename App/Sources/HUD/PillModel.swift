@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import JotCore
+import VoiceIQCore
 import SwiftUI
 
 /// The pill's semantic state — a pure projection of coordinator state
@@ -30,10 +30,20 @@ enum PillState: Equatable {
     case error(String)
 }
 
+/// Microphone level for the waveform. A plain reference, not published: the
+/// level arrives ~30 times a second, and publishing it rebuilt the whole pill
+/// view and re-laid out its hosting view on every tick. The waveform's Canvas
+/// reads the latest value on its own timeline instead.
+@MainActor
+final class LevelSource {
+    var value: Float = 0
+
+    static let silent = LevelSource()
+}
+
 @MainActor
 final class PillModel: ObservableObject {
     @Published var state: PillState = .idleDot
-    @Published var level: Float = 0
     @Published var elapsed: TimeInterval = 0
     /// Still-working slow state (>3s in processing — TimeoutPolicy.slowStateUI).
     @Published var slow = false
@@ -41,9 +51,5 @@ final class PillModel: ObservableObject {
     /// only: this is a guess the model is still revising, and it is never what
     /// gets inserted.
     @Published var partial: String = ""
-    /// Changes once per dictation, when the finished transcript replaces the
-    /// running guess. Drives the Gemini sweep.
-    @Published var corrected: String = ""
-    /// The kept/cut runs to animate. Empty means show plain text.
-    @Published var correction: [TranscriptDiff.Segment] = []
+    let level = LevelSource()
 }

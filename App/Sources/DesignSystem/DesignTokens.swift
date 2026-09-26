@@ -15,10 +15,10 @@
 import SwiftUI
 import AppKit
 
-/// JotUI — the Jot design tokens. Every color, type style, radius,
+/// VoiceIQUI — the Voice IQ design tokens. Every color, type style, radius,
 /// spacing and state-layer value in the app comes from here; views contain no
 /// magic values. Contract: docs/design/experience.md §3 (GM3 production values).
-enum JotUI {
+enum VoiceIQUI {
 
     // MARK: - Color
 

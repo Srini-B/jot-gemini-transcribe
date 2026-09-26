@@ -14,7 +14,7 @@
 
 import AppKit
 import SwiftUI
-import JotCore
+import VoiceIQCore
 
 /// The dictionary manager: teach it your words once, they're spelled right forever.
 /// Terms ride in the cleanup prompt; explicit misspelling rules are enforced
@@ -35,6 +35,7 @@ struct DictionaryView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            searchRow
             addRow
             if entries.isEmpty {
                 emptyState
@@ -46,27 +47,46 @@ struct DictionaryView: View {
         .onAppear(perform: reload)
     }
 
+    // Same field as History's header, so the two data panes share one header
+    // shape and the window titlebar stays a plain title (a toolbar search field
+    // restyled the titlebar and pushed the sidebar down on this pane only).
+    private var searchRow: some View {
+        HStack(spacing: VoiceIQUI.Spacing.xs) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Search your dictionary", text: $search)
+                .textFieldStyle(.plain)
+                .font(VoiceIQUI.TypeScale.body(grad: grad))
+        }
+        .padding(.horizontal, VoiceIQUI.Spacing.s)
+        .padding(.vertical, 7)
+        .background(RoundedRectangle(cornerRadius: VoiceIQUI.Radius.small).fill(.quaternary.opacity(0.5)))
+        .padding(.horizontal, VoiceIQUI.Spacing.l)
+        .padding(.top, VoiceIQUI.Spacing.l)
+    }
+
     private var addRow: some View {
-        HStack(spacing: JotUI.Spacing.xs) {
+        HStack(spacing: VoiceIQUI.Spacing.xs) {
             TextField("Add a word or phrase…", text: $newTerm)
                 .textFieldStyle(.plain)
-                .font(JotUI.TypeScale.body(grad: grad))
+                .font(VoiceIQUI.TypeScale.body(grad: grad))
                 .onSubmit(add)
             TextField("Gemini hears it as… (optional)", text: $newMisspelling)
                 .textFieldStyle(.plain)
-                .font(JotUI.TypeScale.body(grad: grad))
-                .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                .font(VoiceIQUI.TypeScale.body(grad: grad))
+                .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
                 .onSubmit(add)
             Button(action: add) {
                 Image(systemName: "plus.circle.fill")
-                    .foregroundStyle(newTerm.isEmpty ? JotUI.Colors.onSurfaceVariant : JotUI.Colors.primary)
+                    .foregroundStyle(newTerm.isEmpty ? VoiceIQUI.Colors.onSurfaceVariant : VoiceIQUI.Colors.primary)
             }
             .buttonStyle(.plain)
             .disabled(newTerm.isEmpty)
         }
-        .padding(JotUI.Spacing.s)
-        .background(RoundedRectangle(cornerRadius: JotUI.Radius.medium).fill(JotUI.Colors.surfaceContainer))
-        .padding(JotUI.Spacing.m)
+        .padding(VoiceIQUI.Spacing.s)
+        .background(RoundedRectangle(cornerRadius: VoiceIQUI.Radius.medium).fill(VoiceIQUI.Colors.surfaceContainer))
+        .padding(.horizontal, VoiceIQUI.Spacing.l)
+        .padding(.vertical, VoiceIQUI.Spacing.s)
     }
 
     private var filtered: [DictionaryEntry] {
@@ -98,29 +118,28 @@ struct DictionaryView: View {
         }
         .listStyle(.inset)
         .scrollContentBackground(.hidden)
-        .searchable(text: $search, placement: .automatic, prompt: "Search")
     }
 
     private func entryRow(_ entry: DictionaryEntry) -> some View {
-        HStack(spacing: JotUI.Spacing.s) {
+        HStack(spacing: VoiceIQUI.Spacing.s) {
             Button {
                 store.toggleStar(id: entry.id)
                 reload()
             } label: {
                 Image(systemName: entry.starred ? "star.fill" : "star")
-                    .foregroundStyle(entry.starred ? JotUI.Colors.gYellow : JotUI.Colors.onSurfaceVariant.opacity(0.5))
+                    .foregroundStyle(entry.starred ? VoiceIQUI.Colors.gYellow : VoiceIQUI.Colors.onSurfaceVariant.opacity(0.5))
             }
             .buttonStyle(.plain)
             .help("Starred words are prioritized")
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.term)
-                    .font(JotUI.TypeScale.body(grad: grad))
-                    .foregroundStyle(JotUI.Colors.onSurface)
+                    .font(VoiceIQUI.TypeScale.body(grad: grad))
+                    .foregroundStyle(VoiceIQUI.Colors.onSurface)
                 if let misspelling = entry.misspelling, !misspelling.isEmpty {
                     Text("\"\(misspelling)\" → \(entry.term)")
-                        .font(JotUI.TypeScale.labelSmall(grad: grad))
-                        .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                        .font(VoiceIQUI.TypeScale.labelSmall(grad: grad))
+                        .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
                 }
             }
             Spacer()
@@ -130,7 +149,7 @@ struct DictionaryView: View {
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 10))
-                    .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                    .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
             }
             .buttonStyle(.plain)
         }
@@ -138,17 +157,17 @@ struct DictionaryView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: JotUI.Spacing.s) {
+        VStack(spacing: VoiceIQUI.Spacing.s) {
             Spacer()
             Image(systemName: "character.book.closed")
                 .font(.system(size: 28))
-                .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
             Text("Teach it your words")
-                .font(JotUI.TypeScale.title(grad: grad))
-                .foregroundStyle(JotUI.Colors.onSurface)
+                .font(VoiceIQUI.TypeScale.title(grad: grad))
+                .foregroundStyle(VoiceIQUI.Colors.onSurface)
             Text("Names, jargon, product terms — add them once,\nthey're spelled right in every dictation.")
-                .font(JotUI.TypeScale.body(grad: grad))
-                .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                .font(VoiceIQUI.TypeScale.body(grad: grad))
+                .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
                 .multilineTextAlignment(.center)
             Spacer()
         }
@@ -158,17 +177,18 @@ struct DictionaryView: View {
     private var footer: some View {
         HStack {
             Text(feedback ?? "\(entries.count) \(entries.count == 1 ? "word" : "words")")
-                .font(JotUI.TypeScale.labelSmall(grad: grad))
-                .foregroundStyle(feedback == nil ? JotUI.Colors.onSurfaceVariant : JotUI.Colors.primary)
+                .font(VoiceIQUI.TypeScale.labelSmall(grad: grad))
+                .foregroundStyle(feedback == nil ? VoiceIQUI.Colors.onSurfaceVariant : VoiceIQUI.Colors.primary)
             Spacer()
             Button("Import CSV…", action: importCSV)
-                .font(JotUI.TypeScale.labelSmall(grad: grad))
+                .font(VoiceIQUI.TypeScale.labelSmall(grad: grad))
             Button("Export CSV…", action: exportCSV)
-                .font(JotUI.TypeScale.labelSmall(grad: grad))
+                .font(VoiceIQUI.TypeScale.labelSmall(grad: grad))
                 .disabled(entries.isEmpty)
         }
         .buttonStyle(.link)
-        .padding(JotUI.Spacing.m)
+        .padding(.horizontal, VoiceIQUI.Spacing.l)
+        .padding(.vertical, VoiceIQUI.Spacing.s)
     }
 
     // MARK: - Actions
@@ -210,7 +230,7 @@ struct DictionaryView: View {
 
     private func exportCSV() {
         let panel = NSSavePanel()
-        panel.nameFieldStringValue = "jot-dictionary.csv"
+        panel.nameFieldStringValue = "voiceiq-dictionary.csv"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             try store.exportCSV().write(to: url, atomically: true, encoding: .utf8)

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import JotCore
+import VoiceIQCore
 import SwiftUI
 
 // MARK: - Dictation
@@ -37,6 +37,9 @@ struct DictationPane: View {
 
     var body: some View {
         Form {
+            DictationKeySection()
+            PermissionsSection()
+
             Section("Shortcuts") {
                 ShortcutRecorderRow(title: "Paste last transcript", action: .pasteLastTranscript)
                 ShortcutRecorderRow(title: "Ask Anything", action: .askAnything)
@@ -165,7 +168,7 @@ struct DictationPane: View {
             }
         }
         .onAppear { microphones = AudioInputDevices.list() }
-        .onReceive(NotificationCenter.default.publisher(for: .jotInputDevicesChanged).receive(on: RunLoop.main)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .voiceIQInputDevicesChanged).receive(on: RunLoop.main)) { _ in
             microphones = AudioInputDevices.list()
         }
         .onReceive(NotificationCenter.default.publisher(for: .gtSettingDidChange).receive(on: RunLoop.main)) { note in
@@ -221,9 +224,9 @@ private struct LanguagePicker: View {
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 5)
                                 .background(
-                                    RoundedRectangle(cornerRadius: JotUI.Radius.small)
+                                    RoundedRectangle(cornerRadius: VoiceIQUI.Radius.small)
                                         .fill(language.name == selected
-                                              ? Color.primary.opacity(JotUI.StateLayer.hover) : .clear)
+                                              ? Color.primary.opacity(VoiceIQUI.StateLayer.hover) : .clear)
                                 )
                                 .contentShape(Rectangle())
                         }

@@ -44,8 +44,8 @@ fi
 # breaks SPM's bare clone cache.
 exec env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.bareRepository GIT_CONFIG_VALUE_0=all \
   xcodebuild build \
-    -project Jot.xcodeproj \
-    -scheme Jot \
+    -project VoiceIQ.xcodeproj \
+    -scheme VoiceIQ \
     -configuration Debug \
     -destination 'platform=macOS,arch=arm64' \
     -quiet "${signing_args[@]}" "$@"

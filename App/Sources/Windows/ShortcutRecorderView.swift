@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0.
 
 import AppKit
-import JotCore
+import VoiceIQCore
 import SwiftUI
 
 struct ShortcutRecorderRow: View {
@@ -50,7 +50,7 @@ struct ShortcutRecorderRow: View {
                 .help("Reset shortcut")
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .jotShortcutDidChange)) { note in
+        .onReceive(NotificationCenter.default.publisher(for: .voiceIQShortcutDidChange)) { note in
             guard note.object as? ShortcutAction == action else { return }
             shortcut = store.shortcut(for: action)
         }

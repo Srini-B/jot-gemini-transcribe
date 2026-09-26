@@ -1,7 +1,7 @@
 // Copyright 2026 Google LLC
 // Licensed under the Apache License, Version 2.0.
 
-import JotCore
+import VoiceIQCore
 import SwiftUI
 
 /// Settings → Advanced: the TinyFish key that lets Ask Anything search the
@@ -15,29 +15,32 @@ struct TinyFishKeySection: View {
     var body: some View {
         Section {
             HStack {
-                SecureField("API key", text: $apiKey,
-                            prompt: Text(hasStoredKey ? "••••••••  (stored in Keychain)" : "Paste your key"))
-                    .font(JotUI.TypeScale.code)
+                LabeledContent("API key") {
+                    SecureField("", text: $apiKey, prompt: Text(hasStoredKey ? "••••••••  (stored in Keychain)" : "Paste your key"))
+                        .labelsHidden()
+                        .font(VoiceIQUI.TypeScale.code)
+                        .multilineTextAlignment(.trailing)
+                }
                 keyStatusBadge
             }
             if keyStatus == .invalid, KeychainStore.loadTinyFishKey() != nil {
                 Text("That key didn't work — your saved key is unchanged.")
-                    .font(JotUI.TypeScale.labelSmall())
-                    .foregroundStyle(JotUI.Colors.error)
+                    .font(VoiceIQUI.TypeScale.labelSmall())
+                    .foregroundStyle(VoiceIQUI.Colors.error)
             }
             if keyStatus == .invalid, KeychainStore.loadTinyFishKey() == nil {
                 Text("TinyFish rejected that key, or the account has no Search access.")
-                    .font(JotUI.TypeScale.labelSmall())
-                    .foregroundStyle(JotUI.Colors.error)
+                    .font(VoiceIQUI.TypeScale.labelSmall())
+                    .foregroundStyle(VoiceIQUI.Colors.error)
             }
             if keyStatus == .saveFailed {
                 Text("The key validated but couldn't be saved to your Keychain — try again.")
-                    .font(JotUI.TypeScale.labelSmall())
-                    .foregroundStyle(JotUI.Colors.error)
+                    .font(VoiceIQUI.TypeScale.labelSmall())
+                    .foregroundStyle(VoiceIQUI.Colors.error)
             }
             if keyStatus == .savedOffline {
                 Text("You look offline — key saved; it'll be checked on your first Ask Anything.")
-                    .font(JotUI.TypeScale.labelSmall())
+                    .font(VoiceIQUI.TypeScale.labelSmall())
                     .foregroundStyle(.secondary)
             }
             HStack {
@@ -48,7 +51,7 @@ struct TinyFishKeySection: View {
                 }
                 Spacer()
                 Link("Get a key at TinyFish", destination: URL(string: "https://agent.tinyfish.ai/api-keys")!)
-                    .font(JotUI.TypeScale.labelSmall())
+                    .font(VoiceIQUI.TypeScale.labelSmall())
             }
         } header: {
             Text("TinyFish API key")
@@ -72,9 +75,9 @@ struct TinyFishKeySection: View {
         case .validating:
             ProgressView().controlSize(.small)
         case .valid:
-            Image(systemName: "checkmark.circle.fill").foregroundStyle(JotUI.Colors.success)
+            Image(systemName: "checkmark.circle").foregroundStyle(VoiceIQUI.Colors.success)
         case .invalid, .saveFailed:
-            Image(systemName: "xmark.circle.fill").foregroundStyle(JotUI.Colors.error)
+            Image(systemName: "xmark.circle.fill").foregroundStyle(VoiceIQUI.Colors.error)
         }
     }
 

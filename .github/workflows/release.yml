@@ -68,7 +68,7 @@ jobs:
             exit 0
           fi
           echo "$NOTARY_KEY" > notary.p8
-          xcrun notarytool store-credentials jot-notary \
+          xcrun notarytool store-credentials voiceiq-notary \
             --key notary.p8 --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER"
 
       - name: Build release DMG

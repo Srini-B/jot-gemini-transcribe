@@ -38,7 +38,7 @@ struct AnswerView: View {
         }
         .padding(18)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(JotUI.Colors.surface)
+        .background(VoiceIQUI.Colors.surface)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .shadow(color: .black.opacity(0.2), radius: 16, y: 4)
     }
@@ -69,5 +69,5 @@ struct AnswerView: View {
 }
 
 extension Notification.Name {
-    static let pillAnswerDismissed = Notification.Name("com.ammaar.jot.pill.answer.dismissed")
+    static let pillAnswerDismissed = Notification.Name("io.blue.voiceiq.pill.answer.dismissed")
 }

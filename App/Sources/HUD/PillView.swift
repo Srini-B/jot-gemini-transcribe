@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import SwiftUI
-import JotCore
+import VoiceIQCore
 
 /// The pill — geometry, states, and transitions per docs/design/experience.md §1.
 /// Heights 48pt (full pill), state-specific widths, M3 motion tokens throughout:
@@ -40,7 +40,7 @@ struct PillView: View {
     }
 
     private var spatial: Animation {
-        reduceMotion ? .linear(duration: 0.15) : JotMotion.expressiveDefaultSpatial
+        reduceMotion ? .linear(duration: 0.15) : VoiceIQMotion.expressiveDefaultSpatial
     }
 
     @ViewBuilder
@@ -58,24 +58,24 @@ struct PillView: View {
             // and tail-anchored so a long dictation scrolls rather than pushing
             // the panel past its bounds.
             pillSurface(width: model.partial.isEmpty ? (locked ? 268 : 200) : 520) {
-                HStack(spacing: JotUI.Spacing.s) {
+                HStack(spacing: VoiceIQUI.Spacing.s) {
                     if locked {
                         Image(systemName: "lock.fill")
                             .font(.system(size: 11))
-                            .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                            .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
                         Text(timerText)
-                            .font(JotUI.TypeScale.numeric())
-                            .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                            .font(VoiceIQUI.TypeScale.numeric())
+                            .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
                     } else if model.elapsed >= 10 {
                         Text(timerText)
-                            .font(JotUI.TypeScale.numeric())
-                            .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                            .font(VoiceIQUI.TypeScale.numeric())
+                            .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
                     }
                     WaveformView(level: model.level, processing: false)
                     if !model.partial.isEmpty {
                         Text(model.partial)
-                            .font(JotUI.TypeScale.labelSmall())
-                            .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                            .font(VoiceIQUI.TypeScale.labelSmall())
+                            .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
                             .lineLimit(1)
                             .truncationMode(.head) // the newest words matter most
                             .frame(maxWidth: .infinity, alignment: .trailing)
@@ -83,8 +83,6 @@ struct PillView: View {
                             // change would make it jitter continuously.
                             .animation(nil, value: model.partial)
                             .accessibilityHidden(true) // VoiceOver must not read a moving guess
-                            // Sweeps once when the finished text lands.
-                            .geminiSweep(trigger: model.corrected)
                     }
                     if locked {
                         stopButton
@@ -93,50 +91,18 @@ struct PillView: View {
             }
 
         case .processing:
-            // In live mode the sentence is already on screen, so keep it there.
-            // Swapping it for generic bars at key-up throws away the words the
-            // user just watched arrive AND removes the thing the correction is
-            // about to happen to — the sweep fires on text that is no longer
-            // rendered, so the moment is invisible. The batch path has no partial
-            // and still gets the bars, unchanged.
-            if model.partial.isEmpty {
-                pillSurface(width: model.slow ? 220 : 132) {
-                    HStack(spacing: JotUI.Spacing.s) {
-                        WaveformView(level: 0, processing: true)
-                        if model.slow {
-                            Text("Still working…")
-                                .font(JotUI.TypeScale.label())
-                                .foregroundStyle(JotUI.Colors.onSurfaceVariant)
-                                .transition(.opacity)
-                        }
-                    }
-                }
-            } else {
-                pillSurface(width: 520) {
-                    HStack(spacing: JotUI.Spacing.s) {
-                        // A small four-colour tick keeps "working" legible while
-                        // the sentence holds its place.
-                        WaveformView(level: 0, processing: true)
-                            .frame(width: 34)
-                        if model.correction.isEmpty {
-                            Text(model.partial)
-                                .font(JotUI.TypeScale.labelSmall())
-                                .foregroundStyle(JotUI.Colors.onSurfaceVariant)
-                                .lineLimit(1)
-                                .truncationMode(.head)
-                                .frame(maxWidth: .infinity, alignment: .trailing)
-                                .animation(nil, value: model.partial)
-                                .accessibilityHidden(true)
-                                .geminiSweep(trigger: model.corrected)
-                        } else {
-                            // The edit itself: fillers and self-corrections struck
-                            // out, then closed up. Keyed on the corrected text so a
-                            // second dictation restarts the beats rather than
-                            // reusing the previous view's finished state.
-                            CorrectionView(segments: model.correction)
-                                .id(model.corrected)
-                                .frame(maxWidth: .infinity, alignment: .trailing)
-                        }
+            // The live transcript leaves with the key-up. Holding the sentence
+            // here and sweeping the correction across it made the pill carry
+            // the last dictation's words into the next one, and the user asked
+            // for bars plus a working notice only.
+            pillSurface(width: model.slow ? 220 : 132) {
+                HStack(spacing: VoiceIQUI.Spacing.s) {
+                    WaveformView(processing: true)
+                    if model.slow {
+                        Text("Still working…")
+                            .font(VoiceIQUI.TypeScale.label())
+                            .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
+                            .transition(.opacity)
                     }
                 }
             }
@@ -147,11 +113,11 @@ struct PillView: View {
         case .notice(let message):
             pillSurface(width: nil) {
                 Text(message)
-                    .font(JotUI.TypeScale.label())
-                    .foregroundStyle(JotUI.Colors.onSurface)
+                    .font(VoiceIQUI.TypeScale.label())
+                    .foregroundStyle(VoiceIQUI.Colors.onSurface)
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false) // never truncate — the pill hugs the text
-                    .padding(.horizontal, JotUI.Spacing.xxs)
+                    .padding(.horizontal, VoiceIQUI.Spacing.xxs)
             }
 
         case .answer(let answer):
@@ -175,7 +141,7 @@ struct PillView: View {
         @ViewBuilder content: () -> Content
     ) -> some View {
         content()
-            .padding(.horizontal, JotUI.Spacing.m)
+            .padding(.horizontal, VoiceIQUI.Spacing.m)
             .frame(width: width, height: 48)
             .frame(maxWidth: width == nil ? 560 : nil)
             // Content is clipped to the capsule, not merely framed by it. A frame
@@ -192,9 +158,9 @@ struct PillView: View {
             NotificationCenter.default.post(name: .pillStopTapped, object: nil)
         } label: {
             ZStack {
-                Circle().fill(JotUI.Colors.primary)
+                Circle().fill(VoiceIQUI.Colors.primary)
                 RoundedRectangle(cornerRadius: 2.5)
-                    .fill(JotUI.Colors.onPrimary)
+                    .fill(VoiceIQUI.Colors.onPrimary)
                     .frame(width: 10, height: 10)
             }
             .frame(width: 32, height: 32)
@@ -204,37 +170,37 @@ struct PillView: View {
     }
 
     private func successBadge(words: Int?) -> some View {
-        VStack(spacing: JotUI.Spacing.xxs) {
+        VStack(spacing: VoiceIQUI.Spacing.xxs) {
             CheckmarkShape()
                 .trim(from: 0, to: 1)
-                .stroke(JotUI.Colors.success, style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+                .stroke(VoiceIQUI.Colors.success, style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
                 .frame(width: 20, height: 20)
                 .frame(width: 48, height: 48)
                 .gtGlassCircle()
             if let words, words > 20 {
                 Text("\(words) words")
-                    .font(JotUI.TypeScale.labelSmall())
-                    .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                    .font(VoiceIQUI.TypeScale.labelSmall())
+                    .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
             }
         }
         .transition(.scale(scale: 0.6).combined(with: .opacity))
     }
 
     private func errorChip(message: String) -> some View {
-        HStack(spacing: JotUI.Spacing.xs) {
+        HStack(spacing: VoiceIQUI.Spacing.xs) {
             Image(systemName: "exclamationmark.circle.fill")
                 .font(.system(size: 13))
-                .foregroundStyle(JotUI.Colors.onErrorContainer)
+                .foregroundStyle(VoiceIQUI.Colors.onErrorContainer)
             Text(message)
-                .font(JotUI.TypeScale.label())
-                .foregroundStyle(JotUI.Colors.onErrorContainer)
+                .font(VoiceIQUI.TypeScale.label())
+                .foregroundStyle(VoiceIQUI.Colors.onErrorContainer)
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
         }
-        .padding(.horizontal, JotUI.Spacing.m)
+        .padding(.horizontal, VoiceIQUI.Spacing.m)
         .frame(height: 48)
         .frame(maxWidth: 560)
-        .gtGlassCapsule(tint: JotUI.Colors.errorContainer)
+        .gtGlassCapsule(tint: VoiceIQUI.Colors.errorContainer)
         .modifier(ShakeEffect(shakes: reduceMotion ? 0 : 3))
     }
 
@@ -280,13 +246,13 @@ private struct IdleDotView: View {
         Button {
             NotificationCenter.default.post(name: .pillDotTapped, object: nil)
         } label: {
-            HStack(spacing: JotUI.Spacing.xs) {
+            HStack(spacing: VoiceIQUI.Spacing.xs) {
                 Image(systemName: "mic.fill")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(JotUI.Colors.gBlue)
+                    .foregroundStyle(VoiceIQUI.Colors.gBlue)
                 Text("Dictate")
-                    .font(JotUI.TypeScale.label())
-                    .foregroundStyle(JotUI.Colors.onSurface)
+                    .font(VoiceIQUI.TypeScale.label())
+                    .foregroundStyle(VoiceIQUI.Colors.onSurface)
                     .fixedSize()
             }
             .opacity(hovering ? 1 : 0)
@@ -297,7 +263,7 @@ private struct IdleDotView: View {
             .frame(width: hovering ? 116 : 40, height: hovering ? 34 : 8)
             .background(
                 Capsule()
-                    .fill(JotUI.Colors.onSurfaceVariant.opacity(hovering ? 0.04 : 0.18))
+                    .fill(VoiceIQUI.Colors.onSurfaceVariant.opacity(hovering ? 0.04 : 0.18))
             )
             .gtGlassCapsule()
             .contentShape(Capsule().scale(hovering ? 1.2 : 2.4)) // generous hit + hover target
@@ -325,7 +291,7 @@ extension View {
         } else {
             self.background(
                 Capsule()
-                    .fill(tint ?? JotUI.Colors.surface)
+                    .fill(tint ?? VoiceIQUI.Colors.surface)
                     .shadow(color: .black.opacity(0.20), radius: 12, y: 2)
             )
         }
@@ -338,7 +304,7 @@ extension View {
         } else {
             self.background(
                 Circle()
-                    .fill(JotUI.Colors.surface)
+                    .fill(VoiceIQUI.Colors.surface)
                     .shadow(color: .black.opacity(0.20), radius: 12, y: 2)
             )
         }
@@ -392,6 +358,6 @@ private struct CheckmarkShape: Shape {
 }
 
 extension Notification.Name {
-    static let pillStopTapped = Notification.Name("com.ammaar.jot.pill.stop")
-    static let pillDotTapped = Notification.Name("com.ammaar.jot.pill.dot")
+    static let pillStopTapped = Notification.Name("io.blue.voiceiq.pill.stop")
+    static let pillDotTapped = Notification.Name("io.blue.voiceiq.pill.dot")
 }

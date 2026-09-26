@@ -61,7 +61,7 @@ This project follows
 ```bash
 brew install xcodegen
 xcodegen generate
-swift test --package-path JotCore   # fast, headless
+swift test --package-path VoiceIQCore   # fast, headless
 ```
 
 The failure-mode matrix (`docs/design/product-reliability.md`) and the architecture

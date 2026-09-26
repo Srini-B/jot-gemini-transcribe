@@ -22,7 +22,7 @@ import SwiftUI
 ///  - EFFECTS springs (damping 1.0) fade/recolor things — NEVER bounce opacity or color.
 ///  - Expressive springs are reserved for hero moments: pill appear, lock, success,
 ///    onboarding celebration.
-enum JotMotion {
+enum VoiceIQMotion {
     // Standard spatial (damping 0.9 / stiffness 1400·700·300)
     static let fastSpatial = Animation.spring(response: 0.17, dampingFraction: 0.9)
     static let defaultSpatial = Animation.spring(response: 0.24, dampingFraction: 0.9)

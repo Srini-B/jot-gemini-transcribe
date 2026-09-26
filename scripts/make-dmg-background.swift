@@ -49,7 +49,7 @@ func render(scale: CGFloat) -> Data? {
     centered.alignment = .center
 
     // Wordmark + promise.
-    NSAttributedString(string: "Jot", attributes: [
+    NSAttributedString(string: "Voice IQ", attributes: [
         .font: NSFont.systemFont(ofSize: 40, weight: .semibold),
         .foregroundColor: NSColor(srgbRed: 0.07, green: 0.11, blue: 0.24, alpha: 1),
         .paragraphStyle: centered,
@@ -73,7 +73,7 @@ func render(scale: CGFloat) -> Data? {
     NSColor(srgbRed: 0.55, green: 0.61, blue: 0.75, alpha: 1).setStroke()
     chevron.stroke()
 
-    NSAttributedString(string: "Drag Jot into your Applications folder", attributes: [
+    NSAttributedString(string: "Drag Voice IQ into your Applications folder", attributes: [
         .font: NSFont.systemFont(ofSize: 13, weight: .medium),
         .foregroundColor: NSColor(srgbRed: 0.30, green: 0.36, blue: 0.48, alpha: 1),
         .paragraphStyle: centered,

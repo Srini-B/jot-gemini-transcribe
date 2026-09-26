@@ -14,18 +14,18 @@
 
 # xcodegen project definition — regenerate the project with `xcodegen generate`.
 # The .xcodeproj is NOT checked in; this file is the source of truth.
-name: Jot
+name: VoiceIQ
 options:
   createIntermediateGroups: true
   deploymentTarget:
     macOS: "14.0"
 
 packages:
-  JotCore:
-    path: JotCore
+  VoiceIQCore:
+    path: VoiceIQCore
 
 targets:
-  Jot:
+  VoiceIQ:
     type: application
     platform: macOS
     settings:
@@ -34,7 +34,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: io.blue.voiceiq
         DEVELOPMENT_TEAM: G8K3545FJ2
         CODE_SIGN_STYLE: Automatic
-        CODE_SIGN_ENTITLEMENTS: App/Jot.entitlements
+        CODE_SIGN_ENTITLEMENTS: App/VoiceIQ.entitlements
         ENABLE_HARDENED_RUNTIME: NO # enabled for notarized release builds (M8)
         SWIFT_VERSION: "5.10"
         MARKETING_VERSION: "0.4.0"
@@ -72,7 +72,7 @@ targets:
         type: folder
         buildPhase: resources
     dependencies:
-      - package: JotCore
+      - package: VoiceIQCore
     info:
       path: App/Info.plist
       properties:

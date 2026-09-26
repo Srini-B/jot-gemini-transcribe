@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import Foundation
-import JotCore
+import VoiceIQCore
 
 /// `InsertionCoordinator` plus auto-learn: harvest the user's edits to earlier
 /// insertions in this field before the new text lands, then track the new text.
@@ -35,7 +35,7 @@ final class LearningInserter: TextInserting {
         let field = enabled
             ? AXInserter.focusedField(targetPID: context.targetPID, bundleID: context.targetAppBundleID)
             : nil
-        if let field { learner.harvest(before: field) }
+        if let field { await learner.harvest(before: field) }
         let outcome = await inner.insert(text, context: context)
         if outcome == .inserted, let field { learner.track(inserted: text, in: field) }
         return outcome

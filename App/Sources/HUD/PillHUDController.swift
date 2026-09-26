@@ -15,7 +15,7 @@
 import AppKit
 import Combine
 import SwiftUI
-import JotCore
+import VoiceIQCore
 
 /// Owns the non-activating NSPanel that hosts the pill. Fixed-size panel; the pill
 /// animates its own bounds inside (avoids NSWindow frame-animation jank).
