@@ -28,6 +28,7 @@ final class MainWindowController: NSWindowController {
 
     init(
         store: HistoryStore?,
+        meetings: MeetingEngine,
         onRetry: @escaping (DictationRecord) -> Void,
         onDeleteAllHistory: @escaping () -> Void
     ) {
@@ -50,6 +51,7 @@ final class MainWindowController: NSWindowController {
         window.contentView = NSHostingView(rootView: MainView(
             model: model,
             store: store,
+            meetings: meetings,
             onRetry: onRetry,
             onDeleteAllHistory: onDeleteAllHistory
         ))
@@ -66,7 +68,7 @@ final class MainWindowController: NSWindowController {
 }
 
 enum MainSection: String, CaseIterable, Identifiable {
-    case history, dictionary
+    case history, meetings, dictionary
     case general, dictation, privacy, advanced
     case about
     var id: String { rawValue }
@@ -74,6 +76,7 @@ enum MainSection: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .history: return "History"
+        case .meetings: return "Meetings"
         case .dictionary: return "Dictionary"
         case .general: return "General"
         case .dictation: return "Dictation"
@@ -86,6 +89,7 @@ enum MainSection: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .history: return "clock.arrow.circlepath"
+        case .meetings: return "person.2.wave.2.fill"
         case .dictionary: return "character.book.closed.fill"
         case .general: return "gearshape.fill"
         case .dictation: return "waveform"
@@ -98,6 +102,7 @@ enum MainSection: String, CaseIterable, Identifiable {
     var tileColor: Color {
         switch self {
         case .history: return JotUI.Colors.gBlue
+        case .meetings: return Color(nsColor: .systemPurple)
         case .dictionary: return Color(nsColor: .systemOrange)
         case .general: return Color(nsColor: .systemGray)
         case .dictation: return Color(nsColor: .systemTeal)
@@ -107,7 +112,7 @@ enum MainSection: String, CaseIterable, Identifiable {
         }
     }
 
-    static let dataSections: [MainSection] = [.history, .dictionary]
+    static let dataSections: [MainSection] = [.history, .meetings, .dictionary]
     static let settingsSections: [MainSection] = [.general, .dictation, .privacy, .advanced, .about]
 }
 
@@ -117,8 +122,10 @@ final class MainWindowModel: ObservableObject {
 }
 
 private struct MainView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var model: MainWindowModel
     let store: HistoryStore?
+    let meetings: MeetingEngine
     let onRetry: (DictationRecord) -> Void
     let onDeleteAllHistory: () -> Void
 
@@ -133,8 +140,13 @@ private struct MainView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("Jot")
-                .font(JotUI.TypeScale.title())
+            // Loose PNGs, not an asset catalog: SwiftUI's Image(name) only
+            // searches the catalog, so go through the bundle.
+            Image(nsImage: Bundle.main.image(forResource: colorScheme == .dark ? "SidebarLogoDark" : "SidebarLogo") ?? NSImage())
+                .resizable()
+                .scaledToFit()
+                .frame(height: 28)
+                .accessibilityLabel("Voice IQ")
                 .padding(.horizontal, 14)
                 .padding(.top, 20)
                 .padding(.bottom, 12)
@@ -158,7 +170,10 @@ private struct MainView: View {
         }
         .padding(.horizontal, 8)
         .frame(width: 210)
-        .background(.thickMaterial)
+        .background {
+            Rectangle().fill(.thickMaterial)
+                .ignoresSafeArea(.container, edges: .top)
+        }
     }
 
     @ViewBuilder
@@ -171,6 +186,8 @@ private struct MainView: View {
                 } else {
                     ContentUnavailableView("History unavailable", systemImage: "clock.badge.exclamationmark")
                 }
+            case .meetings:
+                MeetingsPane(engine: meetings, store: meetings.store)
             case .dictionary:
                 DictionaryView()
             case .general:
@@ -186,7 +203,10 @@ private struct MainView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background {
+            Color(nsColor: .windowBackgroundColor)
+                .ignoresSafeArea(.container, edges: .top)
+        }
     }
 }
 
@@ -253,7 +273,7 @@ struct GeneralPane: View {
             }
 
             Section {
-                Toggle("Start Jot at login", isOn: $launchAtLogin)
+                Toggle("Start Voice IQ at login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, enabled in
                         // The failure-path revert below re-enters onChange with the
                         // inverted value — this guard stops the bounce from calling
@@ -284,105 +304,12 @@ struct GeneralPane: View {
             doubleTapLock = settings.doubleTapLockEnabled
         }
         // The other panes guard the same way; these two can move under us from
-        // the DEBUG jot://set driver.
+        // the DEBUG voiceiq://set driver.
         .onReceive(NotificationCenter.default.publisher(for: .gtSettingDidChange).receive(on: RunLoop.main)) { note in
             switch note.object as? String {
             case "hotkeyKey": hotkey = settings.hotkeyKey
             case "doubleTapLock": doubleTapLock = settings.doubleTapLockEnabled
             default: break
-            }
-        }
-    }
-}
-
-// MARK: - Dictation
-
-struct DictationPane: View {
-    private let settings = SettingsStore()
-    @State private var sounds = SettingsStore().soundsEnabled
-    @State private var smartTranscription = SettingsStore().smartTranscriptionEnabled
-    @State private var cleanupPass = SettingsStore().smartCleanupPassEnabled
-    @State private var showIdleDot = SettingsStore().showIdleIndicator
-    @State private var noiseHandling = SettingsStore().experimentalNoiseHandling
-    @State private var liveTranscription = SettingsStore().liveTranscription
-
-    var body: some View {
-        Form {
-            Section {
-                Toggle("Sounds", isOn: $sounds)
-                    .onChange(of: sounds) { _, enabled in settings.setSoundsEnabled(enabled) }
-                Toggle("Show resting indicator", isOn: $showIdleDot)
-                    .onChange(of: showIdleDot) { _, show in settings.setShowIdleIndicator(show) }
-            } footer: {
-                Text("The resting dot grows into a Dictate button on hover; click it for hands-free. Off = the pill appears only while dictating.")
-            }
-
-            Section {
-                Toggle("Smart transcription", isOn: $smartTranscription)
-                    .onChange(of: smartTranscription) { _, enabled in
-                        settings.setSmartTranscription(enabled)
-                    }
-            } footer: {
-                Text("Removes filler words and applies self-corrections (\"at 2 — actually 3\") as it transcribes. Off = word for word — unless tone matching below is on, which rewrites either way.")
-            }
-
-            Section {
-                Toggle("Match tone to the app you're in", isOn: $cleanupPass)
-                    .onChange(of: cleanupPass) { _, enabled in
-                        guard enabled != settings.smartCleanupPassEnabled else { return }
-                        settings.setSmartCleanupPass(enabled)
-                    }
-                Toggle("Better hearing in loud rooms", isOn: $noiseHandling)
-                    .onChange(of: noiseHandling) { _, enabled in
-                        settings.setExperimentalNoiseHandling(enabled)
-                    }
-                Toggle("Live transcription", isOn: $liveTranscription)
-                    .onChange(of: liveTranscription) { _, enabled in
-                        settings.setLiveTranscription(enabled)
-                        // Switching it on is an explicit "try again" — clear the
-                        // streak that suppressed it, but keep the history so the
-                        // footer still tells the truth about how it has gone.
-                        if enabled { LiveStats().clearStreak() }
-                    }
-                    // The legacy transport is a different endpoint entirely, so
-                    // live cannot run alongside it. Disabling the control says so;
-                    // leaving it tappable but inert is the exact silent no-op this
-                    // app keeps writing comments about.
-                    .disabled(settings.usesLegacyTranscribeEndpoint)
-            } header: {
-                Text("Experimental")
-            } footer: {
-                if settings.usesLegacyTranscribeEndpoint {
-                    Text("Live transcription is unavailable while the legacy transcription endpoint is on in Advanced.")
-                } else {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Live streams your voice over a WebSocket as you speak instead of uploading at the end (on by default) — if the connection stumbles it quietly falls back to the normal upload, so nothing is ever lost. Tone runs a second model over the transcript so email reads like email and chat like chat (adds about half a second). Loud rooms judges your voice against the actual room noise instead of a fixed level.")
-                        // Live failing is invisible by design — it just looks like
-                        // a slower dictation — so without this the question "is it
-                        // actually working?" has no answer.
-                        if let summary = LiveStats().summary {
-                            Text(summary)
-                        }
-                    }
-                }
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .gtSettingDidChange).receive(on: RunLoop.main)) { note in
-            if note.object as? String == "smartTranscription" {
-                smartTranscription = settings.smartTranscriptionEnabled
-            }
-            if note.object as? String == "liveTranscription" {
-                liveTranscription = settings.liveTranscription
-            }
-            // Auto-degrade flips this one off after three gate trips, so a stale
-            // ON toggle would make the user's next tap a silent no-op.
-            if note.object as? String == "smartCleanupPass" {
-                cleanupPass = settings.smartCleanupPassEnabled
-            }
-            // jot://set drives this headlessly in DEBUG — the pane must not show
-            // a stale toggle after the flag moved underneath it.
-            if note.object as? String == "experimentalNoiseHandling" {
-                noiseHandling = settings.experimentalNoiseHandling
             }
         }
     }
@@ -421,7 +348,8 @@ struct PrivacyPane: View {
 
             Section {
                 LabeledContent("Audio") { Text("Sent to the Gemini API with your key") }
-                LabeledContent("Transcript text") { Text("Only if tone matching is on — otherwise it never leaves") }
+                LabeledContent("Transcript text") { Text("Only if writing rules are on — otherwise it never leaves") }
+                LabeledContent("Meeting audio") { Text("Only if call recording is on; notes are made by the Gemini API") }
                 LabeledContent("Dictionary terms") { Text("Sent with the audio, so names are spelled right as you speak") }
                 LabeledContent("Everything else") { Text("Never leaves this Mac") }
             } header: {
@@ -557,7 +485,7 @@ struct AdvancedPane: View {
                         settings.setLegacyTranscribeEndpoint(enabled)
                     }
             } footer: {
-                Text("Jot transcribes through Gemini's newer interactions endpoint, which is what makes Smart transcription possible. If it starts misbehaving, this switches back to the older one — transcription still works, but it will be word-for-word and Smart transcription will have no effect.")
+                Text("Voice IQ transcribes through Gemini's newer interactions endpoint, which is what makes Smart transcription possible. If it starts misbehaving, this switches back to the older one — transcription still works, but it will be word-for-word and Smart transcription will have no effect.")
             }
         }
         // Key saved elsewhere (onboarding, dev-file migration) while this pane is
@@ -620,16 +548,7 @@ struct AdvancedPane: View {
 
 // MARK: - About
 
-/// Who made this, what version it is, and where to go next. Deliberately a
-/// plain page rather than a Form: it is a colophon, not settings.
 struct AboutPane: View {
-    /// Read from the bundle directly: NSApp.applicationIconImage is set at
-    /// launch but the standard About panel ignores it for an LSUIElement app,
-    /// which is exactly why this pane exists.
-    static let appIcon: NSImage? = Bundle.main
-        .url(forResource: "Jot", withExtension: "icns")
-        .flatMap(NSImage.init(contentsOf:))
-
     private var version: String {
         let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
         return "Version \(short) (\(Bundle.main.buildNumber))"
@@ -638,39 +557,20 @@ struct AboutPane: View {
     var body: some View {
         VStack(spacing: JotUI.Spacing.m) {
             Spacer()
-            if let icon = AboutPane.appIcon {
+            if let icon = NSApp.applicationIconImage ?? NSImage(named: NSImage.applicationIconName) {
                 Image(nsImage: icon)
                     .resizable()
                     .frame(width: 96, height: 96)
                     .accessibilityHidden(true)
             }
             VStack(spacing: 4) {
-                Text("Jot")
+                Text("Voice IQ")
                     .font(JotUI.TypeScale.display())
                     .foregroundStyle(JotUI.Colors.onSurface)
                 Text(version)
                     .font(JotUI.TypeScale.body())
                     .foregroundStyle(JotUI.Colors.onSurfaceVariant)
             }
-            HStack(spacing: 4) {
-                Text("Created by")
-                    .foregroundStyle(JotUI.Colors.onSurfaceVariant)
-                Link("Ammaar Reshi", destination: JotLinks.author)
-            }
-            .font(JotUI.TypeScale.body())
-
-            HStack(spacing: JotUI.Spacing.m) {
-                Link("Source", destination: JotLinks.repository)
-                Link("Privacy", destination: JotLinks.privacy)
-                Link("Report a bug", destination: JotLinks.issues)
-            }
-            .font(JotUI.TypeScale.body())
-
-            Text("Open source under the Apache License 2.0.\nThis is not an officially supported Google product.")
-                .font(JotUI.TypeScale.labelSmall())
-                .foregroundStyle(JotUI.Colors.onSurfaceVariant)
-                .multilineTextAlignment(.center)
-                .padding(.top, JotUI.Spacing.xs)
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

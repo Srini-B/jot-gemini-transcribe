@@ -26,14 +26,19 @@ final class DictationController {
     /// Idle-time capture-graph prewarming — the key press pays only start().
     private let warmEngines = WarmEnginePool()
     private let engine = EventTapEngine(key: .fn)
+    private let globalShortcutEngine = GlobalShortcutEngine()
     private let hud = PillHUDController()
     private let earcons = EarconPlayer()
+    private let outputMute = AudioOutputMute()
     private let transcriptionService: GeminiTranscriptionService
     private let historyStore: HistoryStore?
+    private let learner = EditLearner()
+    private let meetings: MeetingEngine
     private var recoveryScanner: RecoveryScanner?
     private var retryQueue: RetryQueue?
     private var mainWindow: MainWindowController?
     private var onboardingWindow: OnboardingWindowController?
+    private var pendingAnswer: String?
     private var cancellables: Set<AnyCancellable> = []
 
     private var previousState: DictationState = .idle
@@ -41,6 +46,8 @@ final class DictationController {
     private var elapsedTimer: Timer?
     private var slowTimer: Timer?
     private var dismissTask: Task<Void, Never>?
+    private var shortcutMode: DictationMode?
+    private var shortcutDownAt: Date?
 
     var onStatusChange: ((String) -> Void)?
     var onStatusItemState: ((StatusItemController.VisualState) -> Void)?
@@ -93,10 +100,15 @@ final class DictationController {
         let service = GeminiTranscriptionService(client: client)
         transcriptionService = service
         historyStore = try? HistoryStore.standard()
+        meetings = MeetingEngine(
+            client: client,
+            config: { SettingsStore().geminiConfig },
+            summaryModel: SettingsStore().geminiConfig.cleanupModel
+        )
         coordinator = DictationCoordinator(
             audioFactory: { [warmEngines] in warmEngines.take() },
             transcription: service,
-            insertion: InsertionCoordinator(),
+            insertion: LearningInserter(learner: learner),
             contextProvider: {
                 let app = NSWorkspace.shared.frontmostApplication
                 // Wake Electron/Chromium a11y NOW, while the user is still
@@ -116,15 +128,19 @@ final class DictationController {
     }
 
     private var needsOnboarding: Bool {
-        // A deliberate "I'll add it later" is remembered — the wizard must not
-        // re-trap that user every launch; the menu bar carries the key nudge.
-        (KeychainStore.loadAPIKey() == nil && !SettingsStore().hasCompletedOnboarding)
+        // Completing the wizard is remembered. A permission that goes missing
+        // later (macOS reset it, or a rebuilt unsigned binary lost its TCC
+        // grant) is reported through the menu bar, not by re-running the
+        // wizard on every launch.
+        guard !SettingsStore().hasCompletedOnboarding else { return false }
+        return KeychainStore.loadAPIKey() == nil
             || !AXIsProcessTrusted()
             || AVCaptureDevice.authorizationStatus(for: .audio) != .authorized
     }
 
     func start() {
         applyHotkeySettings()
+        registerGlobalShortcuts()
         // Intents flow through one AsyncStream consumed sequentially — independent
         // Task hops have no ordering guarantee under load (audit L35).
         let (intentStream, continuation) = AsyncStream.makeStream(of: HotkeyIntent.self)
@@ -154,6 +170,12 @@ final class DictationController {
                 self?.startHandsFree()
             }
         }
+        NotificationCenter.default.addObserver(forName: .pillAnswerDismissed, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.setPill(Self.restingPill(for: self.coordinator.state))
+            }
+        }
         // Settings must take effect the moment they're flipped — not on the next
         // unrelated pill transition (dogfood: resting-dot toggle "didn't work").
         NotificationCenter.default.addObserver(forName: .gtSettingDidChange, object: nil, queue: .main) { [weak self] note in
@@ -174,19 +196,37 @@ final class DictationController {
                 let tail = stillSmart
                     ? "Smart transcription is still on."
                     : "Re-enable it in Settings → Dictation."
-                self?.showBackgroundNotice("Turned off tone matching — the second model kept misfiring. \(tail)", for: 5.0, sound: nil)
+                self?.showBackgroundNotice("Turned off writing rules — the second model kept misfiring. \(tail)", for: 5.0, sound: nil)
             }
         }
+        learner.onLearned = { [weak self] entries in
+            let terms = entries.map(\.term).joined(separator: ", ")
+            self?.showBackgroundNotice("Learned \(terms) — see Dictionary", for: 4.0, sound: nil)
+        }
+        meetings.onNotice = { [weak self] message in
+            self?.showBackgroundNotice(message, for: 4.0, sound: nil)
+        }
+        meetings.autoDetect = SettingsStore().meetingDetectionEnabled
 
         // A prewarmed graph is bound to the device it was built for — rebuild it
         // the moment the input moves, so the first dictation on new AirPods is
         // as fast as the last one on the old mic.
         AudioInputDevices.startMonitoringDefaultChanges()
+        AudioInputDevices.startMonitoringDeviceChanges()
+        rememberCurrentInputDevices()
+        applyPreferredInputDevice()
         NotificationCenter.default.addObserver(forName: .jotDefaultInputChanged, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 Log.audio.info("default input changed — refreshing the warm capture graph")
                 self?.warmEngines.refresh()
             }
+        }
+        NotificationCenter.default.addObserver(forName: .jotInputDevicesChanged, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.handleInputDevicesChanged() }
+        }
+
+        coordinator.onAnswerReady = { [weak self] answer in
+            self?.pendingAnswer = answer
         }
 
         bind()
@@ -230,6 +270,7 @@ final class DictationController {
 
     private func activateEngine() {
         if engine.start() {
+            _ = globalShortcutEngine.start()
             engineActive = true
             if KeychainStore.loadAPIKey() == nil {
                 // New-user path: dictation can't work yet — say exactly where to go.
@@ -323,6 +364,10 @@ final class DictationController {
             if engineActive, KeychainStore.loadAPIKey() != nil {
                 onStatusChange?("Ready — hold \(SettingsStore().hotkeyKey.displayName) to dictate")
             }
+        case "meetingDetection":
+            meetings.autoDetect = SettingsStore().meetingDetectionEnabled
+        case "preferredInputDeviceUID":
+            applyPreferredInputDevice()
         case "accessibility":
             // Granted mid-onboarding: wake the engine so the Try-It screen works.
             if !engineActive {
@@ -412,7 +457,7 @@ final class DictationController {
         openMainWindow(section: .dictionary)
     }
 
-    /// jot://onboarding — re-run setup on demand (also drives headless UI checks).
+    /// voiceiq://onboarding — re-run setup on demand (also drives headless UI checks).
     func presentOnboardingManually() {
         presentOnboarding()
     }
@@ -421,6 +466,7 @@ final class DictationController {
         if mainWindow == nil {
             mainWindow = MainWindowController(
                 store: historyStore,
+                meetings: meetings,
                 onRetry: { [weak self] record in
                     Task { @MainActor [weak self] in
                         guard let self, let queue = self.retryQueue else { return }
@@ -486,10 +532,102 @@ final class DictationController {
     /// finalize synchronously enough that the CAF is complete and meta says
     /// .recorded; next launch's RecoveryScanner picks the transcript up.
     func prepareForTermination() {
+        outputMute.unmute()
         if case .recording = coordinator.state {
             Log.session.info("terminating — finalizing active dictation")
             coordinator.handle(.finalize)
         }
+    }
+
+    private func registerGlobalShortcuts() {
+        globalShortcutEngine.onKeyDown = { [weak self] action in
+            guard let self else { return }
+            switch action {
+            case .pasteLastTranscript:
+                break
+            case .askAnything:
+                self.handleModeShortcutDown(.askAnything(selectedText: nil))
+            case .translate:
+                self.handleModeShortcutDown(
+                    .translate(target: SettingsStore().translationTargetLanguage)
+                )
+            }
+        }
+        globalShortcutEngine.onKeyUp = { [weak self] action in
+            guard let self else { return }
+            switch action {
+            case .pasteLastTranscript:
+                Log.hotkey.info("paste-last shortcut fired")
+                self.pasteLastTranscript()
+            case .askAnything, .translate:
+                self.handleModeShortcutUp()
+            }
+        }
+    }
+
+    private func handleModeShortcutDown(_ initialMode: DictationMode) {
+        Log.hotkey.info("mode shortcut key-down")
+        if shortcutMode != nil {
+            coordinator.handle(.finalize)
+            shortcutMode = nil
+            shortcutDownAt = nil
+            return
+        }
+        guard coordinator.state == .idle || coordinator.state.isTerminal else { return }
+        let mode: DictationMode
+        var settable = false
+        switch initialMode {
+        case .askAnything:
+            let selection = SelectedTextCapture.capture()
+            mode = .askAnything(selectedText: selection.text)
+            settable = selection.isSettable
+        case .translate:
+            mode = .translate(target: SettingsStore().translationTargetLanguage)
+        case .dictate:
+            mode = .dictate
+        }
+        guard coordinator.handle(.begin, mode: mode, selectedTextIsSettable: settable) else { return }
+        shortcutMode = mode
+        shortcutDownAt = Date()
+    }
+
+    private func handleModeShortcutUp() {
+        guard shortcutMode != nil, let downAt = shortcutDownAt else { return }
+        Log.hotkey.info("mode shortcut key-up")
+        if Date().timeIntervalSince(downAt) >= 0.35 {
+            coordinator.handle(.finalize)
+            shortcutMode = nil
+        } else {
+            coordinator.handle(.lockIn)
+        }
+        shortcutDownAt = nil
+    }
+
+    private func applyPreferredInputDevice() {
+        guard let uid = SettingsStore().preferredInputDeviceUID,
+              let device = AudioInputDevices.list().first(where: { $0.uid == uid }) else { return }
+        _ = AudioInputDevices.setDefault(id: device.id)
+    }
+
+    private func handleInputDevicesChanged() {
+        let devices = AudioInputDevices.list()
+        let defaults = UserDefaults.standard
+        let key = "seenInputDeviceUIDs"
+        var seen = Set(defaults.stringArray(forKey: key) ?? [])
+        if SettingsStore().preferredInputDeviceUID == nil,
+           let device = devices.first(where: { !seen.contains($0.uid) }) {
+            showNotice("New microphone detected: \(device.name)", for: 4.0, sound: nil)
+        }
+        seen.formUnion(devices.map(\.uid))
+        defaults.set(Array(seen), forKey: key)
+        applyPreferredInputDevice()
+    }
+
+    private func rememberCurrentInputDevices() {
+        let defaults = UserDefaults.standard
+        let key = "seenInputDeviceUIDs"
+        guard defaults.object(forKey: key) == nil else { return }
+        defaults.set(AudioInputDevices.list().map(\.uid), forKey: key)
     }
 
     func pasteLastTranscript() {
@@ -590,6 +728,18 @@ final class DictationController {
     }
 
     private func transition(to state: DictationState) {
+        if case .recording = state {
+            if SettingsStore().muteOtherAudioWhileDictating,
+               !meetingIsRecording {
+                outputMute.mute()
+            }
+        } else {
+            outputMute.unmute()
+        }
+        if state.isTerminal || state == .idle {
+            shortcutMode = nil
+            shortcutDownAt = nil
+        }
         defer { previousState = state }
         dismissTask?.cancel()
 
@@ -678,13 +828,23 @@ final class DictationController {
             // Key/permission problems persist beyond the toast — the menu bar
             // icon carries the attention state until resolved (audit L12).
             onStatusItemState?(failure == .auth || failure == .modelAccess ? .attention : .idle)
-            showError(Self.copy(for: failure))
+            showError(coordinator.modeFailureMessage ?? Self.copy(for: failure))
         }
+    }
+
+    private var meetingIsRecording: Bool {
+        if case .recording = meetings.phase { return true }
+        return false
     }
 
     private func handleOutcome(_ outcome: DictationOutcome) {
         switch outcome {
         case .inserted:
+            if let answer = pendingAnswer {
+                pendingAnswer = nil
+                setPill(.answer(answer))
+                return
+            }
             earcons.play(.success)
             let words = coordinator.lastResult.map { $0.split(separator: " ").count }
             setPill(.success(words: words))

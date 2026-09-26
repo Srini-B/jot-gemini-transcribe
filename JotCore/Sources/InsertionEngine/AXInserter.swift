@@ -103,7 +103,22 @@ public enum AXInserter {
         return landed ? .landed : .notPossible
     }
 
-    private static func stringValue(of element: AXUIElement) -> String? {
+    public static func focusedField(targetPID: pid_t?, bundleID: String?) -> FieldSnapshot? {
+        if let bundleID, AppQuirks.forcePaste.contains(bundleID) { return nil }
+        let system = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(system, 1.5)
+        var focusedRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
+              let focused = focusedRef, CFGetTypeID(focused) == AXUIElementGetTypeID() else { return nil }
+        let element = unsafeDowncast(focused as AnyObject, to: AXUIElement.self)
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(element, &pid) == .success,
+              targetPID == nil || targetPID == pid,
+              stringValue(of: element) != nil else { return nil }
+        return FieldSnapshot(element: element, pid: pid, bundleID: bundleID)
+    }
+
+    nonisolated static func stringValue(of element: AXUIElement) -> String? {
         var valueRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &valueRef) == .success else {
             return nil

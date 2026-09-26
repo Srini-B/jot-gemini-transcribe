@@ -27,7 +27,6 @@ repository's Apache 2.0 license. See `App/Resources/Sounds/ATTRIBUTION.md`.
 
 | Package | License |
 |---|---|
-| [KeyboardShortcuts](https://github.com/sindresorhus/KeyboardShortcuts) (sindresorhus) | MIT |
 | [Sauce](https://github.com/Clipy/Sauce) (Clipy) | MIT |
 | [GRDB.swift](https://github.com/groue/GRDB.swift) (Gwendal Roué) | MIT |
 | [Sparkle](https://github.com/sparkle-project/Sparkle) (from M8) | Sparkle License (permissive, MIT-style) |

@@ -13,21 +13,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Packages a built Jot.app into a drag-to-install DMG with custom art.
+# Packages a built Voice IQ.app into a drag-to-install DMG with custom art.
 #
-#   scripts/make-dmg.sh <path-to-Jot.app> [output.dmg]
+#   scripts/make-dmg.sh <path-to-Voice IQ.app> [output.dmg]
 #
 # Layout is set through Finder (AppleScript), which is how every Mac installer
 # DMG is made. The first run may ask for permission to control Finder.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-APP_PATH="${1:?usage: make-dmg.sh <Jot.app> [output.dmg]}"
+APP_NAME="${APP_NAME:-Voice IQ}"
+APP_PATH="${1:?usage: make-dmg.sh <path-to-Voice IQ.app> [output.dmg]}"
 VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP_PATH/Contents/Info.plist")
-OUT_DMG="${2:-build/Jot-$VERSION.dmg}"
-VOLUME_NAME="Jot"
+OUT_DMG="${2:-build/Voice-IQ-$VERSION.dmg}"
+VOLUME_NAME="Voice IQ"
 STAGING="build/dmg-staging"
-RW_DMG="build/jot-rw.dmg"
+RW_DMG="build/voice-iq-rw.dmg"
 
 # Icon coordinates MUST match scripts/make-dmg-background.swift — but Finder's
 # origin is TOP-left while the art is drawn bottom-left, so Y is flipped here.
@@ -55,8 +56,8 @@ echo "▸ Creating read/write image"
 hdiutil create -srcfolder "$STAGING" -volname "$VOLUME_NAME" -fs HFS+ \
   -format UDRW -ov "$RW_DMG" >/dev/null
 
-# A previous failed run can leave /Volumes/Jot mounted, in which case the new
-# image lands on "/Volumes/Jot 1" — the script then decorates the WRONG volume
+# A previous failed run can leave the volume mounted, in which case the new
+# image gets a numeric suffix and the script could decorate the wrong volume
 # and hdiutil convert fails with "Resource temporarily unavailable" because the
 # real one is still attached. Detach leftovers, then trust hdiutil's reported
 # mount point instead of assuming the name.
@@ -86,7 +87,7 @@ tell application "Finder"
     set icon size of viewOptions to 96
     set text size of viewOptions to 12
     set background picture of viewOptions to file ".background:background.tiff"
-    set position of item "Jot.app" of theWindow to {$APP_X, $APP_Y}
+    set position of item "$APP_NAME.app" of theWindow to {$APP_X, $APP_Y}
     set position of item "Applications" of theWindow to {$LINK_X, $LINK_Y}
     -- Anything not part of the pitch goes off-canvas (only reachable when the
     -- user has "show hidden files" on, but then it would sit on the artwork).
@@ -121,7 +122,6 @@ hdiutil convert "$RW_DMG" -format UDZO -imagekey zlib-level=9 -o "$OUT_DMG" >/de
 rm -f "$RW_DMG"
 rm -rf "$STAGING"
 
-# The container is signed by notarizing + stapling it in scripts/release.sh;
-# there is no local Developer ID key to codesign with (cloud-managed signing).
+# scripts/release.sh signs, notarizes, and staples the finished container.
 
 echo "✓ $OUT_DMG ($(du -h "$OUT_DMG" | cut -f1))"

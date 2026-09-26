@@ -23,12 +23,22 @@ public enum FileLayout {
 
     public static var appSupportRoot: URL {
         if let overrideRoot { return overrideRoot }
-        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Jot", isDirectory: true)
+        let fileManager = FileManager.default
+        let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let old = base.appendingPathComponent("Jot", isDirectory: true)
+        let new = base.appendingPathComponent("Voice IQ", isDirectory: true)
+        if fileManager.fileExists(atPath: old.path), !fileManager.fileExists(atPath: new.path) {
+            try? fileManager.moveItem(at: old, to: new)
+        }
+        return new
     }
 
     public static var recordingsRoot: URL {
         appSupportRoot.appendingPathComponent("recordings", isDirectory: true)
+    }
+
+    public static var meetingsRoot: URL {
+        appSupportRoot.appendingPathComponent("meetings", isDirectory: true)
     }
 
     /// Creates (if needed) and returns a fresh session folder. Name is

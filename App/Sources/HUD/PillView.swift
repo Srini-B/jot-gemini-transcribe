@@ -34,7 +34,7 @@ struct PillView: View {
 
     private var hasInteractiveControls: Bool {
         switch model.state {
-        case .idleDot, .listening(locked: true): return true
+        case .idleDot, .listening(locked: true), .answer: return true
         default: return false
         }
     }
@@ -154,6 +154,11 @@ struct PillView: View {
                     .padding(.horizontal, JotUI.Spacing.xxs)
             }
 
+        case .answer(let answer):
+            AnswerView(answer: answer)
+                .frame(width: 520, height: 260)
+                .transition(.scale(scale: 0.94, anchor: .bottom).combined(with: .opacity))
+
         case .error(let message):
             errorChip(message: message)
         }
@@ -240,12 +245,13 @@ struct PillView: View {
 
     private var accessibilityDescription: String {
         switch model.state {
-        case .hidden, .idleDot: return "Jot — ready"
+        case .hidden, .idleDot: return "Voice IQ — ready"
         case .listening(true): return "Listening — hands-free locked"
         case .listening(false): return "Listening"
         case .processing: return "Processing"
         case .success(let words): return "Inserted\(words.map { " \($0) words" } ?? "")"
         case .notice(let message): return message
+        case .answer: return "Answer"
         case .error(let message): return "Error — \(message)"
         }
     }

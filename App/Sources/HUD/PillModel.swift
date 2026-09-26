@@ -25,6 +25,7 @@ enum PillState: Equatable {
     case success(words: Int?)
     /// Neutral informational chip (coaching hint, copied-to-clipboard, offline…).
     case notice(String)
+    case answer(String)
     /// Error styling: errorContainer surface + "saved to History" framing.
     case error(String)
 }

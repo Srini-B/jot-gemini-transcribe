@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import AVFoundation
 import Foundation
 
 /// The transcription pipeline.
@@ -28,10 +29,17 @@ import Foundation
 /// has a hard deadline and NEVER blocks a good transcript; every failure is a
 /// typed TranscriptionError mapping to the failure matrix.
 public struct GeminiTranscriptionService: TranscriptionServicing {
+    static let untranslatableToken = "<<UNTRANSLATABLE>>"
     private let client: GeminiClient
     private let settings: SettingsStore
-    /// Cleanup budget: probe median 0.3s; hard cap so raw fallback keeps us fast.
-    static let cleanupDeadline: TimeInterval = 1.5
+
+    /// Cleanup budget. The pass reads the whole transcript and writes it back, so
+    /// the budget grows with the text: a one-line dictation gets ~3 s, a
+    /// ten-minute one (~8k characters) ~25 s. Capped so a stalled request still
+    /// falls back to the raw transcript in bounded time.
+    static func cleanupDeadline(forCharacters count: Int) -> TimeInterval {
+        min(60, 3 + Double(count) / 350)
+    }
 
     public init(client: GeminiClient, settings: SettingsStore = SettingsStore()) {
         self.client = client
@@ -40,43 +48,56 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
 
     public func transcribe(audioURL: URL, durationSeconds: Double, context: DictationContext) async throws -> TranscriptionResult {
         let config = settings.geminiConfig
-        let flacURL = audioURL.deletingLastPathComponent().appendingPathComponent("audio.flac")
-
-        let encoded = try FLACEncoder.encode(cafURL: audioURL, flacURL: flacURL)
-        Log.transcription.info("FLAC \(encoded.byteCount) bytes in \(Int(encoded.encodeSeconds * 1000))ms")
-        let flacData = try Data(contentsOf: encoded.url)
-        // The FLAC is derived data (re-encoded from the CAF on any retry) — once
-        // it's in memory the file is pure duplication. Storage policy: the CAF is
-        // the only audio artifact that persists.
-        try? FileManager.default.removeItem(at: encoded.url)
-
         let policy = settings.formattingPolicy
         // Read once per dictation: a toggle flipped mid-flight must not change
         // the rules this transcript is being produced under.
         let vocabulary = Self.vocabularyIfEnabled()
-        let deadline = TimeoutPolicy.overallDeadline(audioDuration: durationSeconds)
-        var raw = try await transcribeWithRetry(
-            flacData: flacData, config: config, policy: policy,
-            vocabulary: vocabulary, deadline: deadline
-        )
 
-        var trimmedRaw = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmedRaw.isEmpty, durationSeconds >= 0.6 {
-            // F9a second chance: an empty result on real audio is sometimes model
-            // nondeterminism — one re-send before surfacing anything (audit L25).
-            Log.transcription.info("empty transcript on \(String(format: "%.1f", durationSeconds))s audio — one re-send")
-            // NB: goes through the same policy-aware call as the primary path.
-            // Sending this one down the old endpoint would leave a rare branch
-            // silently on a different pipeline.
-            raw = (try? await sendTranscribe(
+        // One request per chunk. A short dictation is one chunk, so this is the
+        // old single-request path for everything under ten minutes.
+        let ranges = try AudioChunker.ranges(cafURL: audioURL)
+        if ranges.count > 1 {
+            Log.transcription.info("long recording (\(Int(durationSeconds))s) split into \(ranges.count) chunks")
+        }
+        var pieces: [String] = []
+        for (index, range) in ranges.enumerated() {
+            let flacData = try encodeChunk(audioURL: audioURL, range: range, index: index)
+            let seconds = durationSeconds * Double(range.count) / Double(max(1, ranges.reduce(0) { $0 + $1.count }))
+            let deadline = TimeoutPolicy.overallDeadline(audioDuration: seconds)
+            var raw = try await transcribeWithRetry(
                 flacData: flacData, config: config, policy: policy,
                 vocabulary: vocabulary, deadline: deadline
-            )) ?? ""
-            trimmedRaw = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+            var trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty, seconds >= 0.6 {
+                // F9a second chance: an empty result on real audio is sometimes model
+                // nondeterminism — one re-send before surfacing anything (audit L25).
+                Log.transcription.info("empty transcript on \(String(format: "%.1f", seconds))s audio — one re-send")
+                // NB: goes through the same policy-aware call as the primary path.
+                // Sending this one down the old endpoint would leave a rare branch
+                // silently on a different pipeline.
+                raw = (try? await sendTranscribe(
+                    flacData: flacData, config: config, policy: policy,
+                    vocabulary: vocabulary, deadline: deadline
+                )) ?? ""
+                trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            if !trimmed.isEmpty { pieces.append(trimmed) }
         }
+
+        let trimmedRaw = pieces.joined(separator: " ")
         guard !trimmedRaw.isEmpty else {
             // The coordinator classifies silence vs dropped-transcript by energy.
             throw TranscriptionError.emptyTranscript
+        }
+
+        if context.mode != .dictate {
+            let cleaned = try await transform(raw: trimmedRaw, context: context, config: config)
+            return TranscriptionResult(
+                rawTranscript: trimmedRaw,
+                cleanedTranscript: cleaned,
+                modelID: "\(config.transcribeModel)/\(policy.mode.rawValue)+\(config.cleanupModel)"
+            )
         }
 
         guard policy.cleanupPass else {
@@ -101,7 +122,69 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
         )
     }
 
+    /// The cleanup stage on its own, for transcripts the live stream produced.
+    /// Live output has already had dictionary rules applied by `LiveTranscriber`;
+    /// the pass here works from the raw transcript so the gate has a true
+    /// reference, and re-applies the rules on whatever comes back.
+    public func polish(_ result: TranscriptionResult, context: DictationContext) async -> TranscriptionResult {
+        guard context.mode == .dictate else { return result }
+        guard settings.formattingPolicy.cleanupPass else { return result }
+        let config = settings.geminiConfig
+        let raw = result.rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return result }
+        let cleaned = await cleanupOrFallback(raw: raw, context: context, config: config)
+        return TranscriptionResult(
+            rawTranscript: result.rawTranscript,
+            cleanedTranscript: cleaned,
+            modelID: "\(result.modelID)+\(config.cleanupModel)"
+        )
+    }
+
     // MARK: - Stages
+
+    private func transform(raw: String, context: DictationContext, config: GeminiConfig) async throws -> String {
+        let dictionary = DictionaryStore()
+        let prompt: String
+        switch context.mode {
+        case .dictate:
+            return raw
+        case .askAnything(let selectedText):
+            prompt = PromptV1.askAnythingPrompt(
+                instruction: raw,
+                selectedText: selectedText,
+                tone: PromptV1.toneCategory(forBundleID: context.targetAppBundleID),
+                vocabulary: dictionary.sanitizedVocabulary()
+            )
+        case .translate(let target):
+            prompt = PromptV1.translatePrompt(
+                raw: raw, target: target, vocabulary: dictionary.sanitizedVocabulary()
+            )
+        }
+        let response = try await client.cleanup(
+            prompt: prompt,
+            model: config.cleanupModel,
+            endpoint: config.endpoint,
+            deadline: Self.cleanupDeadline(forCharacters: raw.count)
+        )
+        let cleaned = ValidationGate.stripArtifacts(response).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { throw TranscriptionError.emptyTranscript }
+        if case .translate = context.mode, cleaned == Self.untranslatableToken {
+            throw TranscriptionError.emptyTranscript
+        }
+        return cleaned
+    }
+
+    private func encodeChunk(audioURL: URL, range: Range<AVAudioFramePosition>, index: Int) throws -> Data {
+        let flacURL = audioURL.deletingLastPathComponent().appendingPathComponent("audio-\(index).flac")
+        let encoded = try FLACEncoder.encode(cafURL: audioURL, flacURL: flacURL, frameRange: range)
+        Log.transcription.info("FLAC chunk \(index) \(encoded.byteCount) bytes in \(Int(encoded.encodeSeconds * 1000))ms")
+        let data = try Data(contentsOf: encoded.url)
+        // The FLAC is derived data (re-encoded from the CAF on any retry) — once
+        // it's in memory the file is pure duplication. Storage policy: the CAF is
+        // the only audio artifact that persists.
+        try? FileManager.default.removeItem(at: encoded.url)
+        return data
+    }
 
     /// Vocabulary is suppressed once it has PROVABLY broken a request.
     ///
@@ -199,12 +282,18 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
             raw: raw,
             tone: tone,
             vocabulary: dictionary.sanitizedVocabulary(),
-            spellings: dictionary.spellings()
+            spellings: dictionary.spellings(),
+            instructions: settings.customInstructions,
+            imagesAttached: !context.screenshots.isEmpty
         )
         do {
+            let deadline = min(
+                60,
+                Self.cleanupDeadline(forCharacters: raw.count) + Double(context.screenshots.count * 2)
+            )
             let response = try await client.cleanup(
-                prompt: prompt, model: config.cleanupModel,
-                endpoint: config.endpoint, deadline: Self.cleanupDeadline
+                prompt: prompt, images: context.screenshots, model: config.cleanupModel,
+                endpoint: config.endpoint, deadline: deadline
             )
             let cleaned = ValidationGate.stripArtifacts(response)
             let verdict = ValidationGate.validate(raw: raw, cleaned: cleaned)

@@ -22,7 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
         // Single instance, always: two copies means two event taps, two pills,
         // and a race over the History DB. The newer instance defers.
-        let bundleID = Bundle.main.bundleIdentifier ?? "com.ammaar.jot"
+        let bundleID = Bundle.main.bundleIdentifier ?? "io.blue.voiceiq"
         let others = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
             .filter { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
         if !others.isEmpty {
@@ -32,7 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // The launch-triggering GURL Apple event arrives BETWEEN will- and
         // didFinishLaunching — registering in did- silently dropped any
-        // jot:// URL that cold-launched the app (production pass 2).
+        // voiceiq:// URL that cold-launched the app (production pass 2).
         registerURLHandler()
         // Before ANYTHING reads the Keychain, defaults, or History: carry over
         // everything from the app's pre-rename identity.
@@ -40,6 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // AFTER LegacyMigration: smartFormatting is in its key list and has to be
         // pulled out of the old defaults domain before this reads it.
         FormattingSettingsMigration.runIfNeeded()
+        FormattingSettingsMigration.enableWritingRulesIfNeeded()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -47,12 +48,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // An accessory app does not reliably adopt CFBundleIconFile for the
         // standard About panel — it showed the generic placeholder. Load it
         // from the bundle explicitly.
-        if let iconURL = Bundle.main.url(forResource: "Jot", withExtension: "icns"),
+        if let iconURL = Bundle.main.url(forResource: "VoiceIQ", withExtension: "icns"),
            let icon = NSImage(contentsOf: iconURL) {
             NSApp.applicationIconImage = icon
             Log.ui.info("app icon set from \(iconURL.lastPathComponent, privacy: .public) size \(icon.size.width, format: .fixed(precision: 0))")
         } else {
-            Log.ui.error("app icon NOT set — url: \(Bundle.main.url(forResource: "Jot", withExtension: "icns")?.path ?? "nil", privacy: .public)")
+            Log.ui.error("app icon NOT set — url: \(Bundle.main.url(forResource: "VoiceIQ", withExtension: "icns")?.path ?? "nil", privacy: .public)")
         }
         FontLoader.registerBundledFonts()
         let controller = DictationController()
@@ -71,10 +72,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         controller.start()
         dictationController = controller
-        // Replay any jot:// URL that cold-launched the app.
+        // Replay any voiceiq:// URL that cold-launched the app.
         for url in pendingLaunchURLs { dispatch(url) }
         pendingLaunchURLs.removeAll()
-        Log.session.info("Jot launched (build \(Bundle.main.buildNumber, privacy: .public))")
+        Log.session.info("Voice IQ launched (build \(Bundle.main.buildNumber, privacy: .public))")
     }
 
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }
@@ -88,8 +89,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return .terminateNow
     }
 
-    /// jot:// URL scheme — Raycast/Shortcuts automation + headless UI checks.
-    /// jot://settings[/general|dictation|privacy|advanced] | history | dictionary
+    /// voiceiq:// URL scheme — Raycast/Shortcuts automation + headless UI checks.
+    /// voiceiq://settings[/general|dictation|privacy|advanced] | history | dictionary
     ///   | onboarding | start-hands-free | stop
     /// NOTE: registered via NSAppleEventManager in didFinishLaunching — the
     /// NSApplicationDelegate application(_:open:) path is NOT delivered under the
@@ -118,6 +119,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func dispatch(_ url: URL) {
+        guard url.scheme?.lowercased() == "voiceiq" else {
+            Log.session.warning("ignored URL with unsupported scheme: \(url.absoluteString, privacy: .public)")
+            return
+        }
         let command = url.host ?? url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let section = url.pathComponents.count > 1 ? url.pathComponents[1] : nil
         Log.session.info("URL command: \(command, privacy: .public)")
@@ -139,7 +144,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case "start-hands-free": self?.dictationController?.startHandsFree()
             case "stop": self?.dictationController?.coordinator.handle(.finalize)
             #if DEBUG
-            // jot://set/<key>/<true|false> — flips a boolean setting through
+            // voiceiq://set/<key>/<true|false> — flips a boolean setting through
             // the REAL SettingsStore setter (and its change notification), so the
             // live-update path can be exercised headlessly. Debug builds only.
             case "set":

@@ -20,6 +20,7 @@ public extension Notification.Name {
     /// unplugged, picker used). Anything holding device-specific state — a
     /// prewarmed capture graph, a menu checkmark — must refresh.
     static let jotDefaultInputChanged = Notification.Name("com.ammaar.jot.default-input-changed")
+    static let jotInputDevicesChanged = Notification.Name("com.ammaar.jot.input-devices-changed")
 }
 
 /// Enumerates input devices and gets/sets the SYSTEM default input.
@@ -33,6 +34,7 @@ public enum AudioInputDevices {
     public struct Device: Identifiable, Equatable, Sendable {
         public let id: AudioDeviceID
         public let name: String
+        public let uid: String
     }
 
     public static func list() -> [Device] {
@@ -50,8 +52,8 @@ public enum AudioInputDevices {
             return []
         }
         return ids.compactMap { id in
-            guard hasInputStreams(id), let name = name(of: id) else { return nil }
-            return Device(id: id, name: name)
+            guard hasInputStreams(id), let name = name(of: id), let uid = uid(of: id) else { return nil }
+            return Device(id: id, name: name, uid: uid)
         }
     }
 
@@ -66,6 +68,19 @@ public enum AudioInputDevices {
             AudioObjectID(kAudioObjectSystemObject), &address, DispatchQueue.main
         ) { _, _ in
             NotificationCenter.default.post(name: .jotDefaultInputChanged, object: nil)
+        }
+    }
+
+    public static func startMonitoringDeviceChanges() {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject), &address, DispatchQueue.main
+        ) { _, _ in
+            NotificationCenter.default.post(name: .jotInputDevicesChanged, object: nil)
         }
     }
 
@@ -130,5 +145,18 @@ public enum AudioInputDevices {
             return nil
         }
         return cfName as String
+    }
+
+    private static func uid(of id: AudioDeviceID) -> String? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceUID,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var value: Unmanaged<CFString>?
+        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        guard AudioObjectGetPropertyData(id, &address, 0, nil, &size, &value) == noErr,
+              let uid = value?.takeRetainedValue() else { return nil }
+        return uid as String
     }
 }

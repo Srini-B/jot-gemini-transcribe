@@ -67,4 +67,27 @@ public enum FormattingSettingsMigration {
         defaults.removeObject(forKey: "smartFormatting")
         defaults.set(true, forKey: flag)
     }
+
+    private static let writingRulesFlag = "didEnableWritingRules"
+
+    /// Second one-time step, run AFTER `runIfNeeded`: switch the cleanup pass on
+    /// for everyone who has formatting on at all. The pass is now what applies
+    /// the user's writing rules (late corrections, grammar-driven sentence
+    /// boundaries), so a stored `false` left behind by the first migration
+    /// would silently strand them on native smart alone. A deliberate verbatim
+    /// user (`smartTranscription == false`) keeps their choice.
+    public static func enableWritingRulesIfNeeded(defaults: UserDefaults = .standard) {
+        guard !defaults.bool(forKey: writingRulesFlag) else { return }
+        defaults.set(true, forKey: writingRulesFlag)
+
+        let verbatim = (defaults.object(forKey: "smartTranscription") as? Bool) == false
+        guard !verbatim else {
+            Log.session.info("writing rules migration: verbatim user preserved")
+            return
+        }
+        defaults.set(true, forKey: "smartCleanupPass")
+        // A fresh start for the gate counter, same as a deliberate re-enable.
+        defaults.removeObject(forKey: "gateTrips")
+        Log.session.info("writing rules migration: cleanup pass enabled")
+    }
 }

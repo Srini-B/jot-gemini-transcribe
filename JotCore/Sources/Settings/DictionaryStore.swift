@@ -14,6 +14,11 @@
 
 import Foundation
 
+public enum DictionarySource: String, Codable, Sendable {
+    case manual
+    case auto
+}
+
 /// The personal dictionary: terms (spelling hints fed to the cleanup prompt) and
 /// explicit wrong→right rules (enforced deterministically post-model).
 /// UserDefaults-backed — entries are small and this keeps v1 dependency-free.
@@ -25,13 +30,29 @@ public struct DictionaryEntry: Codable, Equatable, Identifiable, Sendable {
     public var misspelling: String?
     public var starred: Bool
     public var createdAt: Date
+    public var source: DictionarySource
 
-    public init(term: String, misspelling: String? = nil, starred: Bool = false) {
+    public init(term: String, misspelling: String? = nil, starred: Bool = false, source: DictionarySource = .manual) {
         self.id = UUID()
         self.term = term
         self.misspelling = misspelling
         self.starred = starred
         self.createdAt = Date()
+        self.source = source
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, term, misspelling, starred, createdAt, source
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        term = try container.decode(String.self, forKey: .term)
+        misspelling = try container.decodeIfPresent(String.self, forKey: .misspelling)
+        starred = try container.decode(Bool.self, forKey: .starred)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        source = try container.decodeIfPresent(DictionarySource.self, forKey: .source) ?? .manual
     }
 }
 
@@ -57,13 +78,26 @@ public struct DictionaryStore: Sendable {
 
     @discardableResult
     public func add(term: String, misspelling: String? = nil) -> Bool {
+        add(term: term, misspelling: misspelling, source: .manual)
+    }
+
+    @discardableResult
+    public func add(term: String, misspelling: String? = nil, source: DictionarySource) -> Bool {
         let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines)
         guard (1...60).contains(trimmed.count) else { return false }
         var current = entries()
         guard !current.contains(where: { $0.term.lowercased() == trimmed.lowercased() }) else { return false }
-        current.append(DictionaryEntry(term: trimmed, misspelling: misspelling?.trimmingCharacters(in: .whitespacesAndNewlines)))
+        current.append(DictionaryEntry(
+            term: trimmed,
+            misspelling: misspelling?.trimmingCharacters(in: .whitespacesAndNewlines),
+            source: source
+        ))
         save(current)
         return true
+    }
+
+    public func autoLearned() -> [DictionaryEntry] {
+        entries().filter { $0.source == .auto }
     }
 
     public func remove(id: UUID) {

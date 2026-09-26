@@ -30,11 +30,9 @@ targets:
     platform: macOS
     settings:
       base:
-        PRODUCT_NAME: Jot
-        PRODUCT_BUNDLE_IDENTIFIER: com.ammaar.jot
-        # Ammaar's PERSONAL Apple team. A personal open-source project must not
-        # be signed under Google LLC's team, in development or in distribution.
-        DEVELOPMENT_TEAM: 7S264298H8
+        PRODUCT_NAME: "Voice IQ"
+        PRODUCT_BUNDLE_IDENTIFIER: io.blue.voiceiq
+        DEVELOPMENT_TEAM: G8K3545FJ2
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_ENTITLEMENTS: App/Jot.entitlements
         ENABLE_HARDENED_RUNTIME: NO # enabled for notarized release builds (M8)
@@ -54,9 +52,17 @@ targets:
           CODE_SIGN_IDENTITY: "-"
           CODE_SIGN_STYLE: Manual
           CODE_SIGNING_REQUIRED: NO
+        Release:
+          CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
     sources:
       - path: App/Sources
-      - path: App/Resources/Jot.icns
+      - path: App/Resources/VoiceIQ.icns
+      - path: App/Resources/MenuBarIcon.png
+      - path: App/Resources/MenuBarIcon@2x.png
+      - path: App/Resources/SidebarLogo.png
+      - path: App/Resources/SidebarLogo@2x.png
+      - path: App/Resources/SidebarLogoDark.png
+      - path: App/Resources/SidebarLogoDark@2x.png
       # Folder references (blue folders) so bundle subdirectory structure is preserved:
       # Contents/Resources/Fonts/GoogleSansFlex/… etc.
       - path: App/Resources/Fonts
@@ -70,20 +76,22 @@ targets:
     info:
       path: App/Info.plist
       properties:
-        CFBundleDisplayName: Jot
-        CFBundleIconFile: Jot
+        CFBundleDisplayName: Voice IQ
+        CFBundleName: Voice IQ
+        CFBundleIconFile: VoiceIQ
         # Without these the generated plist keeps xcodegen's default 1.0, so the
         # About panel and the DMG filename disagree about the version.
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSApplicationCategoryType: public.app-category.productivity
         LSUIElement: true # menu bar app: no Dock icon
-        NSMicrophoneUsageDescription: Jot records audio while you hold the dictation key, so it can transcribe what you say.
+        NSMicrophoneUsageDescription: Voice IQ records audio while you hold the dictation key, so it can transcribe what you say.
+        NSAudioCaptureUsageDescription: Voice IQ records the other side of your calls, so meeting notes include what everyone said.
         NSHumanReadableCopyright: "Copyright 2026 Google LLC. Apache License 2.0. This is not an officially supported Google product."
         LSMinimumSystemVersion: "14.0"
         CFBundleURLTypes:
-          - CFBundleURLName: com.ammaar.jot.url
-            CFBundleURLSchemes: [jot]
+          - CFBundleURLName: io.blue.voiceiq.url
+            CFBundleURLSchemes: [voiceiq]
     scheme:
       testTargets: []
       gatherCoverageData: false

@@ -21,10 +21,11 @@ import Security
 /// lack it (errSecMissingEntitlement, -34018). Never UserDefaults/JSON
 /// (Superwhisper's documented failure).
 public enum KeychainStore {
-    private static let service = "com.ammaar.jot"
+    private static let service = "io.blue.voiceiq"
+    private static let legacyService = "com.ammaar.jot"
     private static let account = "gemini-api-key"
 
-    private static func baseQuery(dataProtection: Bool) -> [String: Any] {
+    private static func baseQuery(service: String = service, dataProtection: Bool) -> [String: Any] {
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -37,8 +38,18 @@ public enum KeychainStore {
     }
 
     public static func loadAPIKey() -> String? {
+        if let key = loadAPIKey(service: service) { return key }
+        guard let legacyKey = loadAPIKey(service: legacyService) else { return nil }
+        if saveAPIKey(legacyKey) {
+            deleteAPIKey(service: legacyService)
+            Log.permissions.info("KeychainStore: migrated API key to Voice IQ service")
+        }
+        return legacyKey
+    }
+
+    private static func loadAPIKey(service: String) -> String? {
         for dataProtection in [true, false] {
-            var query = baseQuery(dataProtection: dataProtection)
+            var query = baseQuery(service: service, dataProtection: dataProtection)
             query[kSecReturnData as String] = true
             query[kSecMatchLimit as String] = kSecMatchLimitOne
             var item: CFTypeRef?
@@ -55,7 +66,7 @@ public enum KeychainStore {
         deleteAPIKey()
         for dataProtection in [true, false] {
             var attributes = baseQuery(dataProtection: dataProtection)
-            attributes[kSecAttrLabel as String] = "Jot — Gemini API key"
+            attributes[kSecAttrLabel as String] = "Voice IQ — Gemini API key"
             attributes[kSecValueData as String] = Data(key.utf8)
             if dataProtection {
                 attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
@@ -77,15 +88,18 @@ public enum KeychainStore {
 
     @discardableResult
     public static func deleteAPIKey(notify: Bool = false) -> Bool {
-        var deleted = false
-        for dataProtection in [true, false] {
-            let status = SecItemDelete(baseQuery(dataProtection: dataProtection) as CFDictionary)
-            deleted = deleted || status == errSecSuccess
-        }
-        // saveAPIKey's internal delete-before-add must not announce "key removed"
-        // mid-save — only user-initiated removal notifies.
+        let deleted = deleteAPIKey(service: service)
         if deleted, notify {
             NotificationCenter.default.post(name: .gtSettingDidChange, object: "apiKey")
+        }
+        return deleted
+    }
+
+    private static func deleteAPIKey(service: String) -> Bool {
+        var deleted = false
+        for dataProtection in [true, false] {
+            let status = SecItemDelete(baseQuery(service: service, dataProtection: dataProtection) as CFDictionary)
+            deleted = deleted || status == errSecSuccess
         }
         return deleted
     }

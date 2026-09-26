@@ -19,6 +19,14 @@ import Foundation
 public protocol TranscriptionServicing: Sendable {
     /// Returns (rawTranscript, cleanedTranscript). Throws TranscriptionError.
     func transcribe(audioURL: URL, durationSeconds: Double, context: DictationContext) async throws -> TranscriptionResult
+    /// Runs the cleanup pass (writing rules, tone, dictionary) over a transcript
+    /// that was produced elsewhere, e.g. by a live stream. Never throws: on any
+    /// failure the input comes back unchanged.
+    func polish(_ result: TranscriptionResult, context: DictationContext) async -> TranscriptionResult
+}
+
+public extension TranscriptionServicing {
+    func polish(_ result: TranscriptionResult, context: DictationContext) async -> TranscriptionResult { result }
 }
 
 public struct TranscriptionResult: Equatable, Sendable {
@@ -52,16 +60,35 @@ public enum TranscriptionError: Error, Equatable, Sendable {
     case safetyBlocked
 }
 
+public enum DictationMode: Equatable, Sendable {
+    case dictate
+    case askAnything(selectedText: String?)
+    case translate(target: String)
+}
+
 /// Snapshot of where the user was dictating, captured at hotkey-down.
 public struct DictationContext: Equatable, Sendable {
     public var targetAppBundleID: String?
     public var targetAppName: String?
     public var targetPID: pid_t?
+    public var mode: DictationMode
+    public var selectedTextIsSettable: Bool
+    public var screenshots: [Data]
 
-    public init(targetAppBundleID: String? = nil, targetAppName: String? = nil, targetPID: pid_t? = nil) {
+    public init(
+        targetAppBundleID: String? = nil,
+        targetAppName: String? = nil,
+        targetPID: pid_t? = nil,
+        mode: DictationMode = .dictate,
+        selectedTextIsSettable: Bool = false,
+        screenshots: [Data] = []
+    ) {
         self.targetAppBundleID = targetAppBundleID
         self.targetAppName = targetAppName
         self.targetPID = targetPID
+        self.mode = mode
+        self.selectedTextIsSettable = selectedTextIsSettable
+        self.screenshots = screenshots
     }
 }
 

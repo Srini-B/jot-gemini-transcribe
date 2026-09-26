@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="docs/images/icon.png" width="128" alt="Jot">
+<img src="docs/images/icon.png" width="128" alt="Voice IQ">
 
-# Jot
+# Voice IQ
 
 **[Gemini 3.5 Transcribe](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-transcribe) Demo. Hold a key. Speak. It types.**
 
@@ -22,7 +22,7 @@ Hold `fn`, say the thing, let go. A moment later your words are in the app you
 were already using — punctuated, filler words removed, cleaned up. No window to switch
 to, no transcript to copy, no account to make.
 
-<img width="640" height="294" alt="Jot preview" src="https://github.com/user-attachments/assets/669efea9-dbfe-4174-a8fe-748aab818f14" />
+<img width="640" height="294" alt="Voice IQ preview" src="https://github.com/user-attachments/assets/669efea9-dbfe-4174-a8fe-748aab818f14" />
 
 
 It is deliberately small: a menu bar icon, a pill at the bottom of your screen
@@ -41,7 +41,7 @@ The key is rebindable in Settings → General if `fn` is spoken for.
 ## What makes it different
 
 **It follows a change of mind.** Say *"let's meet at 1pm — actually, no, make it
-2pm"* and Jot writes **"Let's meet at 2pm."** That is the whole pitch, and
+2pm"* and Voice IQ writes **"Let's meet at 2pm."** That is the whole pitch, and
 onboarding makes you do it once so you believe it.
 
 **It never loses your words.** Audio goes to disk from the first millisecond, so
@@ -52,23 +52,51 @@ listening until you actually stop.
 
 **It is private by architecture.** Your voice goes from your Mac straight to the
 Gemini API with *your* key. No middleman server, no account, no analytics, no
-screenshots, no keystroke logging — one network host, and you can read every
-line of the code that talks to it. See [PRIVACY.md](docs/PRIVACY.md).
+keystroke logging — one network host, and you can read every line of the code
+that talks to it. Screen context (a few downscaled screenshots sent with each
+dictation so on-screen names and paths are spelled right) can be switched off
+in Settings → Dictation. See [PRIVACY.md](docs/PRIVACY.md).
 
 **Your jargon, spelled right.** Names and product terms go in the Dictionary and
 ride along with the audio, so the model hears "Kubernetes" instead of guessing
-"cooper netties" — corrected at the source, not patched afterwards. Tone matching for
-email vs. chat vs. code is available too, in Settings → Dictation.
+"cooper netties" — corrected at the source, not patched afterwards. Fix a word
+after Voice IQ types it and the correction is learned into the Dictionary on its own.
+
+**It writes the way you meant it.** A writing-rules pass runs on every
+transcript: "scratch that", "change the first point to…" and other mid-dictation
+instructions become edits, run-on speech gets sentence breaks, and your own
+rules from Settings → Dictation are applied. Dictate for as long as you like;
+there is no time limit.
+
+**Ask Anything and Translate.** Select text (optional), hold ⌃⌥A, and ask
+("make this shorter", "what does this error mean"); the answer opens in the
+pill, with Markdown rendered and a Copy button, and never edits your text. Each
+question stands alone. Hold ⌃⌥T to dictate in any language and have it typed in
+the target language you pick from the searchable list in Settings → Dictation
+(the 99 languages Gemini Live supports); if Gemini cannot translate it, the pill
+says so and nothing is inserted. ⌘⇧V pastes the last transcript or answer
+again. All three shortcuts are editable and can require either, left, or right
+modifier keys. Plain dictation is language-agnostic: speak in any language, or
+mix them mid-sentence, and the text stays in the language you used.
+
+**Stays out of your way.** Other audio is muted while you dictate and restored
+after (switch it off in Settings → Dictation). Pick a preferred microphone or
+leave it on system default and get a one-time notice when a new one appears.
+
+**Meeting notes, hands-free.** When Zoom, Teams, FaceTime, WhatsApp, Slack,
+Discord, Webex, or a Meet/Teams/Zoom tab in any browser is on a call, Voice IQ
+records both sides, and on hang-up produces a speaker-labelled transcript plus a
+summary, decisions, and owned action items under Settings → Meetings.
 
 ## Install
 
-1. Download the latest `Jot-x.y.z.dmg` from [Releases](../../releases/latest).
-2. Drag Jot into **Applications** and launch it from there — apps run from a
+1. Download the latest `Voice IQ-x.y.z.dmg` from [Releases](../../releases/latest).
+2. Drag Voice IQ into **Applications** and launch it from there — apps run from a
    mounted disk image are sandboxed by macOS and the permissions you grant will
    not stick.
 
 <div align="center">
-<img src="docs/images/installer.png" width="480" alt="Drag Jot to Applications">
+<img src="docs/images/installer.png" width="480" alt="Drag Voice IQ to Applications">
 </div>
 
 Setup takes about two minutes and the app walks you through it:
@@ -83,22 +111,25 @@ Setup takes about two minutes and the app walks you through it:
 
 **Cost:** you pay Google for what you dictate at
 [Gemini API pricing](https://ai.google.dev/pricing); a free tier exists and a
-typical dictation is a few seconds of audio. Jot itself is free and has no
+typical dictation is a few seconds of audio. Voice IQ itself is free and has no
 account.
 
-**Model:** Jot runs on Gemini's specialist transcription model,
-`gemini-3.5-transcribe`. Your key needs access to it; setup tells you up front if
-it does not, instead of failing on your first dictation.
+**Models:** Voice IQ transcribes with `gemini-3.5-transcribe-live` while you speak
+(the live socket) and `gemini-3.5-transcribe` for the batch path, then applies
+writing rules and writes meeting notes with `gemini-3.8-flash`. Your key needs
+access to them; setup tells you up front if it does not, instead of failing on
+your first dictation. Advanced settings can pin other model names.
 
 ## How it works
 
 ```
 fn down ─▶ capture (CAF on disk from t=0) ─▶ fn up ─▶ FLAC ─▶ Gemini transcribe
-                                                                    │
-   cursor ◀─ insert (AX → paste → clipboard) ◀─ [validate ◀─ tone pass] ─┘
-                                              (optional, off by default)
-                                                    │
-                                              History (SQLite)
+                        │  (live socket streams text meanwhile)        │  (chunked past 10 min)
+                        ▼                                              ▼
+   cursor ◀─ insert (AX → paste → clipboard) ◀─ validate ◀─ writing-rules pass
+      │                                                     (gemini-3.8-flash)
+      ▼                                                            │
+   learn from edits ─▶ Dictionary                            History (SQLite)
 ```
 
 A few decisions worth knowing about, because they are what make it feel solid:
@@ -112,7 +143,7 @@ A few decisions worth knowing about, because they are what make it feel solid:
 - **Insertion is a ladder**: Accessibility API first (no clipboard involved), then
   a guarded paste that restores your clipboard, then a "copied — press ⌘V" chip.
   It never blind-pastes into an app that stole focus mid-flight.
-- **A validation gate** guards the optional tone pass, catching the classic failure where the model *answers*
+- **A validation gate** guards the writing-rules pass, catching the classic failure where the model *answers*
   your audio instead of transcribing it, and falls back to the raw transcript.
 - **The paths that can lose words are tested.** `JotCore` is a headless Swift
   package holding the state machine, hotkey grammar, audio, transcription,
@@ -156,11 +187,11 @@ Useful while hacking:
 
 ```bash
 # every surface is reachable headlessly
-open "jot://settings/about"      # or /general /dictation /privacy /advanced
-open "jot://history"  "jot://dictionary"  "jot://onboarding/5"
+open "voiceiq://settings/about"      # or /general /dictation /privacy /advanced
+open "voiceiq://history"  "voiceiq://dictionary"  "voiceiq://onboarding/5"
 
 # watch it work
-log show --last 5m --info --predicate 'subsystem == "com.ammaar.jot"'
+log show --last 5m --info --predicate 'subsystem == "io.blue.voiceiq"'
 ```
 
 Transcript text is logged as `private` and never appears in those logs.

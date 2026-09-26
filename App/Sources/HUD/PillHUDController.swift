@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import AppKit
+import Combine
 import SwiftUI
 import JotCore
 
@@ -23,6 +24,8 @@ import JotCore
 final class PillHUDController {
     let model = PillModel()
     private let panel: NSPanel
+    private var stateObservation: AnyCancellable?
+    private var eventMonitors: [Any] = []
 
     init() {
         panel = NSPanel(
@@ -43,6 +46,9 @@ final class PillHUDController {
         panel.contentView = NSHostingView(
             rootView: PillRootView(model: model)
         )
+        stateObservation = model.$state.sink { [weak self] state in
+            self?.updatePanel(for: state)
+        }
         reposition()
     }
 
@@ -59,6 +65,54 @@ final class PillHUDController {
 
     func hide() {
         panel.orderOut(nil)
+    }
+
+    private func updatePanel(for state: PillState) {
+        let isAnswer: Bool
+        if case .answer = state { isAnswer = true } else { isAnswer = false }
+        let size = isAnswer ? answerPanelSize() : NSSize(width: 600, height: 96)
+        let oldOrigin = panel.frame.origin
+        panel.setFrame(NSRect(origin: oldOrigin, size: size), display: true, animate: panel.isVisible)
+        reposition()
+        isAnswer ? installAnswerMonitors() : removeAnswerMonitors()
+    }
+
+    private func answerPanelSize() -> NSSize {
+        let screen = Self.screenOfFocusedWindow() ?? NSScreen.main
+        let visible = screen?.visibleFrame.size ?? NSSize(width: 600, height: 320)
+        return NSSize(width: min(560, visible.width - 24), height: min(300, visible.height - 24))
+    }
+
+    private func installAnswerMonitors() {
+        guard eventMonitors.isEmpty else { return }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown], handler: { [weak self] event in
+            guard let self else { return event }
+            if event.type == .keyDown, event.keyCode == 53 {
+                self.dismissAnswer()
+                return nil
+            }
+            if event.type != .keyDown, event.window != self.panel {
+                self.dismissAnswer()
+            }
+            return event
+        }) {
+            eventMonitors.append(local)
+        }
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown], handler: { [weak self] event in
+            if event.type == .keyDown, event.keyCode != 53 { return }
+            self?.dismissAnswer()
+        }) {
+            eventMonitors.append(global)
+        }
+    }
+
+    private func removeAnswerMonitors() {
+        eventMonitors.forEach(NSEvent.removeMonitor)
+        eventMonitors.removeAll()
+    }
+
+    private func dismissAnswer() {
+        NotificationCenter.default.post(name: .pillAnswerDismissed, object: nil)
     }
 
     /// Bottom-center of the screen hosting the FOCUSED window — where the text

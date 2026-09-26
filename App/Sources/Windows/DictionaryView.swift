@@ -69,7 +69,7 @@ struct DictionaryView: View {
         .padding(JotUI.Spacing.m)
     }
 
-    private var filtered: [FilteredEntry] {
+    private var filtered: [DictionaryEntry] {
         let base = entries.sorted {
             if $0.starred != $1.starred { return $0.starred }
             return $0.createdAt > $1.createdAt
@@ -78,54 +78,63 @@ struct DictionaryView: View {
             $0.term.localizedCaseInsensitiveContains(search)
                 || ($0.misspelling?.localizedCaseInsensitiveContains(search) ?? false)
         }
-        return matching.map { FilteredEntry(entry: $0) }
-    }
-
-    private struct FilteredEntry: Identifiable {
-        let entry: DictionaryEntry
-        var id: UUID { entry.id }
+        return matching
     }
 
     private var entryList: some View {
-        List(filtered) { item in
-            let entry = item.entry
-            HStack(spacing: JotUI.Spacing.s) {
-                Button {
-                    store.toggleStar(id: entry.id)
-                    reload()
-                } label: {
-                    Image(systemName: entry.starred ? "star.fill" : "star")
-                        .foregroundStyle(entry.starred ? JotUI.Colors.gYellow : JotUI.Colors.onSurfaceVariant.opacity(0.5))
+        List {
+            let manual = filtered.filter { $0.source == .manual }
+            let auto = filtered.filter { $0.source == .auto }
+            if !manual.isEmpty {
+                Section("Dictionary") {
+                    ForEach(manual) { entry in entryRow(entry) }
                 }
-                .buttonStyle(.plain)
-                .help("Starred words are prioritized")
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(entry.term)
-                        .font(JotUI.TypeScale.body(grad: grad))
-                        .foregroundStyle(JotUI.Colors.onSurface)
-                    if let misspelling = entry.misspelling, !misspelling.isEmpty {
-                        Text("\"\(misspelling)\" → \(entry.term)")
-                            .font(JotUI.TypeScale.labelSmall(grad: grad))
-                            .foregroundStyle(JotUI.Colors.onSurfaceVariant)
-                    }
-                }
-                Spacer()
-                Button {
-                    store.remove(id: entry.id)
-                    reload()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 10))
-                        .foregroundStyle(JotUI.Colors.onSurfaceVariant)
-                }
-                .buttonStyle(.plain)
             }
-            .padding(.vertical, 2)
+            if !auto.isEmpty {
+                Section("Auto-learned") {
+                    ForEach(auto) { entry in entryRow(entry) }
+                }
+            }
         }
         .listStyle(.inset)
         .scrollContentBackground(.hidden)
         .searchable(text: $search, placement: .automatic, prompt: "Search")
+    }
+
+    private func entryRow(_ entry: DictionaryEntry) -> some View {
+        HStack(spacing: JotUI.Spacing.s) {
+            Button {
+                store.toggleStar(id: entry.id)
+                reload()
+            } label: {
+                Image(systemName: entry.starred ? "star.fill" : "star")
+                    .foregroundStyle(entry.starred ? JotUI.Colors.gYellow : JotUI.Colors.onSurfaceVariant.opacity(0.5))
+            }
+            .buttonStyle(.plain)
+            .help("Starred words are prioritized")
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(entry.term)
+                    .font(JotUI.TypeScale.body(grad: grad))
+                    .foregroundStyle(JotUI.Colors.onSurface)
+                if let misspelling = entry.misspelling, !misspelling.isEmpty {
+                    Text("\"\(misspelling)\" → \(entry.term)")
+                        .font(JotUI.TypeScale.labelSmall(grad: grad))
+                        .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                }
+            }
+            Spacer()
+            Button {
+                store.remove(id: entry.id)
+                reload()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10))
+                    .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, 2)
     }
 
     private var emptyState: some View {

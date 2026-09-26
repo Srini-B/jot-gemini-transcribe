@@ -30,6 +30,10 @@ public enum FLACEncoder {
     }
 
     public static func encode(cafURL: URL, flacURL: URL) throws -> Output {
+        try encode(cafURL: cafURL, flacURL: flacURL, frameRange: nil)
+    }
+
+    public static func encode(cafURL: URL, flacURL: URL, frameRange: Range<AVAudioFramePosition>?) throws -> Output {
         let started = Date()
         try? FileManager.default.removeItem(at: flacURL)
 
@@ -53,8 +57,11 @@ public enum FLACEncoder {
             let chunk = AVAudioPCMBuffer(pcmFormat: reader.processingFormat, frameCapacity: 65_536)!
             // read(into:) can throw a spurious nilError at EOF with an Int16 client
             // format — guard on framePosition instead (probed on macOS 26).
-            while reader.framePosition < reader.length {
-                try reader.read(into: chunk)
+            let range = frameRange ?? 0..<reader.length
+            reader.framePosition = max(0, range.lowerBound)
+            while reader.framePosition < min(reader.length, range.upperBound) {
+                let count = min(chunk.frameCapacity, AVAudioFrameCount(range.upperBound - reader.framePosition))
+                try reader.read(into: chunk, frameCount: count)
                 if chunk.frameLength == 0 { break }
                 try writer.write(from: chunk)
             }

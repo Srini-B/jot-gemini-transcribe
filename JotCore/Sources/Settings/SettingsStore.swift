@@ -109,6 +109,39 @@ public struct SettingsStore: Sendable {
         Self.set(enabled, forKey: "soundsEnabled")
     }
 
+    public var translationTargetLanguage: String {
+        Self.defaults.string(forKey: "translationTargetLanguage") ?? "English"
+    }
+
+    public func setTranslationTargetLanguage(_ language: String) {
+        let trimmed = language.trimmingCharacters(in: .whitespacesAndNewlines)
+        Self.set(trimmed.isEmpty ? "English" : trimmed, forKey: "translationTargetLanguage")
+    }
+
+    public var muteOtherAudioWhileDictating: Bool {
+        Self.defaults.object(forKey: "muteOtherAudioWhileDictating") as? Bool ?? true
+    }
+
+    public func setMuteOtherAudioWhileDictating(_ enabled: Bool) {
+        Self.set(enabled, forKey: "muteOtherAudioWhileDictating")
+    }
+
+    public var screenContextEnabled: Bool {
+        Self.defaults.object(forKey: "screenContextEnabled") as? Bool ?? true
+    }
+
+    public func setScreenContextEnabled(_ enabled: Bool) {
+        Self.set(enabled, forKey: "screenContextEnabled")
+    }
+
+    public var preferredInputDeviceUID: String? {
+        Self.defaults.string(forKey: "preferredInputDeviceUID")
+    }
+
+    public func setPreferredInputDeviceUID(_ uid: String?) {
+        Self.set(uid, forKey: "preferredInputDeviceUID")
+    }
+
     public var hotkeyKey: HotkeyKey {
         (Self.defaults.string(forKey: "hotkeyKey")).flatMap(HotkeyKey.init(rawValue:)) ?? .fn
     }
@@ -138,7 +171,7 @@ public struct SettingsStore: Sendable {
     public var formattingPolicy: FormattingPolicy {
         FormattingPolicy(
             nativeSmart: Self.defaults.object(forKey: "smartTranscription") as? Bool ?? true,
-            cleanupPass: Self.defaults.object(forKey: "smartCleanupPass") as? Bool ?? false
+            cleanupPass: Self.defaults.object(forKey: "smartCleanupPass") as? Bool ?? true
         )
     }
 
@@ -151,11 +184,54 @@ public struct SettingsStore: Sendable {
         Self.set(enabled, forKey: "smartTranscription")
     }
 
-    /// The opt-in second pass through the cleanup model — this is what carries
-    /// per-app tone. Off by default: it costs a round trip and sends the
+    /// The second pass through the cleanup model — this is what applies the
+    /// user's writing rules (`customInstructions`) and per-app tone. On by
+    /// default: native smart transcription cannot apply a correction spoken
+    /// several sentences after the thing it corrects, and cannot segment
+    /// pause-free speech by grammar. It costs a round trip and sends the
     /// transcript text a second time.
     public var smartCleanupPassEnabled: Bool {
-        Self.defaults.object(forKey: "smartCleanupPass") as? Bool ?? false
+        Self.defaults.object(forKey: "smartCleanupPass") as? Bool ?? true
+    }
+
+    /// Free-form rules the cleanup pass follows. Empty or whitespace means
+    /// "use `DictationRulesSeed.text`", so a user who clears the box gets the
+    /// defaults rather than a rule-less pass.
+    public var customInstructions: String {
+        let stored = Self.defaults.string(forKey: "customInstructions") ?? ""
+        return stored.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? DictationRulesSeed.text
+            : stored
+    }
+
+    /// The raw stored value for the editor (nil until the user edits).
+    public var customInstructionsOverride: String? {
+        Self.defaults.string(forKey: "customInstructions")
+    }
+
+    public func setCustomInstructions(_ text: String?) {
+        let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines)
+        Self.set(trimmed.flatMap { $0.isEmpty ? nil : $0 }, forKey: "customInstructions")
+    }
+
+    /// Watch the field after insertion and add the user's word-level edits to
+    /// the dictionary automatically.
+    public var autoLearnEnabled: Bool {
+        Self.defaults.object(forKey: "autoLearn") as? Bool ?? true
+    }
+
+    public func setAutoLearn(_ enabled: Bool) {
+        Self.set(enabled, forKey: "autoLearn")
+    }
+
+    /// Detect calls (mic in use by a call app or a meeting tab) and record
+    /// them for meeting notes.
+    public var meetingDetectionEnabled: Bool {
+        Self.defaults.object(forKey: "meetingDetection") as? Bool ?? true
+    }
+
+    public func setMeetingDetection(_ enabled: Bool) {
+        Self.set(enabled, forKey: "meetingDetection")
     }
 
     public func setSmartCleanupPass(_ enabled: Bool) {

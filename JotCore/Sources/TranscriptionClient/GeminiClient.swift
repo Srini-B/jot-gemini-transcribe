@@ -31,7 +31,7 @@ public struct GeminiConfig: Sendable, Equatable {
         // one.) A user can still pin something else in Settings → Advanced.
         transcribeModel: String = "gemini-3.5-transcribe",
         liveModel: String = "gemini-3.5-transcribe-live",
-        cleanupModel: String = "gemini-3.5-flash-lite"
+        cleanupModel: String = "gemini-3.8-flash"
     ) {
         self.endpoint = endpoint
         self.transcribeModel = transcribeModel
@@ -66,7 +66,9 @@ public actor GeminiClient {
     public init(apiKey: @escaping @Sendable () -> String?) {
         let config = URLSessionConfiguration.ephemeral
         config.waitsForConnectivity = false // fail fast into the retry/queue path
-        config.timeoutIntervalForResource = 600
+        // Recordings are no longer capped at 10 minutes; a one-hour upload on a
+        // slow uplink needs more than the old 600s resource budget.
+        config.timeoutIntervalForResource = 3_600
         self.session = URLSession(configuration: config)
         self.apiKey = apiKey
     }
@@ -99,20 +101,30 @@ public actor GeminiClient {
         return try await generateContent(body: body, model: model, endpoint: endpoint, deadline: deadline)
     }
 
-    /// Text-only cleanup call (flash-lite class, thinking minimized).
+    /// Cleanup call (flash class, thinking minimized), optionally with JPEG context.
     /// The thinking knob differs by model generation (probed live):
     ///  - gemini-2.x: `thinkingConfig.thinkingBudget: 0`
     ///  - gemini-3.x+: `thinkingConfig.thinkingLevel: "low"` (thinkingBudget → 400;
     ///    bare/top-level thinkingLevel → 400; "low" measured faster and more
     ///    consistent than "minimal" on our eval set)
-    public func cleanup(prompt: String, model: String, endpoint: URL, deadline: TimeInterval) async throws -> String {
+    public func cleanup(
+        prompt: String,
+        images: [Data] = [],
+        model: String,
+        endpoint: URL,
+        deadline: TimeInterval
+    ) async throws -> String {
         let thinkingConfig: [String: Any] = model.hasPrefix("gemini-2")
             ? ["thinkingBudget": 0]
             : ["thinkingLevel": "low"]
+        var parts: [[String: Any]] = [["text": prompt]]
+        parts.append(contentsOf: images.map {
+            ["inline_data": ["mime_type": "image/jpeg", "data": $0.base64EncodedString()]]
+        })
         let body: [String: Any] = [
             "contents": [[
                 "role": "user",
-                "parts": [["text": prompt]],
+                "parts": parts,
             ]],
             "generationConfig": [
                 "temperature": 0,
@@ -177,7 +189,7 @@ public actor GeminiClient {
     // MARK: - Core
 
     /// Thin parser over `post` — the classic `candidates/content/parts` envelope.
-    private func generateContent(body: [String: Any], model: String, endpoint: URL, deadline: TimeInterval) async throws -> String {
+    func generateContent(body: [String: Any], model: String, endpoint: URL, deadline: TimeInterval) async throws -> String {
         let data = try await post(
             path: "v1beta/models/\(model):generateContent",
             body: try JSONSerialization.data(withJSONObject: body),
@@ -191,7 +203,7 @@ public actor GeminiClient {
     /// fork per-endpoint — RetryQueue branches on `.rateLimitedDaily` vs
     /// `.rateLimitedTransient` to decide between "keep this row queued forever"
     /// and "mark it failed", so two copies would drift into a data-loss bug.
-    private func post(
+    func post(
         path: String,
         body: Data,
         endpoint: URL,

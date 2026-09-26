@@ -332,7 +332,7 @@ final class DictationCoordinatorTests: XCTestCase {
         c.handle(.finalize)
         await pump()
         XCTAssertEqual(c.state, .transcribing)
-        c.handle(.finalize) // pill Stop double-click / second jot://stop
+        c.handle(.finalize) // pill Stop double-click / second voiceiq://stop
         XCTAssertEqual(c.state, .transcribing)
         await pump()
         XCTAssertEqual(capture.stopCount, 1, "second finalize must not stop capture again")

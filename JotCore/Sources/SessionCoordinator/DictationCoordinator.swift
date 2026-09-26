@@ -27,6 +27,7 @@ public final class DictationCoordinator: ObservableObject {
     @Published public private(set) var micLevel: Float = 0
     @Published public private(set) var lastResult: String?
     @Published public private(set) var coachingHint: String?
+    @Published public private(set) var modeFailureMessage: String?
 
     /// "Delete All History" should also forget the paste-last buffer — a user
     /// wiping their words expects them gone from everywhere we hold them.
@@ -78,12 +79,12 @@ public final class DictationCoordinator: ObservableObject {
     /// room. This clause can only ever prevent a discard, never cause one.
     static let discardSNRThreshold: Double = 6
 
-    /// F20: soft warning at 9:00, hard stop + transcribe at 10:00.
-    static let recordingWarnSeconds: TimeInterval = 540
-    static let recordingCapSeconds: TimeInterval = 600
+    /// Live sessions are server-capped at ten minutes. Past this point the
+    /// stream is about to be (or has been) closed, so the batch path over the
+    /// CAF is the only complete transcript; waiting on a live final would only
+    /// add latency before the same fallback.
+    static let liveMaxSeconds: TimeInterval = 570
 
-    private var capWarnTask: Task<Void, Never>?
-    private var capStopTask: Task<Void, Never>?
     /// The in-flight transcription task — cancelled when the user cancels the
     /// session (audit L8: Esc previously left the network work running).
     private var inFlightTask: Task<Void, Never>?
@@ -108,6 +109,10 @@ public final class DictationCoordinator: ObservableObject {
             correctedTranscript = ""
             correctionSegments = []
             lastInterim = ""
+            if oldValue != nil, let collector = screenContextCollector {
+                screenContextCollector = nil
+                _ = collector.stop()
+            }
             guard let live = liveSession else { return }
             liveSession = nil
             Task { await live.abort() }
@@ -136,6 +141,7 @@ public final class DictationCoordinator: ObservableObject {
     /// left-hand side of the diff.
     private var lastInterim: String = ""
     private var capture: AudioCapturing?
+    private var screenContextCollector: ScreenContextCollector?
     /// Most recent metered level — decides whether the user was mid-word when
     /// they released the key.
     private var latestLevel: Float = 0
@@ -159,6 +165,7 @@ public final class DictationCoordinator: ObservableObject {
     /// short cancels) — the app removes its History row. Disk mirrors the UI:
     /// what History doesn't show, we don't store.
     public var onSessionDiscard: ((UUID) -> Void)?
+    public var onAnswerReady: ((String) -> Void)?
 
     /// Cancelled recordings at least this long stay recoverable in History —
     /// an accidental Esc after minutes of dictation must not destroy the words.
@@ -213,9 +220,18 @@ public final class DictationCoordinator: ObservableObject {
     /// the refused session strands it in .locked and eats the next dictation.
     @discardableResult
     public func handle(_ intent: HotkeyIntent) -> Bool {
+        handle(intent, mode: .dictate)
+    }
+
+    @discardableResult
+    public func handle(
+        _ intent: HotkeyIntent,
+        mode: DictationMode,
+        selectedTextIsSettable: Bool = false
+    ) -> Bool {
         switch intent {
         case .begin:
-            return beginSession()
+            return beginSession(mode: mode, selectedTextIsSettable: selectedTextIsSettable)
         case .lockIn:
             // Engine start is deferred a tick (and Bluetooth mics take longer):
             // a lock arriving during warming must not be dropped — latch it and
@@ -284,7 +300,10 @@ public final class DictationCoordinator: ObservableObject {
     // MARK: - Session lifecycle
 
     @discardableResult
-    private func beginSession() -> Bool {
+    private func beginSession(
+        mode: DictationMode = .dictate,
+        selectedTextIsSettable: Bool = false
+    ) -> Bool {
         guard state == .idle || state.isTerminal else {
             Log.session.info("begin ignored: session already active (\(String(describing: self.state), privacy: .public))")
             return false
@@ -293,7 +312,7 @@ public final class DictationCoordinator: ObservableObject {
         if secureInputActive() {
             // Name the app holding it and say what to do. The flag is SYSTEM-WIDE,
             // so the culprit is usually not the window the user is looking at —
-            // "secure input is on" alone reads as "Jot is broken", especially
+            // "secure input is on" alone reads as "Voice IQ is broken", especially
             // during onboarding where a stuck loginwindow flag is common.
             if let holder = SecureInput.holder() {
                 coachingHint = "\(holder.name) has secure input on. \(SecureInput.advice(forHolder: holder.name))"
@@ -306,6 +325,7 @@ public final class DictationCoordinator: ObservableObject {
         }
         state = .idle
         coachingHint = nil
+        modeFailureMessage = nil
         pendingLockIn = false // never inherit a stale latch from a dead session
         apply(.hotkeyBegin)
 
@@ -314,11 +334,19 @@ public final class DictationCoordinator: ObservableObject {
         do {
             let folder = try FileLayout.makeSessionFolder(id: id, now: startedAt)
             var meta = SessionMeta(id: id, startedAt: startedAt, status: .recording)
-            let context = contextProvider()
+            var context = contextProvider()
+            context.mode = mode
+            context.selectedTextIsSettable = selectedTextIsSettable
             meta.targetAppBundleID = context.targetAppBundleID
             meta.targetAppName = context.targetAppName
             meta.write(to: folder)
             session = Session(id: id, folder: folder, startedAt: startedAt, context: context, meta: meta)
+
+            if mode == .dictate, SettingsStore().screenContextEnabled {
+                let collector = ScreenContextCollector()
+                screenContextCollector = collector
+                collector.start()
+            }
 
             noiseFloor = NoiseFloorEstimator()
             noiseHandlingActive = noiseHandlingEnabled()
@@ -381,7 +409,7 @@ public final class DictationCoordinator: ObservableObject {
         do {
             // Latched once, here: the user flipping the setting mid-dictation
             // must not produce a recording that is half streamed and half not.
-            let live = makeLiveSession()
+            let live = session?.context.mode == .dictate ? makeLiveSession() : nil
             liveSession = live
             liveActiveForSession = live != nil
 
@@ -418,7 +446,6 @@ public final class DictationCoordinator: ObservableObject {
                 pendingLockIn = false
                 apply(.lockIn)
             }
-            startCapTimers()
         } catch {
             Log.audio.error("audio engine failed to start: \(error)")
             // Honest failure taxonomy: "Mic didn't start" is wrong advice on a
@@ -438,33 +465,7 @@ public final class DictationCoordinator: ObservableObject {
         }
     }
 
-    // MARK: - Recording cap (F20) & disk failure (F22)
-
-    private func startCapTimers() {
-        capWarnTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(Self.recordingWarnSeconds * 1_000_000_000))
-            guard !Task.isCancelled else { return }
-            await MainActor.run { [weak self] in
-                if case .recording = self?.state {
-                    self?.coachingHint = "One minute left — 10-minute limit"
-                }
-            }
-        }
-        capStopTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(Self.recordingCapSeconds * 1_000_000_000))
-            guard !Task.isCancelled else { return }
-            await MainActor.run { [weak self] in
-                guard let self, case .recording = self.state else { return }
-                Log.session.info("recording cap reached — finalizing")
-                self.finalizeSession()
-            }
-        }
-    }
-
-    private func stopCapTimers() {
-        capWarnTask?.cancel(); capWarnTask = nil
-        capStopTask?.cancel(); capStopTask = nil
-    }
+    // MARK: - Disk failure (F22)
 
     private func handleWriteFailure() {
         guard case .recording = state else { return }
@@ -520,7 +521,7 @@ public final class DictationCoordinator: ObservableObject {
         // (same pattern as cancelSession, audit #10). A second stop while a
         // session is in flight must not stop capture or clobber meta.
         guard apply(.finalize) else { return }
-        stopCapTimers()
+        finishScreenContext()
         // Hand the engine off and release it immediately: stop() now drains the
         // HAL's in-flight buffer (~50ms mean of real speech) and tears the graph
         // down — tens to hundreds of ms that must not freeze the main actor. The
@@ -649,7 +650,8 @@ public final class DictationCoordinator: ObservableObject {
                 // cancels inFlightTask, so a live finish outside it would be
                 // invisible to cancellation and keep running after the user
                 // gave up.
-                if self.liveActiveForSession, let live = self.liveSession {
+                if self.liveActiveForSession, let live = self.liveSession,
+                   result.durationSeconds <= Self.liveMaxSeconds {
                     let liveResult = await live.finish(
                         deadline: TimeoutPolicy.liveFinal,
                         framesWritten: result.framesWritten
@@ -670,8 +672,13 @@ public final class DictationCoordinator: ObservableObject {
                         self.correctionSegments = diff.contains(where: \.isCut) ? diff : []
                         self.partialTranscript = liveResult.cleanedTranscript
                         self.correctedTranscript = liveResult.cleanedTranscript
+                        // The live model only formats; the writing rules (late
+                        // corrections, grammar-driven sentence boundaries, tone)
+                        // are the cleanup pass, same as the batch path.
+                        let polished = await self.transcription.polish(liveResult, context: session.context)
+                        guard !Task.isCancelled else { return }
                         await self.completeTranscription(
-                            sessionID: sessionID, outcome: liveResult, startedAt: finalizeStartedAt
+                            sessionID: sessionID, outcome: polished, startedAt: finalizeStartedAt
                         )
                         return
                     }
@@ -704,6 +711,15 @@ public final class DictationCoordinator: ObservableObject {
         }
         apply(.transcriptReady)
 
+        if case .askAnything = session?.context.mode {
+            lastResult = outcome.cleanedTranscript
+            onAnswerReady?(outcome.cleanedTranscript)
+            updateMeta { $0.status = .inserted; $0.pipelineSeconds = Date().timeIntervalSince(startedAt) }
+            apply(.inserted)
+            session = nil
+            return
+        }
+
         let insertionOutcome = await insertion.insert(outcome.cleanedTranscript, context: session?.context ?? DictationContext())
         let pipelineSeconds = Date().timeIntervalSince(startedAt)
         switch insertionOutcome {
@@ -726,6 +742,15 @@ public final class DictationCoordinator: ObservableObject {
 
     private func failTranscription(sessionID: UUID, error: Error) async {
         guard session?.id == sessionID else { return }
+        if session?.context.mode != .dictate {
+            if case .translate(let target) = session?.context.mode {
+                modeFailureMessage = "Couldn't translate to \(target)"
+            }
+            updateMeta { $0.status = .failed; $0.errorCode = "mode_transform" }
+            apply(.transcriptFailed(.network))
+            session = nil
+            return
+        }
         // Empty transcript: silence is judged by AUDIO ENERGY, not duration —
         // a long quiet hold is "no speech", never "Failed" (F9b; dogfood bug).
         // Speech energy present but no transcript = real failure, retryable (F9a).
@@ -803,10 +828,10 @@ public final class DictationCoordinator: ObservableObject {
             coachingHint = hint
             return
         }
+        finishScreenContext()
         inFlightTask?.cancel() // stop the network work too (audit L8)
         inFlightTask = nil
         micLevel = 0
-        stopCapTimers()
         coachingHint = hint // feedback is immediate; the bookkeeping can wait
 
         // Teardown is async (it drains the HAL tail), so the keep-or-discard
@@ -841,6 +866,15 @@ public final class DictationCoordinator: ObservableObject {
             discardSessionArtifacts()
         }
         session = nil
+    }
+
+    private func finishScreenContext() {
+        guard let collector = screenContextCollector else { return }
+        screenContextCollector = nil
+        let images = collector.stop()
+        guard var session else { return }
+        session.context.screenshots = images
+        self.session = session
     }
 
     /// Removes the session folder and asks the app to drop its History row.

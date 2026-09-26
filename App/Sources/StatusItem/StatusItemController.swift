@@ -16,9 +16,8 @@ import AppKit
 import CoreAudio
 import JotCore
 
-/// Owns the NSStatusItem. Plain NSStatusItem (not MenuBarExtra) so the icon can be
-/// animated per state: listening = equalizer bars, processing = sequential pulse.
-/// Template-only rendering (menu bar convention; macOS shows its own mic dot).
+/// Owns the NSStatusItem. Plain NSStatusItem (not MenuBarExtra) so the template
+/// icon can pulse for listening and processing states.
 final class StatusItemController: NSObject {
     enum VisualState {
         case idle
@@ -33,8 +32,9 @@ final class StatusItemController: NSObject {
     private let onOpenSettings: () -> Void
     private let onStartHandsFree: () -> Void
     private let onOpenAbout: () -> Void
+    private let templateImage: NSImage
     private var animationTimer: Timer?
-    private var frameIndex = 0
+    private var animationStartedAt = Date()
     private var state: VisualState = .idle
 
     init(
@@ -50,10 +50,11 @@ final class StatusItemController: NSObject {
         self.onOpenSettings = onOpenSettings
         self.onStartHandsFree = onStartHandsFree
         self.onOpenAbout = onOpenAbout
+        self.templateImage = Self.loadTemplateImage()
         super.init()
 
-        statusItem.button?.image = Self.glyph(barHeights: Self.idleBars, dimmed: false)
-        statusItem.button?.toolTip = "Jot"
+        statusItem.button?.image = renderedTemplate(alpha: 1)
+        statusItem.button?.toolTip = "Voice IQ"
         statusItem.menu = makeMenu()
     }
 
@@ -62,16 +63,15 @@ final class StatusItemController: NSObject {
         state = newState
         animationTimer?.invalidate()
         animationTimer = nil
-        frameIndex = 0
+        animationStartedAt = Date()
 
         switch newState {
         case .idle:
-            statusItem.button?.image = Self.glyph(barHeights: Self.idleBars, dimmed: false)
+            statusItem.button?.image = renderedTemplate(alpha: 1)
         case .attention:
-            statusItem.button?.image = Self.glyph(barHeights: Self.idleBars, dimmed: true)
+            statusItem.button?.image = renderedTemplate(alpha: 0.4)
         case .listening, .processing:
-            let interval = newState == .listening ? 0.12 : 0.25
-            animationTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            animationTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
                 self?.tickAnimation()
             }
             tickAnimation()
@@ -79,51 +79,24 @@ final class StatusItemController: NSObject {
     }
 
     private func tickAnimation() {
-        frameIndex += 1
-        let heights: [CGFloat]
-        switch state {
-        case .listening:
-            heights = Self.listeningFrames[frameIndex % Self.listeningFrames.count]
-        case .processing:
-            heights = Self.processingFrames[frameIndex % Self.processingFrames.count]
-        default:
-            heights = Self.idleBars
-        }
-        statusItem.button?.image = Self.glyph(barHeights: heights, dimmed: false)
+        let duration = state == .listening ? 0.7 : 1.2
+        let phase = Date().timeIntervalSince(animationStartedAt) / duration * 2 * Double.pi
+        let alpha = 0.725 + 0.275 * CGFloat(sin(phase))
+        statusItem.button?.image = renderedTemplate(alpha: alpha)
     }
 
-    // MARK: - Glyph drawing (original mark: pill outline + 3 waveform bars)
+    private static func loadTemplateImage() -> NSImage {
+        guard let bundled = Bundle.main.image(forResource: "MenuBarIcon"),
+              let image = bundled.copy() as? NSImage else { return NSImage(size: NSSize(width: 18, height: 18)) }
+        image.size = NSSize(width: 18, height: 18)
+        image.isTemplate = true
+        return image
+    }
 
-    private static let idleBars: [CGFloat] = [3.5, 6, 3.5]
-    private static let listeningFrames: [[CGFloat]] = [
-        [3, 6.5, 4], [5, 4, 6], [6.5, 5.5, 3.5], [4, 7, 5], [3.5, 5, 6.5],
-    ]
-    private static let processingFrames: [[CGFloat]] = [
-        [6, 4, 4], [4, 6, 4], [4, 4, 6], [4, 6, 4],
-    ]
-
-    private static func glyph(barHeights: [CGFloat], dimmed: Bool) -> NSImage {
+    private func renderedTemplate(alpha: CGFloat) -> NSImage {
         let size = NSSize(width: 18, height: 18)
         let image = NSImage(size: size, flipped: false) { _ in
-            let alpha: CGFloat = dimmed ? 0.4 : 1.0
-            let pill = NSBezierPath(
-                roundedRect: NSRect(x: 1, y: 3.5, width: 16, height: 11),
-                xRadius: 5.5, yRadius: 5.5
-            )
-            pill.lineWidth = 1.5
-            NSColor.black.withAlphaComponent(alpha).setStroke()
-            pill.stroke()
-
-            let barWidth: CGFloat = 1.8
-            let xs: [CGFloat] = [5.1, 8.1, 11.1]
-            for (x, height) in zip(xs, barHeights) {
-                let bar = NSBezierPath(
-                    roundedRect: NSRect(x: x, y: 9 - height / 2, width: barWidth, height: height),
-                    xRadius: barWidth / 2, yRadius: barWidth / 2
-                )
-                NSColor.black.withAlphaComponent(alpha).setFill()
-                bar.fill()
-            }
+            self.templateImage.draw(in: NSRect(origin: .zero, size: size), from: .zero, operation: .sourceOver, fraction: alpha)
             return true
         }
         image.isTemplate = true
@@ -162,7 +135,7 @@ final class StatusItemController: NSObject {
 
         menu.addItem(.separator())
 
-        // Which mic Jot hears through — moves the SYSTEM default input, exactly
+        // Which mic Voice IQ hears through — moves the SYSTEM default input, exactly
         // like Control Center, so AirPods vs built-in is one click (dogfood).
         let micItem = NSMenuItem(title: "Microphone", action: nil, keyEquivalent: "")
         let micMenu = NSMenu(title: "Microphone")
@@ -176,11 +149,11 @@ final class StatusItemController: NSObject {
 
         menu.addItem(.separator())
 
-        let about = NSMenuItem(title: "About Jot", action: #selector(openAbout), keyEquivalent: "")
+        let about = NSMenuItem(title: "About Voice IQ", action: #selector(openAbout), keyEquivalent: "")
         about.target = self
         menu.addItem(about)
 
-        let quit = NSMenuItem(title: "Quit Jot", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "Quit Voice IQ", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
 
         return menu
