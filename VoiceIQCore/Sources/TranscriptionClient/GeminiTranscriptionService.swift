@@ -186,13 +186,15 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
                 raw: raw, target: target, vocabulary: dictionary.sanitizedVocabulary()
             )
         }
+        let stage: UsageStage = { if case .translate = context.mode { return .translate }; return .answer }()
         let response = try await client.cleanup(
             prompt: prompt,
             model: config.cleanupModel,
             endpoint: config.endpoint,
             // Web context can make the prompt far larger than the transcript;
             // the model has to read it all, so the budget follows the prompt.
-            deadline: Self.cleanupDeadline(forCharacters: max(raw.count, prompt.count / 3))
+            deadline: Self.cleanupDeadline(forCharacters: max(raw.count, prompt.count / 3)),
+            stage: stage
         )
         let cleaned = ValidationGate.stripArtifacts(response).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { throw TranscriptionError.emptyTranscript }

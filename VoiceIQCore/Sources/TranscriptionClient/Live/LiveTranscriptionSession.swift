@@ -72,6 +72,9 @@ public actor LiveTranscriptionSession {
 
     private var finals: [String] = []
     private var latestPartial: String = ""
+    /// The socket reports usage per turn; a later frame supersedes an earlier
+    /// one for the same turn, so the largest total wins rather than the sum.
+    private var reportedUsage: TokenUsage?
     private var failure: String?
     private var didSetup = false
     private var activityEndFlushed = false
@@ -189,6 +192,7 @@ public actor LiveTranscriptionSession {
         while !closed {
             do {
                 let frame = try await transport.receive()
+                if let usage = TokenUsage.fromLiveFrame(frame) { noteUsage(usage) }
                 guard let event = LiveProtocol.decode(frame) else { continue }
                 switch event {
                 case .partial(let text):
@@ -215,6 +219,22 @@ public actor LiveTranscriptionSession {
 
     private func recordFailure(_ why: String) {
         if failure == nil { failure = why }
+    }
+
+    private func noteUsage(_ usage: TokenUsage) {
+        if let current = reportedUsage, current.totalIn + current.totalOut >= usage.totalIn + usage.totalOut { return }
+        reportedUsage = usage
+    }
+
+    /// Books this session against the caller's `UsageMeter.scope`. Estimates
+    /// from bytes sent and text received when the server sent no counts.
+    private func recordUsage(outputText: String) {
+        let usage = reportedUsage ?? TokenUsage.estimated(
+            audioSeconds: Double(ring.acceptedBytes) / 32_000,
+            outputCharacters: outputText.count,
+            audioTokensPerSecond: PriceBook.audioTokensPerSecond(model: setup.model)
+        )
+        UsageMeter.record(stage: .liveTranscribe, model: setup.model, usage: usage)
     }
 
     /// Ends the turn and waits for the server's last word.
@@ -244,6 +264,7 @@ public actor LiveTranscriptionSession {
             try? await Task.sleep(nanoseconds: 30_000_000)
         }
         close()
+        recordUsage(outputText: finals.joined(separator: " "))
 
         if let failure { return .unusable(failure) }
         guard !finals.isEmpty else { return .unusable("no final transcript before deadline") }

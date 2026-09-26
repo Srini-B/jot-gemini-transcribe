@@ -1,0 +1,195 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+import SwiftUI
+import VoiceIQCore
+
+/// Cost Analysis: what the Gemini calls behind each action cost, at the
+/// paid-tier prices on the pricing page. Period totals up top, then a
+/// breakdown by action and by model for the chosen period, then the most
+/// recent calls.
+struct CostPane: View {
+    let store: UsageStore
+
+    enum Period: String, CaseIterable, Identifiable {
+        case today, week, month, all
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .today: return "Today"
+            case .week: return "This week"
+            case .month: return "This month"
+            case .all: return "All time"
+            }
+        }
+        var start: Date? {
+            let calendar = Calendar.current
+            let now = Date()
+            switch self {
+            case .today: return calendar.startOfDay(for: now)
+            case .week: return calendar.dateInterval(of: .weekOfYear, for: now)?.start
+            case .month: return calendar.dateInterval(of: .month, for: now)?.start
+            case .all: return nil
+            }
+        }
+    }
+
+    @State private var period: Period = .month
+    @State private var totals: [Period: UsageStore.Total] = [:]
+    @State private var byActivity: [(key: String, total: UsageStore.Total)] = []
+    @State private var byModel: [(key: String, total: UsageStore.Total)] = []
+    @State private var recent: [UsageRecord] = []
+    @Environment(\.colorScheme) private var scheme
+    private var grad: CGFloat { scheme == .dark ? 25 : 0 }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: VoiceIQUI.Spacing.l) {
+                summary
+                Picker("Period", selection: $period) {
+                    ForEach(Period.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .onChange(of: period) { _, _ in reloadBreakdown() }
+                breakdown("By action", rows: byActivity.map { (UsageActivity(rawValue: $0.key)?.displayName ?? $0.key, $0.total) })
+                breakdown("By model", rows: byModel.map { ($0.key, $0.total) })
+                recentCalls
+                Text("Paid-tier Standard prices from the Gemini API pricing page. A free-tier key is billed nothing. ≈ marks estimated tokens or an unpriced model.")
+                    .font(VoiceIQUI.TypeScale.labelSmall(grad: grad))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(VoiceIQUI.Spacing.l)
+        }
+        .onAppear(perform: reload)
+        .onReceive(
+            NotificationCenter.default.publisher(for: .gtUsageDidChange)
+                .debounce(for: .milliseconds(250), scheduler: RunLoop.main)
+        ) { _ in reload() }
+    }
+
+    // MARK: - Sections
+
+    private var summary: some View {
+        HStack(spacing: VoiceIQUI.Spacing.xl) {
+            ForEach(Period.allCases) { p in
+                let total = totals[p] ?? .zero
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(Self.money(total.costUSD, approximate: total.isApproximate))
+                        .font(VoiceIQUI.TypeScale.title(grad: grad))
+                        .monospacedDigit()
+                    Text(p.title)
+                        .font(VoiceIQUI.TypeScale.labelSmall(grad: grad))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+        }
+    }
+
+    private func breakdown(_ title: String, rows: [(String, UsageStore.Total)]) -> some View {
+        VStack(alignment: .leading, spacing: VoiceIQUI.Spacing.xs) {
+            Text(title).font(VoiceIQUI.TypeScale.title(grad: grad))
+            if rows.isEmpty {
+                Text("No calls in this period")
+                    .font(VoiceIQUI.TypeScale.body(grad: grad))
+                    .foregroundStyle(.secondary)
+            } else {
+                Grid(alignment: .leading, horizontalSpacing: VoiceIQUI.Spacing.l, verticalSpacing: 6) {
+                    GridRow {
+                        header(""); header("Calls"); header("Tokens in"); header("Tokens out"); header("Cost")
+                    }
+                    ForEach(rows, id: \.0) { name, total in
+                        GridRow {
+                            Text(name).font(VoiceIQUI.TypeScale.body(grad: grad))
+                            cell("\(total.calls)")
+                            cell(Self.tokens(total.tokensIn))
+                            cell(Self.tokens(total.tokensOut))
+                            cell(Self.money(total.costUSD, approximate: total.isApproximate))
+                        }
+                    }
+                }
+            }
+        }
+        .padding(VoiceIQUI.Spacing.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: VoiceIQUI.Radius.medium).fill(.quaternary.opacity(0.4)))
+    }
+
+    private var recentCalls: some View {
+        VStack(alignment: .leading, spacing: VoiceIQUI.Spacing.xs) {
+            Text("Recent calls").font(VoiceIQUI.TypeScale.title(grad: grad))
+            if recent.isEmpty {
+                Text("Nothing recorded yet")
+                    .font(VoiceIQUI.TypeScale.body(grad: grad))
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(recent) { record in
+                    HStack(spacing: VoiceIQUI.Spacing.s) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(record.activityValue.displayName) · \(record.stageValue?.displayName ?? record.stage)")
+                                .font(VoiceIQUI.TypeScale.body(grad: grad))
+                            Text("\(record.model) · in \(Self.tokens(record.usage.totalIn)) · out \(Self.tokens(record.usage.totalOut)) · \(record.at.formatted(date: .abbreviated, time: .shortened))")
+                                .font(VoiceIQUI.TypeScale.labelSmall(grad: grad))
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text(Self.money(record.costUSD, approximate: record.isEstimated || record.costUSD == nil))
+                            .font(VoiceIQUI.TypeScale.body(grad: grad))
+                            .monospacedDigit()
+                    }
+                    .padding(.vertical, 4)
+                    Divider()
+                }
+            }
+        }
+    }
+
+    private func header(_ text: String) -> some View {
+        Text(text).font(VoiceIQUI.TypeScale.labelSmall(grad: grad)).foregroundStyle(.secondary)
+    }
+
+    private func cell(_ text: String) -> some View {
+        Text(text).font(VoiceIQUI.TypeScale.body(grad: grad)).monospacedDigit()
+    }
+
+    // MARK: - Data
+
+    private func reload() {
+        var next: [Period: UsageStore.Total] = [:]
+        for p in Period.allCases { next[p] = store.total(since: p.start) }
+        totals = next
+        recent = store.recent(limit: 30)
+        reloadBreakdown()
+    }
+
+    private func reloadBreakdown() {
+        byActivity = store.totalsByActivity(since: period.start)
+        byModel = store.totalsByModel(since: period.start)
+    }
+
+    // MARK: - Formatting
+
+    /// Costs are fractions of a cent per dictation, so four decimals until a
+    /// dollar, two after.
+    static func money(_ value: Double?, approximate: Bool = false) -> String {
+        guard let value else { return "—" }
+        let text = value >= 1 ? String(format: "$%.2f", value) : String(format: "$%.4f", value)
+        return approximate ? "≈" + text : text
+    }
+
+    static func tokens(_ count: Int) -> String {
+        count >= 10_000 ? String(format: "%.1fk", Double(count) / 1000) : "\(count)"
+    }
+}

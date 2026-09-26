@@ -146,13 +146,16 @@ public final class RetryQueue {
                 targetAppBundleID: meta.targetAppBundleID,
                 targetAppName: meta.targetAppName
             )
-            let result = try await transcription.transcribe(
-                audioURL: cafURL,
-                durationSeconds: meta.audioDurationSeconds
-                    ?? FileLayout.estimatedDuration(ofCAF: cafURL)
-                    ?? 60,
-                context: context
-            )
+            let scope = UsageScope(activity: .dictation, sessionID: meta.id.uuidString)
+            let result = try await UsageMeter.$scope.withValue(scope) {
+                try await transcription.transcribe(
+                    audioURL: cafURL,
+                    durationSeconds: meta.audioDurationSeconds
+                        ?? FileLayout.estimatedDuration(ofCAF: cafURL)
+                        ?? 60,
+                    context: context
+                )
+            }
             meta.rawTranscript = result.rawTranscript
             meta.cleanedTranscript = result.cleanedTranscript
             meta.modelID = result.modelID

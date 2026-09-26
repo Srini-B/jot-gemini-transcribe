@@ -29,4 +29,5 @@ public enum Log {
     public static let screen = Logger(subsystem: subsystem, category: "screen")
     public static let permissions = Logger(subsystem: subsystem, category: "permissions")
     public static let ui = Logger(subsystem: subsystem, category: "ui")
+    public static let usage = Logger(subsystem: subsystem, category: "usage")
 }

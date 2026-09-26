@@ -35,7 +35,8 @@ public extension GeminiClient {
         ]
         let data = try await post(path: "v1beta/interactions",
                                   body: try JSONSerialization.data(withJSONObject: body), endpoint: endpoint,
-                                  deadline: deadline, modelLabel: model, modelIsInPath: false)
+                                  deadline: deadline, modelLabel: model, modelIsInPath: false,
+                                  stage: .meetingTranscribe)
         return try Self.parseDiarizedWords(data)
     }
 
@@ -65,7 +66,8 @@ public extension GeminiClient {
                 "thinkingConfig": ["thinkingLevel": "low"],
             ],
         ]
-        let text = try await generateContent(body: body, model: model, endpoint: endpoint, deadline: deadline)
+        let text = try await generateContent(body: body, model: model, endpoint: endpoint, deadline: deadline,
+                                             stage: .meetingSummary)
         return try Self.parseMeetingNotes(text)
     }
 

@@ -68,7 +68,7 @@ final class MainWindowController: NSWindowController {
 }
 
 enum MainSection: String, CaseIterable, Identifiable {
-    case history, meetings, dictionary
+    case history, meetings, dictionary, cost
     case dictation, privacy, advanced
     case about
     var id: String { rawValue }
@@ -78,6 +78,7 @@ enum MainSection: String, CaseIterable, Identifiable {
         case .history: return "History"
         case .meetings: return "Meetings"
         case .dictionary: return "Dictionary"
+        case .cost: return "Cost Analysis"
         case .dictation: return "Dictation"
         case .privacy: return "Privacy & Storage"
         case .advanced: return "Advanced"
@@ -90,6 +91,7 @@ enum MainSection: String, CaseIterable, Identifiable {
         case .history: return "clock.arrow.circlepath"
         case .meetings: return "person.2.wave.2.fill"
         case .dictionary: return "character.book.closed.fill"
+        case .cost: return "dollarsign.circle.fill"
         case .dictation: return "waveform"
         case .privacy: return "hand.raised.fill"
         case .advanced: return "wrench.and.screwdriver.fill"
@@ -102,6 +104,7 @@ enum MainSection: String, CaseIterable, Identifiable {
         case .history: return VoiceIQUI.Colors.gBlue
         case .meetings: return Color(nsColor: .systemPurple)
         case .dictionary: return Color(nsColor: .systemOrange)
+        case .cost: return Color(nsColor: .systemMint)
         case .dictation: return Color(nsColor: .systemTeal)
         case .privacy: return Color(nsColor: .systemGreen)
         case .advanced: return Color(nsColor: .systemIndigo)
@@ -109,7 +112,7 @@ enum MainSection: String, CaseIterable, Identifiable {
         }
     }
 
-    static let dataSections: [MainSection] = [.history, .meetings, .dictionary]
+    static let dataSections: [MainSection] = [.history, .meetings, .dictionary, .cost]
     static let settingsSections: [MainSection] = [.dictation, .privacy, .advanced, .about]
 }
 
@@ -184,7 +187,7 @@ private struct MainView: View {
             switch model.selection {
             case .history:
                 if let store {
-                    HistoryPane(store: store, onRetry: onRetry)
+                    HistoryPane(store: store, usage: UsageMeter.store, onRetry: onRetry)
                 } else {
                     ContentUnavailableView("History unavailable", systemImage: "clock.badge.exclamationmark")
                 }
@@ -192,6 +195,12 @@ private struct MainView: View {
                 MeetingsPane(engine: meetings, store: meetings.store)
             case .dictionary:
                 DictionaryView()
+            case .cost:
+                if let usage = UsageMeter.store {
+                    CostPane(store: usage)
+                } else {
+                    ContentUnavailableView("Cost tracking unavailable", systemImage: "dollarsign.circle")
+                }
             case .dictation:
                 DictationPane().formStyle(.grouped)
             case .privacy:

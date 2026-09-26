@@ -98,7 +98,7 @@ public actor GeminiClient {
                 "audioTranscriptionConfig": audioConfig,
             ],
         ]
-        return try await generateContent(body: body, model: model, endpoint: endpoint, deadline: deadline)
+        return try await generateContent(body: body, model: model, endpoint: endpoint, deadline: deadline, stage: .transcribe)
     }
 
     /// Cleanup call (flash class, thinking minimized), optionally with JPEG context.
@@ -113,7 +113,8 @@ public actor GeminiClient {
         audioFLAC: Data? = nil,
         model: String,
         endpoint: URL,
-        deadline: TimeInterval
+        deadline: TimeInterval,
+        stage: UsageStage = .cleanup
     ) async throws -> String {
         let thinkingConfig: [String: Any] = model.hasPrefix("gemini-2")
             ? ["thinkingBudget": 0]
@@ -135,7 +136,7 @@ public actor GeminiClient {
                 "thinkingConfig": thinkingConfig,
             ],
         ]
-        return try await generateContent(body: body, model: model, endpoint: endpoint, deadline: deadline)
+        return try await generateContent(body: body, model: model, endpoint: endpoint, deadline: deadline, stage: stage)
     }
 
     /// Cheap key validation for onboarding/Settings.
@@ -193,11 +194,12 @@ public actor GeminiClient {
     // MARK: - Core
 
     /// Thin parser over `post` — the classic `candidates/content/parts` envelope.
-    func generateContent(body: [String: Any], model: String, endpoint: URL, deadline: TimeInterval) async throws -> String {
+    func generateContent(body: [String: Any], model: String, endpoint: URL, deadline: TimeInterval,
+                         stage: UsageStage) async throws -> String {
         let data = try await post(
             path: "v1beta/models/\(model):generateContent",
             body: try JSONSerialization.data(withJSONObject: body),
-            endpoint: endpoint, deadline: deadline, modelLabel: model
+            endpoint: endpoint, deadline: deadline, modelLabel: model, stage: stage
         )
         return try Self.extractText(from: data)
     }
@@ -219,6 +221,8 @@ public actor GeminiClient {
         /// the wrong fix — especially since onboarding's preflight GETs the model
         /// resource and passes for exactly that user.
         modelIsInPath: Bool = true,
+        /// Attributed to the current `UsageMeter.scope` for the Cost pane.
+        stage: UsageStage,
         isRetryAfter429: Bool = false
     ) async throws -> Data {
         let url = endpoint.appendingPathComponent(path)
@@ -255,7 +259,12 @@ public actor GeminiClient {
         }
         switch http.statusCode {
         case 200:
-            break
+            // Every billed call passes through here, so this is the one place
+            // usage is read. Both envelopes are tried; a body with neither is
+            // simply not metered.
+            if let usage = TokenUsage.fromGenerateContent(data) ?? TokenUsage.fromInteraction(data) {
+                UsageMeter.record(stage: stage, model: modelLabel, usage: usage)
+            }
         case 401:
             throw TranscriptionError.auth
         case 403, 404:
@@ -277,7 +286,8 @@ public actor GeminiClient {
                 Log.transcription.info("GeminiClient: 429 with retryDelay \(delay, format: .fixed(precision: 1))s — waiting once")
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 return try await post(path: path, body: body, endpoint: endpoint, deadline: deadline,
-                                      modelLabel: modelLabel, modelIsInPath: modelIsInPath, isRetryAfter429: true)
+                                      modelLabel: modelLabel, modelIsInPath: modelIsInPath, stage: stage,
+                                      isRetryAfter429: true)
             }
             // Only a real daily/hard quota is terminal; a per-minute throttle
             // (or an unparseable body) clears on its own and stays retryable.
@@ -332,7 +342,7 @@ public actor GeminiClient {
         let data = try await post(
             path: "v1beta/interactions",
             body: try JSONSerialization.data(withJSONObject: body),
-            endpoint: endpoint, deadline: deadline, modelLabel: model, modelIsInPath: false
+            endpoint: endpoint, deadline: deadline, modelLabel: model, modelIsInPath: false, stage: .transcribe
         )
         return try Self.extractInteractionText(from: data)
     }

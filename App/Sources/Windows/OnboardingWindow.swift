@@ -147,8 +147,10 @@ private struct OnboardingFlow: View {
 
     private func advance() {
         var next = Screen(rawValue: screen.rawValue + 1) ?? .done
-        // Skip the Globe screen when the system action is already Do Nothing.
-        if next == .globeKey, !FnUsageAdvisor.currentGlobeKeyAction().conflictsWithFnHotkey {
+        // Skip the Globe screen when the dictation key is not Globe, or when the
+        // system action is already Do Nothing.
+        if next == .globeKey,
+           SettingsStore().hotkeyKey != .fn || !FnUsageAdvisor.currentGlobeKeyAction().conflictsWithFnHotkey {
             next = .howTo
         }
         backStack.append(screen)
@@ -748,16 +750,22 @@ private struct MicScreen: View {
 private struct AccessibilityScreen: View {
     let onNext: () -> Void
     @State private var granted = AXIsProcessTrusted()
+    @State private var screenGranted = CGPreflightScreenCaptureAccess()
     @State private var pollTimer: Timer?
     @State private var slowGrant = false
 
     var body: some View {
-        ScreenScaffold("Let it type for you.", "macOS needs your OK before Voice IQ can place text at your cursor.") {
+        ScreenScaffold("Let it type for you.", "Accessibility places text at your cursor. Screen Recording lets Voice IQ read names and paths on screen while you talk. It is optional.") {
             VStack(spacing: VoiceIQUI.Spacing.m) {
                 PermissionCard(icon: "keyboard", title: "Accessibility", granted: granted) {
                     let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
                     _ = AXIsProcessTrustedWithOptions(options)
                     NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+                }
+                PermissionCard(icon: "rectangle.dashed.badge.record", title: "Screen Recording", granted: screenGranted) {
+                    if !CGRequestScreenCaptureAccess() {
+                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
+                    }
                 }
                 if slowGrant && !granted {
                     Text("Granted but not detected? A relaunch may be needed.")
@@ -781,6 +789,7 @@ private struct AccessibilityScreen: View {
                         NSApp.activate(ignoringOtherApps: true)
                     }
                     granted = trusted
+                    screenGranted = CGPreflightScreenCaptureAccess()
                 }
             }
             Timer.scheduledTimer(withTimeInterval: 10, repeats: false) { _ in
@@ -851,15 +860,24 @@ private struct GlobeKeyScreen: View {
 private struct HowToScreen: View {
     let onNext: () -> Void
     private let keyName = SettingsStore().hotkeyKey.displayName
+    private let shortcuts = ShortcutStore()
 
     var body: some View {
-        ScreenScaffold("Talk to Voice IQ.", "Two gestures — that's the whole product.") {
+        ScreenScaffold("Talk to Voice IQ.", "One press starts, one press finishes. Every key is editable in Settings → Dictation.") {
             VStack(spacing: VoiceIQUI.Spacing.m) {
                 VStack(alignment: .leading, spacing: VoiceIQUI.Spacing.s) {
-                    gestureRow(keys: [keyName], title: "Press and talk",
+                    gestureRow(keys: [keyName], title: "Dictate",
                                detail: "Talk as long as you like. Press \(keyName) again and polished text lands at your cursor.")
                     gestureRow(keys: ["esc"], title: "Changed your mind",
                                detail: "Cancels the dictation. Long recordings are kept in History.")
+                    gestureRow(keys: [shortcuts.shortcut(for: .askAnything).displayString], title: "Ask Anything",
+                               detail: "Speak a question or a command over selected text. The answer shows on the pill.")
+                    gestureRow(keys: [shortcuts.shortcut(for: .translate).displayString], title: "Translate",
+                               detail: "Speak in any language. The target language types out.")
+                    gestureRow(keys: [shortcuts.shortcut(for: .meetingToggle).displayString], title: "Meeting notes",
+                               detail: "Records the call, then writes a transcript, summary, and action items.")
+                    gestureRow(keys: [shortcuts.shortcut(for: .pasteLastTranscript).displayString], title: "Paste last transcript",
+                               detail: "Types the most recent dictation again wherever the cursor is.")
                 }
                 .padding(VoiceIQUI.Spacing.m)
                 .background(RoundedRectangle(cornerRadius: VoiceIQUI.Radius.large).fill(VoiceIQUI.Colors.surface)
@@ -1080,7 +1098,7 @@ private struct DoneScreen: View {
                 // page total (display + body), never three.
                 // "strips your ums" read as jargon to a first-time user (Kat,
                 // from the wild) — name the filler words plainly instead.
-                Text("It removes filler words like \"umm\" and \"uhh\", follows your change of mind, and takes \"new paragraph\" literally. Teach it your jargon in Settings → Dictionary.")
+                Text("It removes filler words like \"umm\" and \"uhh\", follows your change of mind, and turns spoken lists into lists. Words you correct after pasting are learned into Settings → Dictionary.")
                     .font(VoiceIQUI.TypeScale.body())
                     .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
                     .multilineTextAlignment(.center)

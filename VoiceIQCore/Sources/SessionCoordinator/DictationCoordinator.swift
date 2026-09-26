@@ -619,7 +619,9 @@ public final class DictationCoordinator: ObservableObject {
 
         let sessionID = session.id
         let finalizeStartedAt = Date()
+        let usageScope = UsageScope(mode: session.context.mode, sessionID: sessionID.uuidString)
         inFlightTask = Task { [weak self] in
+          await UsageMeter.$scope.withValue(usageScope) {
             guard let self else { return }
             do {
                 // Live first, when it is on. Inside this task on purpose: Esc
@@ -677,6 +679,7 @@ public final class DictationCoordinator: ObservableObject {
                 guard !Task.isCancelled else { return }
                 await self.failTranscription(sessionID: sessionID, error: error)
             }
+          }
         }
     }
 

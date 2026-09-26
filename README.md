@@ -4,39 +4,38 @@
 
 # Voice IQ
 
-**[Gemini 3.5 Transcribe](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-transcribe) Demo. Hold a key. Speak. It types.**
+**Press a key. Speak. It types.**
 
-Smart dictation for macOS that puts polished text wherever your cursor is.
-
-<sub>Created by [Ammaar Reshi](https://x.com/ammaar) · Apache 2.0 licensed</sub>
+Smart dictation, Ask Anything, Translate, and meeting notes for macOS, all on Gemini.
 
 </div>
-
-This is not an officially supported Google product.
 
 ---
 
 ## What it is
 
-Hold `fn`, say the thing, let go. A moment later your words are in the app you
-were already using — punctuated, filler words removed, cleaned up. No window to switch
+Press the dictation key, say the thing, press it again. A moment later your
+words are in the app you were already using — punctuated, filler words removed,
+lists laid out as lists, mid-sentence corrections applied. No window to switch
 to, no transcript to copy, no account to make.
-
-<img width="640" height="294" alt="Voice IQ preview" src="https://github.com/user-attachments/assets/669efea9-dbfe-4174-a8fe-748aab818f14" />
-
 
 It is deliberately small: a menu bar icon, a pill at the bottom of your screen
 while you talk, and a History window that proves nothing was ever lost.
 
-## The three gestures
+## Keys
 
-| Gesture | What happens |
+| Key | What happens |
 | --- | --- |
-| **Hold `fn`** | Records while held. Release and the text lands at your cursor. |
-| **`fn` + tap `Space`** | Hands-free: keeps recording after you let go. Tap `fn` to finish. |
+| **Dictation key** (default `fn`) | One press starts, one press finishes. Hands-free, no holding. |
 | **`Esc`** | Cancels. Anything over 10 seconds is still kept in History. |
+| **⌃⌥A** | Ask Anything. Speak a question or a command over selected text. |
+| **⌃⌥T** | Translate. Speak in any language; the target language is typed. |
+| **⌥M** | Start or stop meeting notes. |
+| **⌘⇧V** | Paste the last transcript or answer again. |
 
-The key is rebindable in Settings → General if `fn` is spoken for.
+Every key is editable in Settings → Dictation, and a shortcut can require the
+left or the right modifier only. The dictation key also stops an Ask Anything or
+Translate in progress.
 
 ## What makes it different
 
@@ -68,13 +67,13 @@ instructions become edits, run-on speech gets sentence breaks, and your own
 rules from Settings → Dictation are applied. Dictate for as long as you like;
 there is no time limit.
 
-**Ask Anything and Translate.** Select text (optional), hold ⌃⌥A, and ask
+**Ask Anything and Translate.** Select text (optional), press ⌃⌥A, and ask
 ("make this shorter", "what does this error mean"); the answer opens in the
 pill, with Markdown rendered and a Copy button, and never edits your text. Each
 question stands alone. Add a free [TinyFish](https://agent.tinyfish.ai/api-keys)
 API key in Settings → Advanced and questions that need current information
 (news, prices, releases) are answered from a live web search, with sources
-linked. Hold ⌃⌥T to dictate in any language and have it typed in
+linked. Press ⌃⌥T to dictate in any language and have it typed in
 the target language you pick from the searchable list in Settings → Dictation
 (the 99 languages Gemini Live supports); if Gemini cannot translate it, the pill
 says so and nothing is inserted. ⌘⇧V pastes the last transcript or answer
@@ -93,18 +92,17 @@ a live transcript in the pill. Press ⌥M again (or the pill's stop button) to
 finish: you get a speaker-labelled transcript plus a summary, decisions, and
 owned action items under Settings → Meetings. Recording never stops on its own.
 
-## Install
+**Cost Analysis.** Every Gemini call is metered from the token counts the API
+returns and priced at the paid-tier rates on the pricing page. Settings → Cost
+Analysis shows today, this week, this month, and all time, broken down by action
+and by model; each dictation in History shows what it cost. Details in
+[docs/COST_TRACKING.md](docs/COST_TRACKING.md).
 
-1. Download the latest `Voice IQ-x.y.z.dmg` from [Releases](../../releases/latest).
-2. Drag Voice IQ into **Applications** and launch it from there — apps run from a
-   mounted disk image are sandboxed by macOS and the permissions you grant will
-   not stick.
+## Setup
 
-<div align="center">
-<img src="docs/images/installer.png" width="480" alt="Drag Voice IQ to Applications">
-</div>
-
-Setup takes about two minutes and the app walks you through it:
+Build the app (see Development below), move `Voice IQ.app` into
+**Applications**, and launch it. Setup takes about two minutes and the app walks
+you through it:
 
 1. **Paste a Gemini API key** — get one at
    [Google AI Studio](https://aistudio.google.com/apikey). It is stored in your
@@ -112,7 +110,9 @@ Setup takes about two minutes and the app walks you through it:
 2. **Allow the microphone** — say hello and it advances by itself.
 3. **Allow Accessibility** — macOS requires this for any app that types into
    another app.
-4. **Hold `fn` and talk.**
+4. **Allow Screen Recording** (optional) — lets a few downscaled screenshots
+   ride along with each dictation so on-screen names and paths are spelled right.
+5. **Press the dictation key and talk.**
 
 **Cost:** you pay Google for what you dictate at
 [Gemini API pricing](https://ai.google.dev/pricing); a free tier exists and a
@@ -128,13 +128,13 @@ your first dictation. Advanced settings can pin other model names.
 ## How it works
 
 ```
-fn down ─▶ capture (CAF on disk from t=0) ─▶ fn up ─▶ FLAC ─▶ Gemini transcribe
-                        │  (live socket streams text meanwhile)        │  (chunked past 10 min)
-                        ▼                                              ▼
+key ─▶ capture (CAF on disk from t=0) ─▶ key ─▶ FLAC ─▶ Gemini transcribe
+                    │  (live socket streams text meanwhile)     │  (chunked past 10 min)
+                    ▼                                           ▼
    cursor ◀─ insert (AX → paste → clipboard) ◀─ validate ◀─ writing-rules pass
-      │                                                     (gemini-3.8-flash)
-      ▼                                                            │
-   learn from edits ─▶ Dictionary                            History (SQLite)
+      │                                                  (gemini-3.8-flash, with screenshots)
+      ▼                                                         │
+   learn from edits ─▶ Dictionary                  History (SQLite) + usage ledger
 ```
 
 A few decisions worth knowing about, because they are what make it feel solid:
@@ -184,15 +184,19 @@ VoiceIQCore/        all engine logic, headless and testable
   FormattingPipeline/   cleanup prompt, validation gate, dictionary rules
   InsertionEngine/      the AX → paste → clipboard ladder
   HistoryStore/         GRDB index, recovery, retry queue, retention
+  MeetingEngine/        call detection, mic + system audio taps, diarized notes
+  ScreenContext/        screenshots on app switch for spelling context
+  Learning/             dictionary auto-learn from your edits
+  Usage/                token metering, price book, cost ledger
 scripts/        build, test, icon, DMG, release
-docs/           privacy, releasing, design specs, research
+docs/           privacy, releasing, cost tracking, design specs, research
 ```
 
 Useful while hacking:
 
 ```bash
 # every surface is reachable headlessly
-open "voiceiq://settings/about"      # or /dictation /privacy /advanced
+open "voiceiq://settings/about"      # or /dictation /privacy /advanced /meetings /cost
 open "voiceiq://history"  "voiceiq://dictionary"  "voiceiq://onboarding/5"
 
 # watch it work
@@ -206,10 +210,3 @@ Transcript text is logged as `private` and never appears in those logs.
 `./scripts/release.sh` archives, signs with Developer ID, notarizes, staples,
 and builds the installer DMG. It refuses to produce a shareable DMG that is not
 notarized. See [docs/RELEASING.md](docs/RELEASING.md) for the certificate setup.
-
-## License
-
-Apache License 2.0 — see [LICENSE](LICENSE). Bundled fonts (Google Sans Flex,
-Google Sans Code) are SIL OFL 1.1. The earcons are original works covered by the
-same Apache 2.0 license. Details in
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

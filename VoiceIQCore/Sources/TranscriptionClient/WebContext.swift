@@ -76,7 +76,8 @@ public struct WebContext: Sendable, Equatable {
                 prompt: PromptV1.webSearchQueryPrompt(instruction: instruction, selectedText: selectedText),
                 model: config.cleanupModel,
                 endpoint: config.endpoint,
-                deadline: 8
+                deadline: 8,
+                stage: .webQuery
             )
             decision = Decision(response)
         } catch {

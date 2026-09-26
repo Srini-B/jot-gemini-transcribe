@@ -116,6 +116,7 @@ final class DictationController {
         let service = GeminiTranscriptionService(client: client)
         transcriptionService = service
         historyStore = try? HistoryStore.standard()
+        UsageMeter.store = try? UsageStore.standard()
         meetings = MeetingEngine(
             client: client,
             config: { SettingsStore().geminiConfig },

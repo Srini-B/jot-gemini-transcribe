@@ -105,7 +105,9 @@ import Foundation
             do { try system.start() } catch { _ = mic.stop(); throw error }
             self.mic = mic; self.system = system; self.preview = preview
             currentFolder = folder; currentMeta = meta; livePreview = ""
-            preview?.start()
+            // The preview's rotation tasks inherit this scope, so its live
+            // sessions are booked to the meeting.
+            UsageMeter.$scope.withValue(UsageScope(activity: .meeting, sessionID: id.uuid.uuidString)) { preview?.start() }
             phase = .recording(id, since: now)
         } catch { fail(id, error) }
     }
@@ -118,12 +120,17 @@ import Foundation
         livePreview = ""
         meta.endedAt = Date(); meta.durationSeconds = max(micDuration, systemDuration); meta.status = .transcribing
         currentMeta = meta; try? store.save(meta: meta)
-        Task { await process(id: id, folder: folder, meta: meta, remix: true) }
+        Task { await UsageMeter.$scope.withValue(UsageScope(activity: .meeting, sessionID: id.uuid.uuidString)) {
+            await process(id: id, folder: folder, meta: meta, remix: true)
+        } }
     }
 
     public func retry(id: MeetingID) {
         guard let folder = store.folder(for: id), let meta = store.list().first(where: { $0.id == id }) else { return }
-        phase = .processing(id); Task { await process(id: id, folder: folder, meta: meta, remix: false) }
+        phase = .processing(id)
+        Task { await UsageMeter.$scope.withValue(UsageScope(activity: .meeting, sessionID: id.uuid.uuidString)) {
+            await process(id: id, folder: folder, meta: meta, remix: false)
+        } }
     }
 
     private func process(id: MeetingID, folder: URL, meta original: MeetingMeta, remix: Bool) async {

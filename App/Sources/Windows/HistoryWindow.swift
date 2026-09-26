@@ -22,10 +22,12 @@ import VoiceIQCore
 /// Cleaned/Raw, audio playback, retry, delete.
 struct HistoryPane: View {
     let store: HistoryStore
+    var usage: UsageStore?
     let onRetry: (DictationRecord) -> Void
 
     @State private var query = ""
     @State private var records: [DictationRecord] = []
+    @State private var costs: [String: Double] = [:]
     @State private var stats = HistoryStore.Stats(totalWords: 0, totalDictations: 0, averageWPM: 0)
     @State private var detailRecord: DictationRecord?
     @State private var showAllAttention = false
@@ -54,6 +56,7 @@ struct HistoryPane: View {
         .sheet(item: $detailRecord) { record in
             RecordDetailSheet(
                 record: record,
+                calls: usage?.records(forSession: record.id) ?? [],
                 onRetry: { onRetry(record) },
                 onDelete: {
                     store.delete(id: record.id, removeFolder: true)
@@ -279,6 +282,9 @@ struct HistoryPane: View {
                             Text(String(format: "%.0fs", duration))
                         }
                         Text(record.startedAt.formatted(date: .omitted, time: .shortened))
+                        if let cost = costs[record.id] {
+                            Text(CostPane.money(cost))
+                        }
                     }
                     .font(VoiceIQUI.TypeScale.labelSmall(grad: grad))
                     .foregroundStyle(.secondary)
@@ -382,6 +388,7 @@ struct HistoryPane: View {
     private func reload() {
         records = store.records(matching: query.isEmpty ? nil : query)
         stats = store.stats()
+        costs = usage?.costBySession(ids: records.map(\.id)) ?? [:]
     }
 
 }
@@ -390,6 +397,7 @@ struct HistoryPane: View {
 
 private struct RecordDetailSheet: View {
     let record: DictationRecord
+    var calls: [UsageRecord] = []
     let onRetry: () -> Void
     let onDelete: () -> Void
 
@@ -459,6 +467,21 @@ private struct RecordDetailSheet: View {
                 if let pipeline = record.pipelineSeconds {
                     GridRow {
                         metaLabel("Pipeline"); metaValue(String(format: "%.2fs", pipeline))
+                    }
+                }
+                if !calls.isEmpty {
+                    GridRow {
+                        metaLabel("Cost")
+                        metaValue(CostPane.money(
+                            calls.reduce(0) { $0 + ($1.costUSD ?? 0) },
+                            approximate: calls.contains { $0.isEstimated || $0.costUSD == nil }
+                        ))
+                    }
+                    ForEach(calls) { call in
+                        GridRow {
+                            metaLabel(call.stageValue?.displayName ?? call.stage)
+                            metaValue("\(call.model) · in \(CostPane.tokens(call.usage.totalIn)) · out \(CostPane.tokens(call.usage.totalOut)) · \(CostPane.money(call.costUSD, approximate: call.isEstimated))")
+                        }
                     }
                 }
                 GridRow {
