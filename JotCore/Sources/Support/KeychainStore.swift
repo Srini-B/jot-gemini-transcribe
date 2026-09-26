@@ -23,13 +23,33 @@ import Security
 public enum KeychainStore {
     private static let service = "io.blue.voiceiq"
     private static let legacyService = "com.ammaar.jot"
-    private static let account = "gemini-api-key"
 
-    private static func baseQuery(service: String = service, dataProtection: Bool) -> [String: Any] {
+    /// One keychain item per secret. `rawValue` is the `kSecAttrAccount`.
+    public enum Secret: String {
+        case gemini = "gemini-api-key"
+        case tinyFish = "tinyfish-api-key"
+
+        var label: String {
+            switch self {
+            case .gemini: return "Voice IQ — Gemini API key"
+            case .tinyFish: return "Voice IQ — TinyFish API key"
+            }
+        }
+
+        /// `object` of `.gtSettingDidChange` when this secret changes.
+        public var settingKey: String {
+            switch self {
+            case .gemini: return "apiKey"
+            case .tinyFish: return "tinyFishKey"
+            }
+        }
+    }
+
+    private static func baseQuery(service: String = service, secret: Secret, dataProtection: Bool) -> [String: Any] {
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
+            kSecAttrAccount as String: secret.rawValue,
         ]
         if dataProtection {
             query[kSecUseDataProtectionKeychain as String] = true
@@ -37,19 +57,39 @@ public enum KeychainStore {
         return query
     }
 
+    // MARK: - Gemini
+
     public static func loadAPIKey() -> String? {
-        if let key = loadAPIKey(service: service) { return key }
-        guard let legacyKey = loadAPIKey(service: legacyService) else { return nil }
+        if let key = load(.gemini, service: service) { return key }
+        guard let legacyKey = load(.gemini, service: legacyService) else { return nil }
         if saveAPIKey(legacyKey) {
-            deleteAPIKey(service: legacyService)
+            delete(.gemini, service: legacyService)
             Log.permissions.info("KeychainStore: migrated API key to Voice IQ service")
         }
         return legacyKey
     }
 
-    private static func loadAPIKey(service: String) -> String? {
+    @discardableResult
+    public static func saveAPIKey(_ key: String) -> Bool { save(key, for: .gemini) }
+
+    @discardableResult
+    public static func deleteAPIKey(notify: Bool = false) -> Bool { delete(.gemini, notify: notify) }
+
+    // MARK: - TinyFish
+
+    public static func loadTinyFishKey() -> String? { load(.tinyFish, service: service) }
+
+    @discardableResult
+    public static func saveTinyFishKey(_ key: String) -> Bool { save(key, for: .tinyFish) }
+
+    @discardableResult
+    public static func deleteTinyFishKey(notify: Bool = false) -> Bool { delete(.tinyFish, notify: notify) }
+
+    // MARK: - Generic
+
+    private static func load(_ secret: Secret, service: String) -> String? {
         for dataProtection in [true, false] {
-            var query = baseQuery(service: service, dataProtection: dataProtection)
+            var query = baseQuery(service: service, secret: secret, dataProtection: dataProtection)
             query[kSecReturnData as String] = true
             query[kSecMatchLimit as String] = kSecMatchLimitOne
             var item: CFTypeRef?
@@ -61,20 +101,19 @@ public enum KeychainStore {
         return nil
     }
 
-    @discardableResult
-    public static func saveAPIKey(_ key: String) -> Bool {
-        deleteAPIKey()
+    private static func save(_ key: String, for secret: Secret) -> Bool {
+        delete(secret, service: service)
         for dataProtection in [true, false] {
-            var attributes = baseQuery(dataProtection: dataProtection)
-            attributes[kSecAttrLabel as String] = "Voice IQ — Gemini API key"
+            var attributes = baseQuery(secret: secret, dataProtection: dataProtection)
+            attributes[kSecAttrLabel as String] = secret.label
             attributes[kSecValueData as String] = Data(key.utf8)
             if dataProtection {
                 attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
             }
             let status = SecItemAdd(attributes as CFDictionary, nil)
             if status == errSecSuccess {
-                Log.permissions.info("KeychainStore: key saved (\(dataProtection ? "data-protection" : "login", privacy: .public) keychain)")
-                NotificationCenter.default.post(name: .gtSettingDidChange, object: "apiKey")
+                Log.permissions.info("KeychainStore: \(secret.rawValue, privacy: .public) saved (\(dataProtection ? "data-protection" : "login", privacy: .public) keychain)")
+                NotificationCenter.default.post(name: .gtSettingDidChange, object: secret.settingKey)
                 return true
             }
             if status != errSecMissingEntitlement {
@@ -86,19 +125,19 @@ public enum KeychainStore {
         return false
     }
 
-    @discardableResult
-    public static func deleteAPIKey(notify: Bool = false) -> Bool {
-        let deleted = deleteAPIKey(service: service)
+    private static func delete(_ secret: Secret, notify: Bool) -> Bool {
+        let deleted = delete(secret, service: service)
         if deleted, notify {
-            NotificationCenter.default.post(name: .gtSettingDidChange, object: "apiKey")
+            NotificationCenter.default.post(name: .gtSettingDidChange, object: secret.settingKey)
         }
         return deleted
     }
 
-    private static func deleteAPIKey(service: String) -> Bool {
+    @discardableResult
+    private static func delete(_ secret: Secret, service: String) -> Bool {
         var deleted = false
         for dataProtection in [true, false] {
-            let status = SecItemDelete(baseQuery(service: service, dataProtection: dataProtection) as CFDictionary)
+            let status = SecItemDelete(baseQuery(service: service, secret: secret, dataProtection: dataProtection) as CFDictionary)
             deleted = deleted || status == errSecSuccess
         }
         return deleted

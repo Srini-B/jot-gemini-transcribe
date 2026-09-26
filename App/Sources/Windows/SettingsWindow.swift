@@ -226,7 +226,7 @@ private struct SidebarRow: View {
                     .background(RoundedRectangle(cornerRadius: 6).fill(section.tileColor))
                 Text(section.title)
                     .font(JotUI.TypeScale.body())
-                    .foregroundStyle(selected ? Color.white : .primary)
+                    .foregroundStyle(selected ? JotUI.Colors.onPrimary : .primary)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 8)
@@ -351,11 +351,13 @@ struct PrivacyPane: View {
                 LabeledContent("Transcript text") { Text("Only if writing rules are on — otherwise it never leaves") }
                 LabeledContent("Meeting audio") { Text("Only if call recording is on; notes are made by the Gemini API") }
                 LabeledContent("Dictionary terms") { Text("Sent with the audio, so names are spelled right as you speak") }
+                LabeledContent("Screen snapshots") { Text("Only if screen context is on; sent with the audio, never stored") }
+                LabeledContent("Ask Anything search") { Text("Only if a TinyFish key is saved; the search query goes to TinyFish") }
                 LabeledContent("Everything else") { Text("Never leaves this Mac") }
             } header: {
                 Text("What leaves your Mac")
             } footer: {
-                Text("No middleman server, no account, no analytics, no screenshots, no keystroke logging. One network host.")
+                Text("No middleman server, no account, no analytics, no keystroke logging. Google, plus TinyFish only when you add its key.")
             }
 
             Section {
@@ -438,6 +440,8 @@ struct AdvancedPane: View {
             } footer: {
                 Text("Stored in your Mac's Keychain and only ever sent to Google.")
             }
+
+            TinyFishKeySection()
 
             Section {
                 TextField("Endpoint", text: $endpoint,

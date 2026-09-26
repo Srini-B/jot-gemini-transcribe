@@ -9,7 +9,8 @@ Everything else stays on your Mac. The code is open — verify all of this.
 ## What leaves your machine (the complete list)
 
 1. **The audio of each dictation** (FLAC-compressed), sent to
-   `generativelanguage.googleapis.com` — the only network host this app talks to.
+   `generativelanguage.googleapis.com` — the only network host this app talks
+   to unless you add a TinyFish key (item 5).
 2. **Your dictionary terms**, alongside that audio. The transcription model uses
    them to bias what it hears, which is why names and jargon come out spelled
    right as you speak rather than being corrected afterwards. Only the correct
@@ -28,6 +29,15 @@ Everything else stays on your Mac. The code is open — verify all of this.
    the images in memory and never stores them on disk. macOS asks for Screen
    Recording permission the first time this feature runs. If you deny access,
    dictation continues without images. Turn off "Screen context" to stop capture.
+5. **Ask Anything web search**, only if you saved a TinyFish API key in
+   Settings → Advanced (off by default; there is no key until you add one).
+   For each Ask Anything request Gemini first decides whether the question
+   needs current information. If it does, Voice IQ sends one short search
+   query to `api.search.tinyfish.ai` and fetches the top three result pages
+   through `api.fetch.tinyfish.ai`. Your spoken instruction and any selected
+   text go only to Google; TinyFish receives the search query and the page
+   URLs. The fetched page text is placed in the Gemini prompt and discarded.
+   Remove the key to stop this entirely.
 5. **Meeting audio**, while "Record calls for meeting notes" is on in
    Settings → Dictation — on by default. When a calling app (Zoom, Teams,
    FaceTime, WhatsApp, Slack, Discord, Webex) or a browser tab on a meeting
@@ -94,7 +104,8 @@ the clipboard.
 ## Verify it
 
 - Build from source (`./scripts/build.sh`).
-- Watch traffic with Little Snitch or `nettop` — you'll see exactly one host.
+- Watch traffic with Little Snitch or `nettop` — you'll see exactly one host
+  (two TinyFish hosts appear only after you add a TinyFish key).
 - Read the prompts: they are source files. The writing-rules pass is
   [PromptV1.swift](../JotCore/Sources/FormattingPipeline/PromptV1.swift) plus
   the default custom instructions in

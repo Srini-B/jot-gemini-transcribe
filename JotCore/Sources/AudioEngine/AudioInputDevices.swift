@@ -52,9 +52,32 @@ public enum AudioInputDevices {
             return []
         }
         return ids.compactMap { id in
-            guard hasInputStreams(id), let name = name(of: id), let uid = uid(of: id) else { return nil }
+            guard hasInputStreams(id), !isPrivateAggregate(id),
+                  let name = name(of: id), let uid = uid(of: id) else { return nil }
             return Device(id: id, name: name, uid: uid)
         }
+    }
+
+    /// CoreAudio builds a private aggregate (`CADefaultDeviceAggregate-<pid>-0`,
+    /// `VPAUAggregateAudioDevice-…`) around whatever this process captures from.
+    /// Its name is its UID and the UID changes every launch, so it is neither a
+    /// microphone the user can pick nor a new device worth announcing.
+    private static func isPrivateAggregate(_ id: AudioDeviceID) -> Bool {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyTransportType,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var transport: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(id, &address, 0, nil, &size, &transport) == noErr,
+              transport == kAudioDeviceTransportTypeAggregate else { return false }
+        address.mSelector = kAudioAggregateDevicePropertyComposition
+        var composition: Unmanaged<CFDictionary>?
+        size = UInt32(MemoryLayout<Unmanaged<CFDictionary>?>.size)
+        guard AudioObjectGetPropertyData(id, &address, 0, nil, &size, &composition) == noErr,
+              let dict = composition?.takeRetainedValue() as? [String: Any] else { return false }
+        return (dict[kAudioAggregateDeviceIsPrivateKey] as? NSNumber)?.boolValue ?? false
     }
 
     /// Signal, never poll: CoreAudio tells us when the default input moves.

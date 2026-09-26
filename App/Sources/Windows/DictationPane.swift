@@ -205,26 +205,35 @@ private struct LanguagePicker: View {
     }
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
             TextField("Search languages", text: $search)
                 .textFieldStyle(.roundedBorder)
                 .multilineTextAlignment(.leading)
-            List(languages) { language in
-                Button {
-                    selected = language.name
-                    onSelect()
-                } label: {
-                    HStack {
-                        Text(language.name)
-                        Spacer()
-                        Text(language.code).foregroundStyle(.secondary)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(languages) { language in
+                        Button {
+                            selected = language.name
+                            onSelect()
+                        } label: {
+                            Text(language.name)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5)
+                                .background(
+                                    RoundedRectangle(cornerRadius: JotUI.Radius.small)
+                                        .fill(language.name == selected
+                                              ? Color.primary.opacity(JotUI.StateLayer.hover) : .clear)
+                                )
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
             }
         }
+        .environment(\.layoutDirection, .leftToRight)
         .padding(12)
-        .frame(width: 320, height: 360)
+        .frame(width: 280, height: 360)
     }
 }

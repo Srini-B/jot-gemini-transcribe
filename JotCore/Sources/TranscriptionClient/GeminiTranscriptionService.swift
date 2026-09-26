@@ -149,11 +149,22 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
         case .dictate:
             return raw
         case .askAnything(let selectedText):
+            var webContext: WebContext?
+            if KeychainStore.loadTinyFishKey() != nil {
+                webContext = await WebContext.gather(
+                    instruction: raw,
+                    selectedText: selectedText,
+                    gemini: client,
+                    tinyFish: TinyFishClient(apiKey: { KeychainStore.loadTinyFishKey() }),
+                    config: config
+                )
+            }
             prompt = PromptV1.askAnythingPrompt(
                 instruction: raw,
                 selectedText: selectedText,
                 tone: PromptV1.toneCategory(forBundleID: context.targetAppBundleID),
-                vocabulary: dictionary.sanitizedVocabulary()
+                vocabulary: dictionary.sanitizedVocabulary(),
+                webContext: webContext
             )
         case .translate(let target):
             prompt = PromptV1.translatePrompt(
@@ -164,7 +175,9 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
             prompt: prompt,
             model: config.cleanupModel,
             endpoint: config.endpoint,
-            deadline: Self.cleanupDeadline(forCharacters: raw.count)
+            // Web context can make the prompt far larger than the transcript;
+            // the model has to read it all, so the budget follows the prompt.
+            deadline: Self.cleanupDeadline(forCharacters: max(raw.count, prompt.count / 3))
         )
         let cleaned = ValidationGate.stripArtifacts(response).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { throw TranscriptionError.emptyTranscript }

@@ -71,7 +71,10 @@ there is no time limit.
 **Ask Anything and Translate.** Select text (optional), hold ⌃⌥A, and ask
 ("make this shorter", "what does this error mean"); the answer opens in the
 pill, with Markdown rendered and a Copy button, and never edits your text. Each
-question stands alone. Hold ⌃⌥T to dictate in any language and have it typed in
+question stands alone. Add a free [TinyFish](https://agent.tinyfish.ai/api-keys)
+API key in Settings → Advanced and questions that need current information
+(news, prices, releases) are answered from a live web search, with sources
+linked. Hold ⌃⌥T to dictate in any language and have it typed in
 the target language you pick from the searchable list in Settings → Dictation
 (the 99 languages Gemini Live supports); if Gemini cannot translate it, the pill
 says so and nothing is inserted. ⌘⇧V pastes the last transcript or answer
