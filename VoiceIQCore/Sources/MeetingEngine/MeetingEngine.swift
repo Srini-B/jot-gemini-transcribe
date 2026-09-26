@@ -45,6 +45,18 @@ import Foundation
         self.client = client; self.store = store; self.config = config
         self.transcribeModel = transcribeModel; self.summaryModel = summaryModel
         detector.onChange = { [weak self] source in self?.detected(source) }
+        failInterruptedRecordings()
+    }
+
+    /// A meeting still marked `.recording` at launch belonged to a process that
+    /// died; nothing will ever stop it, so the list would show "Recording"
+    /// forever.
+    private func failInterruptedRecordings() {
+        for var meta in store.list() where meta.status == .recording {
+            meta.status = .failed("interrupted")
+            meta.endedAt = meta.endedAt ?? meta.startedAt.addingTimeInterval(meta.durationSeconds)
+            try? store.save(meta: meta)
+        }
     }
 
     public var isRecording: Bool { if case .recording = phase { return true }; return false }

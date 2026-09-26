@@ -48,7 +48,6 @@ final class DictationController {
     private var slowTimer: Timer?
     private var dismissTask: Task<Void, Never>?
     private var shortcutMode: DictationMode?
-    private var shortcutDownAt: Date?
 
     var onStatusChange: ((String) -> Void)?
     var onStatusItemState: ((StatusItemController.VisualState) -> Void)?
@@ -173,7 +172,6 @@ final class DictationController {
                     Log.hotkey.info("dictation key ends mode session")
                     self.coordinator.handle(.finalize)
                     self.shortcutMode = nil
-                    self.shortcutDownAt = nil
                     self.engine.resetGrammar()
                     continue
                 }
@@ -592,9 +590,9 @@ final class DictationController {
             case .pasteLastTranscript:
                 break
             case .askAnything:
-                self.handleModeShortcutDown(.askAnything(selectedText: nil))
+                self.toggleModeShortcut(.askAnything(selectedText: nil))
             case .translate:
-                self.handleModeShortcutDown(
+                self.toggleModeShortcut(
                     .translate(target: SettingsStore().translationTargetLanguage)
                 )
             case .meetingToggle:
@@ -607,20 +605,19 @@ final class DictationController {
             case .pasteLastTranscript:
                 Log.hotkey.info("paste-last shortcut fired")
                 self.pasteLastTranscript()
-            case .askAnything, .translate:
-                self.handleModeShortcutUp()
-            case .meetingToggle:
+            case .askAnything, .translate, .meetingToggle:
                 break
             }
         }
     }
 
-    private func handleModeShortcutDown(_ initialMode: DictationMode) {
-        Log.hotkey.info("mode shortcut key-down")
+    /// One press starts a hands-free Ask Anything or Translate session, the
+    /// next press of the same shortcut ends it. Release does nothing.
+    private func toggleModeShortcut(_ initialMode: DictationMode) {
+        Log.hotkey.info("mode shortcut pressed")
         if shortcutMode != nil {
             coordinator.handle(.finalize)
             shortcutMode = nil
-            shortcutDownAt = nil
             return
         }
         guard coordinator.state == .idle || coordinator.state.isTerminal else { return }
@@ -637,20 +634,8 @@ final class DictationController {
             mode = .dictate
         }
         guard coordinator.handle(.begin, mode: mode, selectedTextIsSettable: settable) else { return }
+        coordinator.handle(.lockIn)
         shortcutMode = mode
-        shortcutDownAt = Date()
-    }
-
-    private func handleModeShortcutUp() {
-        guard shortcutMode != nil, let downAt = shortcutDownAt else { return }
-        Log.hotkey.info("mode shortcut key-up")
-        if Date().timeIntervalSince(downAt) >= 0.35 {
-            coordinator.handle(.finalize)
-            shortcutMode = nil
-        } else {
-            coordinator.handle(.lockIn)
-        }
-        shortcutDownAt = nil
     }
 
     private func applyPreferredInputDevice() {
@@ -752,11 +737,10 @@ final class DictationController {
         }
         // Only terminal states clear the mode. The coordinator re-publishes
         // `.idle` at the start of every begin, and this sink delivers it after
-        // handleModeShortcutDown already set shortcutMode — clearing on `.idle`
+        // toggleModeShortcut already set shortcutMode — clearing on `.idle`
         // wiped the mode and let the dictation key fall through to "begin ignored".
         if state.isTerminal {
             shortcutMode = nil
-            shortcutDownAt = nil
         }
         defer { previousState = state }
         dismissTask?.cancel()

@@ -66,12 +66,21 @@ in this order. Moving the rules to `system_instruction` changed nothing measurab
 6. `AUDIO:` paragraph, only when the FLAC is attached: the recording is authoritative for the
    words, `RAW` is a machine transcript that can be wrong; follow the audio, output only the
    cleaned text.
-7. `PromptV1.examples`: nineteen `RAW`/`CLEAN` pairs covering self-correction, marker-less
+7. `PromptV1.examples`: twenty-one `RAW`/`CLEAN` pairs covering self-correction, marker-less
    restatement, a term swap, a side note resolved to a name, spoken punctuation, hedges kept in
    parentheses, "scratch that", "start over", numbered lists, nested lists, parallel points as
-   bullets, a sequence that stays prose, a question, and an injection attempt transcribed
-   rather than obeyed.
-8. `RAW: <transcript>` and `CLEAN:` on the next line.
+   bullets, a sequence that stays prose, a question, an injection attempt transcribed rather
+   than obeyed, a three-paragraph report of three unannounced problems that becomes a numbered
+   list, and a two-paragraph report of one problem that stays prose.
+8. A one-paragraph layout reminder: count the requests, tasks, or reported problems the reader
+   must act on; two or more become a numbered list with every sentence kept, questions and
+   context before the first stay as prose above it, and one request, a question, a status
+   update, or a short conversational message stays prose. It sits directly before the
+   transcript because that is the rule the model dropped most on long dictations, more so
+   with the recording attached (2026-09-26 replays: 1 list in 24 runs across eight real
+   dictations over 75 s before, every multi-problem fixture listed and every single-topic
+   fixture stayed prose after, 3 runs each; audio replays 20 of 21).
+9. `RAW: <transcript>` and `CLEAN:` on the next line.
 
 ### `PromptV1.rules`
 
@@ -92,10 +101,11 @@ Rules:
 - Format enumerations as lists. The speaker is enumerating when they count items ("number one", "first ... second ..."), announce a set ("a few things", "here is what needs to be done", "the following"), chain separate items with "the first thing", "the next thing", "another thing", "the other thing", "and also", or state two or more parallel points back to back that each carry their own instruction, condition, option, or observation ("if it is done, don't show it; if it is processing, show the right text"). Parallel points become bullets under the sentence that introduced them. Put each item on its own line as a numbered list when order or count matters and bullets otherwise; keep any lead-in sentence as prose above the list. When an item has its own sub-points ("under that", "within that", "for this one", "(a) ... (b) ..."), indent them as a nested list under that item. A sequence inside one sentence ("first I checked the logs and then waited") stays prose. Obey explicit "bullet points", "number those", "new line", and "new paragraph" commands when their target is clear; do not invent headings.
 - Render clearly dictated punctuation and formatting commands instead of printing them: "comma", "period", "question mark", "open quote", "close quote", "new line", and "new paragraph". Keep such words literal when context uses them as content.
 - Write numbers, dates, times, currency, percentages, measurements, phone numbers, email addresses, URLs, filenames, and file paths in conventional written form when unambiguous, such as "twenty five dollars" → "$25", "three hundred rupees" → "₹300", "three thirty p m" → "3:30 PM", and "name at example dot com" → "name@example.com". Small numbers that read naturally as words stay words. Preserve the speaker's intended precision and locale when clear, and never guess an unclear value.
-- Paragraphs stay short and readable: start a new paragraph when the speaker moves to a new idea, question, topic, or tone, and keep a paragraph to about three sentences.
+- Paragraphs stay short and readable: start a new paragraph when the speaker moves to a new idea, question, topic, or tone, and keep a paragraph to about three sentences. Paragraph breaks already present in RAW are guesses by the speech recognizer, not the speaker's structure; decide the structure yourself.
 - Join explicitly spelled characters into the intended word or identifier: "capital B, e, e" → "Bee". Preserve casing the speaker states and stay conservative with names, product names, acronyms, filenames, code, and technical identifiers. Honor exact spellings supplied in the Vocabulary and Spellings sections.
 - Keep every language the speaker used, including code-switching within a sentence. Do not translate or replace non-English speech. Apply the same conservative punctuation, correction, and cleanup rules in that language.
-- Work out what kind of text this is from the speech alone: a chat message, an email, notes, a request or set of instructions for someone or for an AI assistant, or technical text. Format for that intent. When the dictation gives several distinct requests, tasks, or reported problems to whoever will read it, number them, one per item. Sentences spoken before the first request stay as prose above the list, and the list starts directly after them: never add a lead-in such as "Here is what needs to be done" or any heading or wording the speaker did not say. A single request, an update, or a description stays prose. A short conversational message keeps a light touch: no list, no trailing period on a single sentence. Technical text keeps identifiers, file names, and casing such as camelCase or snake_case exactly as spoken.
+- Work out what kind of text this is from the speech alone: a chat message, an email, notes, a request or set of instructions for someone or for an AI assistant, or technical text. Format for that intent. A short conversational message keeps a light touch: no list, no trailing period on a single sentence. Technical text keeps identifiers, file names, and casing such as camelCase or snake_case exactly as spoken.
+- Before writing, count the separate requests, tasks, or reported problems the dictation hands to its reader. A long dictation usually carries several, one per topic shift, even when the speaker never says "first" or "another thing" and even when each one runs for a whole paragraph. Two or more become a numbered list in the order spoken, one item per request or problem. The list changes only the layout: every item keeps all of its own sentences, explanation, examples, and detail, with the same cleanup a paragraph would get and nothing shortened or summarized. Sentences spoken before the first item stay as prose above the list, and the list starts directly after them; never add a lead-in such as "Here is what needs to be done" or any heading or wording the speaker did not say. One request, one question, one update, or one description stays prose however long it runs, and so do several sentences that all explain the same request or problem.
 ```
 
 ### `DictationRulesSeed.text` (default user writing rules)

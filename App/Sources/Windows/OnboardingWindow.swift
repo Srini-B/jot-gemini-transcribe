@@ -277,7 +277,7 @@ private struct WelcomeScreen: View {
     private static let cleanLine = "Let's meet at 2pm."
 
     var body: some View {
-        ScreenScaffold("Speak. It types.", "Hold a key, say the thing, and polished text lands wherever your cursor is.") {
+        ScreenScaffold("Speak. It types.", "Press a key, say the thing, and polished text lands wherever your cursor is.") {
             VStack(spacing: VoiceIQUI.Spacing.m) {
                 WaveformView(level: demoLevel, processing: false)
                     .frame(width: 200, height: 48)
@@ -1074,7 +1074,7 @@ private struct DoneScreen: View {
     @State private var launchAtLogin = true
 
     var body: some View {
-        ScreenScaffold("You're set.", "Voice IQ lives in your menu bar now. Hold \(SettingsStore().hotkeyKey.displayName) anywhere and start talking.") {
+        ScreenScaffold("You're set.", "Voice IQ lives in your menu bar now. Press \(SettingsStore().hotkeyKey.displayName) anywhere and start talking.") {
             VStack(spacing: VoiceIQUI.Spacing.m) {
                 // Same voice as the scaffold's subtitle — two type sizes on the
                 // page total (display + body), never three.
