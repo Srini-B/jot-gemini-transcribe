@@ -140,7 +140,7 @@ public struct SettingsStore: Sendable {
     /// How a dictation gets formatted. Two independent flags rather than a
     /// three-valued enum, because all four combinations are meaningful — in
     /// particular (nativeSmart: false, cleanupPass: true) is the exact pipeline
-    /// Voice IQ shipped before native smart existed, and that is the configuration you
+    /// VoiceiQ shipped before native smart existed, and that is the configuration you
     /// want reachable if smart mode ever regresses server-side.
     public struct FormattingPolicy: Equatable, Sendable {
         public var nativeSmart: Bool

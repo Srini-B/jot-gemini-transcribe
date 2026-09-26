@@ -1,69 +1,56 @@
-# How to Contribute
+# Contributing to VoiceiQ
 
-We'd love to accept your patches and contributions to this project.
-
-External contributions are welcome: bug reports, fixes, and features are all accepted through GitHub pull requests.
-
-There are just a few small guidelines you need to follow.
-
-## Contributor License Agreement
-
-Contributions to this project must be accompanied by a Contributor License
-Agreement (CLA). You (or your employer) retain the copyright to your
-contribution; this simply gives us permission to use and redistribute your
-contributions as part of the project. Head over to
-<https://cla.developers.google.com/> to see your current agreements on file or
-to sign a new one.
-
-You generally only need to submit a CLA once, so if you've already submitted one
-(even if it was for a different project), you probably don't need to do it again.
-
-## Code Reviews
-
-All submissions, including submissions by project members, require review. We use
-GitHub pull requests for this purpose. Consult
-[GitHub Help](https://help.github.com/articles/about-pull-requests/) for more
-information on using pull requests.
-
-## Community Guidelines
-
-This project follows
-[Google's Open Source Community Guidelines](https://opensource.google/conduct/).
-
-## Ground rules
-
-1. **Cleanroom policy.** GPL-licensed projects in this space may be *studied for
-   behavior* — never copied. Do not port, translate, or paraphrase their code into
-   this repository. Signing the CLA above affirms you have the right to contribute
-   the code; this rule is the stricter provenance bar that goes with it.
-2. **No secrets, ever.** No API keys, tokens, or signing material in code, fixtures,
-   tests, or CI files. The app takes the user's own Gemini key at runtime and stores
-   it in the Keychain.
-3. **Design tokens only.** UI changes must use `DesignTokens.swift` /
-   `MotionTokens.swift`. If a value isn't in the tokens file, add it there first —
-   no magic numbers in views. The full design contract is `docs/design/experience.md`.
-4. **Prompt changes need evidence in the PR.** `PromptV1.swift` steers the
-   optional flash-lite cleanup pass (Settings › Dictation → Tone). There is no
-   automated eval set yet, so verification is by hand and the results belong in
-   the PR description: dictate a self-correction, question-shaped speech ("what
-   if we shipped it on Friday"), spoken punctuation, and an all-filler take —
-   then confirm the ValidationGate did not trip on any of them. Building a real
-   eval set is open work and a good first contribution.
-5. **Never-lose-words is an invariant, not a feature.** Any change touching audio,
-   networking, or insertion must keep these true: audio is on disk before network I/O
-   begins; every failure writes a terminal status; errors are never modal; nothing is
-   silently discarded.
-6. **No telemetry.** PRs adding analytics, tracking, or phone-home behavior of any
-   kind will be declined.
+Bug reports, fixes, and features are welcome through GitHub issues and pull
+requests. Open an issue first for anything larger than a focused fix, so the
+approach can be agreed before the code is written.
 
 ## Getting started
 
 ```bash
 brew install xcodegen
-xcodegen generate
-swift test --package-path VoiceIQCore   # fast, headless
+./scripts/build.sh                        # xcodegen generate + Debug build
+swift test --package-path VoiceIQCore     # fast, headless
 ```
 
-The failure-mode matrix (`docs/design/product-reliability.md`) and the architecture
-contract (`docs/design/architecture.md`) are the best places to understand how the
-pieces fit.
+`docs/design/architecture.md` explains how the pieces fit. `docs/RELEASING.md`
+covers signing and notarization; contributors do not need any of that for a
+Debug build.
+
+## Pull requests
+
+Every submission is reviewed through a GitHub pull request. Keep a PR to one
+change. Describe what changed, why, and how you verified it. Update `docs/`
+when behavior, setup, or architecture changes.
+
+By opening a pull request you confirm that you wrote the code, or otherwise have
+the right to contribute it under this repository's license.
+
+## Ground rules
+
+1. **Swift, macOS, Gemini only.** No local models, no other AI providers, no
+   cross-platform layers.
+2. **It has to just work by default.** New behavior ships with a sensible default
+   and no required setup. Add a setting only when users genuinely need to choose.
+3. **Cleanroom policy.** GPL-licensed projects in this space may be studied for
+   behavior, never copied. Do not port, translate, or paraphrase their code into
+   this repository.
+4. **No secrets, ever.** No API keys, tokens, or signing material in code,
+   fixtures, tests, or CI files. The app takes the user's own keys at runtime and
+   stores them in the Keychain.
+5. **Design tokens only.** UI changes use `DesignTokens.swift` and
+   `MotionTokens.swift`. If a value is not in the tokens file, add it there
+   first. The full design contract is `docs/design/experience.md`.
+6. **Prompt changes need evidence in the PR.** `PromptV1.swift` and
+   `PromptV1+Modes.swift` steer the writing-rules pass. There is no automated
+   eval set yet, so verify by hand and put the results in the PR: dictate a
+   self-correction, a spoken list, question-shaped speech, spoken punctuation,
+   and an all-filler take, and confirm the ValidationGate did not trip.
+7. **Never-lose-words is an invariant.** Any change touching audio, networking,
+   or insertion must keep these true: audio is on disk before network I/O
+   begins; every failure writes a terminal status; errors are never modal;
+   nothing is silently discarded.
+8. **No telemetry.** PRs adding analytics, tracking, or phone-home behavior will
+   be declined. The only network host is the Gemini API, plus TinyFish when the
+   user has entered a key for it.
+9. **Keep files small.** Around 500 lines per source file; split when it improves
+   clarity, not to hit a number.

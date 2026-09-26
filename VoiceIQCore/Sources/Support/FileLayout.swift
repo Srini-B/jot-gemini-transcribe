@@ -25,10 +25,14 @@ public enum FileLayout {
         if let overrideRoot { return overrideRoot }
         let fileManager = FileManager.default
         let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let old = base.appendingPathComponent("Jot", isDirectory: true)
-        let new = base.appendingPathComponent("Voice IQ", isDirectory: true)
-        if fileManager.fileExists(atPath: old.path), !fileManager.fileExists(atPath: new.path) {
-            try? fileManager.moveItem(at: old, to: new)
+        let new = base.appendingPathComponent("VoiceiQ", isDirectory: true)
+        // Folder names this app shipped under before, oldest first. The first
+        // one that still exists is moved into place; later ones are left alone.
+        for legacyName in ["Voice IQ", "Jot"] where !fileManager.fileExists(atPath: new.path) {
+            let old = base.appendingPathComponent(legacyName, isDirectory: true)
+            if fileManager.fileExists(atPath: old.path) {
+                try? fileManager.moveItem(at: old, to: new)
+            }
         }
         return new
     }

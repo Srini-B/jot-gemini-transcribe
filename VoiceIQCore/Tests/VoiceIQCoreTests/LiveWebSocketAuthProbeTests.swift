@@ -60,7 +60,7 @@ final class LiveWebSocketAuthProbeTests: XCTestCase {
     }
 
     /// Byte-identical between the two arms so the ONLY difference is where the
-    /// credential goes. Manual VAD, because that is the shape Voice IQ will actually
+    /// credential goes. Manual VAD, because that is the shape VoiceiQ will actually
     /// use — hold-to-talk sends activityStart/activityEnd itself.
     ///
     /// NOTE: `languageCodes` is deliberately absent rather than `[]`. On the
@@ -168,7 +168,7 @@ final class LiveWebSocketAuthProbeTests: XCTestCase {
         }
     }
 
-    /// THE QUESTION. A pass here means Voice IQ can keep its no-keys-in-URLs rule.
+    /// THE QUESTION. A pass here means VoiceiQ can keep its no-keys-in-URLs rule.
     ///
     /// Not `XCTFail` on rejection: a documented-only-one-way API declining an
     /// undocumented alternative is information, not a broken build. The whole

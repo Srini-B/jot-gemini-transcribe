@@ -1,4 +1,4 @@
-# Releasing Voice IQ
+# Releasing VoiceiQ
 
 Releases are built locally with `scripts/release.sh`. The script produces a Developer ID signed, notarized, and stapled app and DMG. It stops on any signing, entitlement, notarization, or Gatekeeper failure.
 
@@ -39,21 +39,21 @@ The script performs this sequence:
 3. Verifies the app signature and rejects `get-task-allow`.
 4. Creates a ZIP with `ditto` and submits it to Apple notarization.
 5. Staples the app and checks it with Gatekeeper.
-6. Builds `build/release/Voice-IQ-<version>.dmg` with `scripts/make-dmg.sh`.
+6. Builds `build/release/VoiceiQ-<version>.dmg` with `scripts/make-dmg.sh`.
 7. Signs, notarizes, staples, and Gatekeeper-checks the DMG.
 
-The bundle identifier is `io.blue.voiceiq`. Changing it resets the app's UserDefaults domain and requires users to grant microphone, Accessibility, and other TCC permissions again. `FileLayout` and `KeychainStore` migrate the previous Voice IQ folder and API-key service, but macOS permissions cannot be migrated.
+The bundle identifier is `io.blue.voiceiq`. Changing it resets the app's UserDefaults domain and requires users to grant microphone, Accessibility, and other TCC permissions again. `FileLayout` and `KeychainStore` migrate the previous VoiceiQ folder and API-key service, but macOS permissions cannot be migrated.
 
 ## Verification
 
 Inspect an existing release without submitting another notarization job:
 
 ```bash
-codesign -dvv "build/release/DerivedData/Build/Products/Release/Voice IQ.app"
-codesign -d --entitlements :- "build/release/DerivedData/Build/Products/Release/Voice IQ.app"
-spctl -a -t exec -vv "build/release/DerivedData/Build/Products/Release/Voice IQ.app"
-xcrun stapler validate "build/release/Voice-IQ-<version>.dmg"
-spctl -a -t open --context context:primary-signature -vv "build/release/Voice-IQ-<version>.dmg"
+codesign -dvv "build/release/DerivedData/Build/Products/Release/VoiceiQ.app"
+codesign -d --entitlements :- "build/release/DerivedData/Build/Products/Release/VoiceiQ.app"
+spctl -a -t exec -vv "build/release/DerivedData/Build/Products/Release/VoiceiQ.app"
+xcrun stapler validate "build/release/VoiceiQ-<version>.dmg"
+spctl -a -t open --context context:primary-signature -vv "build/release/VoiceiQ-<version>.dmg"
 ```
 
 Do not distribute an artifact if any command fails. There is no unsigned or unnotarized fallback.

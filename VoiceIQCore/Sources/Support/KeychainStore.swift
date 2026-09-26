@@ -31,8 +31,8 @@ public enum KeychainStore {
 
         var label: String {
             switch self {
-            case .gemini: return "Voice IQ — Gemini API key"
-            case .tinyFish: return "Voice IQ — TinyFish API key"
+            case .gemini: return "VoiceiQ — Gemini API key"
+            case .tinyFish: return "VoiceiQ — TinyFish API key"
             }
         }
 
@@ -64,7 +64,7 @@ public enum KeychainStore {
         guard let legacyKey = load(.gemini, service: legacyService) else { return nil }
         if saveAPIKey(legacyKey) {
             delete(.gemini, service: legacyService)
-            Log.permissions.info("KeychainStore: migrated API key to Voice IQ service")
+            Log.permissions.info("KeychainStore: migrated API key to VoiceiQ service")
         }
         return legacyKey
     }

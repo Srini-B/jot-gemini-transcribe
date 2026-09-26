@@ -21,7 +21,7 @@ import Security
 /// dictionary, History) must survive the rename invisibly.
 ///
 /// macOS permissions (mic, Accessibility) are keyed by bundle id and CANNOT be
-/// migrated — onboarding re-collects them on first launch as Voice IQ.
+/// migrated — onboarding re-collects them on first launch as VoiceiQ.
 public enum LegacyMigration {
     private static let legacyBundleID = "com.google.transcribe"
     private static let legacyKeychainService = "com.google.transcribe"

@@ -27,7 +27,7 @@ public extension Notification.Name {
 ///
 /// Deliberately system-level: engine-level device pinning (AU property or
 /// AUAudioUnit.setDeviceID) silently kills the AVAudioEngine tap on macOS 26 —
-/// probed, do not reintroduce. Voice IQ always records from the system default;
+/// probed, do not reintroduce. VoiceiQ always records from the system default;
 /// the menu's Microphone picker simply moves that default, exactly like
 /// Control Center's input picker.
 public enum AudioInputDevices {

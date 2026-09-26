@@ -24,7 +24,7 @@ public struct GeminiConfig: Sendable, Equatable {
 
     public init(
         endpoint: URL = URL(string: "https://generativelanguage.googleapis.com")!,
-        // PRODUCT DECISION, not a tunable default: Voice IQ ships on
+        // PRODUCT DECISION, not a tunable default: VoiceiQ ships on
         // gemini-3.5-transcribe. Do not swap it, and do not add automatic
         // substitution — no other model is this product. (The name that 404'd
         // on 2026-08-18 was the -preview suffix; the graduated name is this

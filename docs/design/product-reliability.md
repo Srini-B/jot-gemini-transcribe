@@ -250,7 +250,7 @@ Bar: Wispr markets <700 ms p99 but users report 1–2 s real-world; ≤0.9 s p50
 3. **What never leaves:** recordings, history, dictionary, edits, app usage, keystrokes (we observe only our hotkey — no CGEventTap over all keys), screenshots (never taken), telemetry (none; crash reports opt-in and local-file based).
 4. **What's stored locally & control:** per-dictation folders + SQLite; retention controls incl. "Never keep audio" (with its retry trade-off); one-click Delete All; where files live on disk.
 5. **Google's side of the wire:** your data is governed by your own Gemini API terms — paid-tier keys are not used for training; free-tier keys may be (link + in-app note during key setup). Zero-data-retention is *your* relationship with Google, not a promise we broker.
-6. **Privacy posture, stated plainly:** document our own behaviour on each axis — audio path, account required, screenshots, full-AX-tree reading, keystroke interception, telemetry SDKs, key storage, source auditable. Describe what Voice IQ does; do not characterise other products.
+6. **Privacy posture, stated plainly:** document our own behaviour on each axis — audio path, account required, screenshots, full-AX-tree reading, keystroke interception, telemetry SDKs, key storage, source auditable. Describe what VoiceiQ does; do not characterise other products.
 7. **Threat model & limits:** what Accessibility permission technically allows and what we do/don't with it; secure-input behavior; local files are not encrypted at rest beyond FileVault (stated honestly).
 8. **Verification:** how to build from source, watch traffic (only one host), and audit the prompt (it's a source file).
 

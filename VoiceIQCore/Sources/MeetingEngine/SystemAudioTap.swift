@@ -48,7 +48,7 @@ public final class SystemAudioTap: @unchecked Sendable {
         inputFormat = input; self.converter = converter; writer = try CAFWriter(url: url, format: target); frames = 0
         let uid = UUID().uuidString
         let aggregate: [String: Any] = [
-            kAudioAggregateDeviceNameKey: "Voice IQ Meeting Audio",
+            kAudioAggregateDeviceNameKey: "VoiceiQ Meeting Audio",
             kAudioAggregateDeviceUIDKey: uid,
             kAudioAggregateDeviceIsPrivateKey: true,
             kAudioAggregateDeviceTapAutoStartKey: true,

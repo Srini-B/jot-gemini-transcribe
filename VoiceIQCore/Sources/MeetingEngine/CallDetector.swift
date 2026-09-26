@@ -18,7 +18,7 @@ import CoreAudio
 
 /// Polls for an active call. A call is "active" when a known calling app, or a
 /// browser showing a meeting page, is itself capturing the microphone. Mic
-/// use is read per process (macOS 14.2+ Core Audio process objects), so Voice IQ's
+/// use is read per process (macOS 14.2+ Core Audio process objects), so VoiceiQ's
 /// own recording never counts as a call and a call that ends while the app
 /// stays open is still noticed. Two consecutive hits start, three misses stop.
 @MainActor public final class CallDetector {
@@ -112,7 +112,7 @@ import CoreAudio
 
     private nonisolated static func detectedSource() -> CallSource? {
         let capturing = capturingProcesses()
-        // Pre-14.2: only a global "mic is in use" bit exists. Voice IQ's own meeting
+        // Pre-14.2: only a global "mic is in use" bit exists. VoiceiQ's own meeting
         // tap trips it, so there the call ends only when the app or tab goes away.
         if capturing == nil, !microphoneInUse() { return nil }
         for app in NSWorkspace.shared.runningApplications {

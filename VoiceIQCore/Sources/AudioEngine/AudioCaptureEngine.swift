@@ -313,6 +313,13 @@ public final class AudioCaptureEngine: AudioCapturing {
         if let engine {
             engine.inputNode.removeTap(onBus: 0)
             engine.stop()
+            // Never deallocate an AVAudioEngine on the same turn a device
+            // change lands: AVFAudio's IO unit dispatches its property listener
+            // asynchronously and dereferences the unit after we free it
+            // (SIGSEGV in AVAudioIOUnit::IOUnitPropertyListener, 2026-09-26).
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 5) {
+                withExtendedLifetime(engine) {}
+            }
         }
         engine = nil
         converter = nil

@@ -64,7 +64,19 @@ final class WarmEnginePool {
     /// Drop the spare (e.g. the input device changed under it) and build a fresh
     /// one for the new route.
     func refresh() {
-        spare = nil
+        if let spare {
+            self.spare = nil
+            // Releasing the spare here deallocates its AVAudioEngine while
+            // AVFAudio is still dispatching the very device-change notification
+            // that brought us here. The IO unit's listener block then runs on a
+            // freed object: SIGSEGV in AVAudioIOUnit::IOUnitPropertyListener,
+            // two crash reports on 2026-09-26, both with WarmEnginePool.refresh
+            // on the main thread. Hold it until that queue has drained.
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(5))
+                withExtendedLifetime(spare) {}
+            }
+        }
         prewarmNext()
     }
 }

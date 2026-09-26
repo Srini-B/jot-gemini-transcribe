@@ -13,20 +13,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Packages a built Voice IQ.app into a drag-to-install DMG with custom art.
+# Packages a built VoiceiQ.app into a drag-to-install DMG with custom art.
 #
-#   scripts/make-dmg.sh <path-to-Voice IQ.app> [output.dmg]
+#   scripts/make-dmg.sh <path-to-VoiceiQ.app> [output.dmg]
 #
 # Layout is set through Finder (AppleScript), which is how every Mac installer
 # DMG is made. The first run may ask for permission to control Finder.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-APP_NAME="${APP_NAME:-Voice IQ}"
-APP_PATH="${1:?usage: make-dmg.sh <path-to-Voice IQ.app> [output.dmg]}"
+APP_NAME="${APP_NAME:-VoiceiQ}"
+APP_PATH="${1:?usage: make-dmg.sh <path-to-VoiceiQ.app> [output.dmg]}"
 VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP_PATH/Contents/Info.plist")
-OUT_DMG="${2:-build/Voice-IQ-$VERSION.dmg}"
-VOLUME_NAME="Voice IQ"
+OUT_DMG="${2:-build/VoiceiQ-$VERSION.dmg}"
+VOLUME_NAME="VoiceiQ"
 STAGING="build/dmg-staging"
 RW_DMG="build/voice-iq-rw.dmg"
 

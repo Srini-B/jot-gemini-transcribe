@@ -26,7 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let others = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
             .filter { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
         if !others.isEmpty {
-            Log.session.warning("another Voice IQ instance is already running — quitting this one")
+            Log.session.warning("another VoiceiQ instance is already running — quitting this one")
             NSApp.terminate(nil)
             return
         }
@@ -75,7 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Replay any voiceiq:// URL that cold-launched the app.
         for url in pendingLaunchURLs { dispatch(url) }
         pendingLaunchURLs.removeAll()
-        Log.session.info("Voice IQ launched (build \(Bundle.main.buildNumber, privacy: .public))")
+        Log.session.info("VoiceiQ launched (build \(Bundle.main.buildNumber, privacy: .public))")
     }
 
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }

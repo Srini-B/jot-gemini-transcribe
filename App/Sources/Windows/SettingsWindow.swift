@@ -151,7 +151,7 @@ private struct MainView: View {
                 .resizable()
                 .scaledToFit()
                 .frame(height: 28)
-                .accessibilityLabel("Voice IQ")
+                .accessibilityLabel("VoiceiQ")
                 .padding(.horizontal, 14)
                 .padding(.top, 20)
                 .padding(.bottom, 12)
@@ -265,7 +265,7 @@ struct PrivacyPane: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Start Voice IQ at login", isOn: $launchAtLogin)
+                Toggle("Start VoiceiQ at login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, enabled in
                         // The failure-path revert below re-enters onChange with the
                         // inverted value — this guard stops the bounce from calling
@@ -467,7 +467,7 @@ struct AdvancedPane: View {
                         settings.setLegacyTranscribeEndpoint(enabled)
                     }
             } footer: {
-                Text("Voice IQ transcribes through Gemini's newer interactions endpoint, which is what makes Smart transcription possible. If it starts misbehaving, this switches back to the older one — transcription still works, but it will be word-for-word and Smart transcription will have no effect.")
+                Text("VoiceiQ transcribes through Gemini's newer interactions endpoint, which is what makes Smart transcription possible. If it starts misbehaving, this switches back to the older one — transcription still works, but it will be word-for-word and Smart transcription will have no effect.")
             }
         }
         // Key saved elsewhere (onboarding, dev-file migration) while this pane is

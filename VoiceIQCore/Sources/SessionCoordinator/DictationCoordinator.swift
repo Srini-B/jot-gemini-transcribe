@@ -285,7 +285,7 @@ public final class DictationCoordinator: ObservableObject {
         if secureInputActive() {
             // Name the app holding it and say what to do. The flag is SYSTEM-WIDE,
             // so the culprit is usually not the window the user is looking at —
-            // "secure input is on" alone reads as "Voice IQ is broken", especially
+            // "secure input is on" alone reads as "VoiceiQ is broken", especially
             // during onboarding where a stuck loginwindow flag is common.
             if let holder = SecureInput.holder() {
                 coachingHint = "\(holder.name) has secure input on. \(SecureInput.advice(forHolder: holder.name))"

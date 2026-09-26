@@ -221,7 +221,7 @@ struct PillView: View {
 
     private var accessibilityDescription: String {
         switch model.state {
-        case .hidden, .idleDot: return "Voice IQ — ready"
+        case .hidden, .idleDot: return "VoiceiQ — ready"
         case .listening(true): return "Listening — hands-free locked"
         case .listening(false): return "Listening"
         case .processing: return "Processing"

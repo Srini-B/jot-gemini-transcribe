@@ -1,4 +1,4 @@
-# Voice IQ — macOS Dictation App Plan
+# VoiceiQ — macOS Dictation App Plan
 
 > **Historical planning record.** Captures the design as planned; it may diverge
 > from what shipped. `LICENSE` and `THIRD_PARTY_NOTICES.md` are authoritative for
@@ -12,7 +12,7 @@ This plan is the product of a 10-agent research sweep (Wispr Flow forensic teard
 
 ## Locked decisions (confirmed with Ammaar)
 
-- **Name**: Voice IQ. **License**: Apache-2.0. (Flag: public release under the Google name needs Ammaar's internal brand/OSS review — start that process at M0; keep a neutral-rename fallback cheap. "Not an official Google product" README line until resolved.)
+- **Name**: VoiceiQ. **License**: Apache-2.0. (Flag: public release under the Google name needs Ammaar's internal brand/OSS review — start that process at M0; keep a neutral-rename fallback cheap. "Not an official Google product" README line until resolved.)
 - **Stack**: Native Swift/SwiftUI menu-bar app (LSUIElement, no Dock icon), AppKit `NSPanel` HUD. macOS 14.0+, Apple Silicon + Intel. No Electron (research verdict was unambiguous: fn capture, non-activating overlays, AX insertion, idle footprint).
 - **Invoke**: **Hold fn/Globe** (default) = push-to-talk; release = transcribe + insert. **Double-tap = hands-free lock**; single short tap = coaching hint ("Hold to talk — double-tap to lock"), audio discarded. Esc cancels. Rebindable (Ctrl+Opt fallback when no Apple keyboard); combo hotkeys use a side-aware CGEventTap, and fn uses its existing CGEventTap.
 - **API**: `POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-transcribe:streamGenerateContent?alt=sse`, key in `x-goog-api-key` header (never `?key=` — leaks into logs). Request = `contents/parts`: `inline_data` (base64 FLAC) + TEXT steering prompt (formatting rules + dictionary + app-tone context ride in the same call), `generationConfig.audioTranscriptionConfig {wordTimestamp:false, diarization:false}`, temperature 0, safetySettings BLOCK_NONE. Response streams back via SSE. Batch-up/stream-down — no live partials while speaking (same as Wispr, whose full-context design is what enables cleanup). One call does transcription + formatting; a second-model cleanup pass is v1.x, not v1.

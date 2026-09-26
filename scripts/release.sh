@@ -2,7 +2,7 @@
 # Copyright 2026 Google LLC
 # Licensed under the Apache License, Version 2.0.
 
-# Build, sign, notarize, staple, and package Voice IQ.
+# Build, sign, notarize, staple, and package VoiceiQ.
 # The caller must source ~/.zshrc first. This script never prints credentials.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -17,10 +17,10 @@ done
 VERSION=$(awk '/MARKETING_VERSION:/ {gsub(/"/, "", $2); print $2; exit}' project.yml)
 BUILD_DIR="build/release"
 DERIVED_DATA="$BUILD_DIR/DerivedData"
-APP_NAME="Voice IQ"
+APP_NAME="VoiceiQ"
 APP_PATH="$DERIVED_DATA/Build/Products/Release/$APP_NAME.app"
-ZIP_PATH="$BUILD_DIR/Voice-IQ-$VERSION.zip"
-DMG_PATH="$BUILD_DIR/Voice-IQ-$VERSION.dmg"
+ZIP_PATH="$BUILD_DIR/VoiceiQ-$VERSION.zip"
+DMG_PATH="$BUILD_DIR/VoiceiQ-$VERSION.dmg"
 SIGN_IDENTITY="Developer ID Application"
 
 rm -rf "$BUILD_DIR"

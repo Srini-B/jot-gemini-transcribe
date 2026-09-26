@@ -1,12 +1,12 @@
 # Cost tracking
 
-Voice IQ meters every Gemini call and shows the result under Settings → Cost
+VoiceiQ meters every Gemini call and shows the result under Settings → Cost
 Analysis (`voiceiq://settings/cost`) and per dictation in History.
 
 ## What is recorded
 
 Each successful model call becomes one `UsageRecord` in
-`~/Library/Application Support/Voice IQ/usage.sqlite` (GRDB, WAL). Fields:
+`~/Library/Application Support/VoiceiQ/usage.sqlite` (GRDB, WAL). Fields:
 time, activity, stage, model, session ID, token counts by modality (text,
 audio, image, cached in; text, audio, thought out), an `isEstimated` flag,
 and `costUSD`.

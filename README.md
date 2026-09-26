@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="docs/images/icon.png" width="128" alt="Voice IQ">
+<img src="docs/images/icon.png" width="128" alt="VoiceiQ">
 
-# Voice IQ
+# VoiceiQ
 
 **Press a key. Speak. It types.**
 
@@ -40,7 +40,7 @@ Translate in progress.
 ## What makes it different
 
 **It follows a change of mind.** Say *"let's meet at 1pm — actually, no, make it
-2pm"* and Voice IQ writes **"Let's meet at 2pm."** That is the whole pitch, and
+2pm"* and VoiceiQ writes **"Let's meet at 2pm."** That is the whole pitch, and
 onboarding makes you do it once so you believe it.
 
 **It never loses your words.** Audio goes to disk from the first millisecond, so
@@ -59,7 +59,7 @@ in Settings → Dictation. See [PRIVACY.md](docs/PRIVACY.md).
 **Your jargon, spelled right.** Names and product terms go in the Dictionary and
 ride along with the audio, so the model hears "Kubernetes" instead of guessing
 "cooper netties" — corrected at the source, not patched afterwards. Fix a word
-after Voice IQ types it and the correction is learned into the Dictionary on its own.
+after VoiceiQ types it and the correction is learned into the Dictionary on its own.
 
 **It writes the way you meant it.** A writing-rules pass runs on every
 transcript: "scratch that", "change the first point to…" and other mid-dictation
@@ -87,7 +87,7 @@ leave it on system default and get a one-time notice when a new one appears.
 
 **Meeting notes.** When Zoom, Teams, FaceTime, WhatsApp, Slack, Discord,
 Webex, or a Meet/Teams/Zoom tab in any browser starts a call, the pill offers to
-record it. Accept, or press ⌥M at any time, and Voice IQ records both sides with
+record it. Accept, or press ⌥M at any time, and VoiceiQ records both sides with
 a live transcript in the pill. Press ⌥M again (or the pill's stop button) to
 finish: you get a speaker-labelled transcript plus a summary, decisions, and
 owned action items under Settings → Meetings. Recording never stops on its own.
@@ -100,7 +100,7 @@ and by model; each dictation in History shows what it cost. Details in
 
 ## Setup
 
-Build the app (see Development below), move `Voice IQ.app` into
+Build the app (see Development below), move `VoiceiQ.app` into
 **Applications**, and launch it. Setup takes about two minutes and the app walks
 you through it:
 
@@ -116,10 +116,10 @@ you through it:
 
 **Cost:** you pay Google for what you dictate at
 [Gemini API pricing](https://ai.google.dev/pricing); a free tier exists and a
-typical dictation is a few seconds of audio. Voice IQ itself is free and has no
+typical dictation is a few seconds of audio. VoiceiQ itself is free and has no
 account.
 
-**Models:** Voice IQ transcribes with `gemini-3.5-transcribe-live` while you speak
+**Models:** VoiceiQ transcribes with `gemini-3.5-transcribe-live` while you speak
 (the live socket) and `gemini-3.5-transcribe` for the batch path, then applies
 writing rules and writes meeting notes with `gemini-3.8-flash`. Your key needs
 access to them; setup tells you up front if it does not, instead of failing on

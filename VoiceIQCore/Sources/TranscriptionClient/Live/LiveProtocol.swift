@@ -15,7 +15,7 @@
 import Foundation
 
 /// What the server said. Deliberately small: everything the Live API sends that
-/// Voice IQ does not act on becomes `nil` rather than a case, so an API that grows new
+/// VoiceiQ does not act on becomes `nil` rather than a case, so an API that grows new
 /// message types does not start throwing in the middle of someone's dictation.
 public enum LiveEvent: Equatable, Sendable {
     /// The credential was accepted and the session is configured. Audio sent
@@ -65,7 +65,7 @@ public enum LiveProtocol {
     /// a second time. Omitting the field is also what the docs prescribe for
     /// automatic language detection, so there is no cost to leaving it out.
     ///
-    /// Manual VAD is not optional here: Voice IQ decides turn boundaries from the
+    /// Manual VAD is not optional here: VoiceiQ decides turn boundaries from the
     /// hotkey, so server-side voice detection would cut turns in the middle of
     /// someone pausing to think.
     public static func setupFrame(_ setup: LiveSetup) -> Data {

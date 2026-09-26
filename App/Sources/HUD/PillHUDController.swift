@@ -26,6 +26,7 @@ final class PillHUDController {
     private let panel: NSPanel
     private var stateObservation: AnyCancellable?
     private var eventMonitors: [Any] = []
+    private var mouseMonitor: Any?
 
     init() {
         panel = NSPanel(
@@ -55,6 +56,7 @@ final class PillHUDController {
     func show() {
         reposition()
         panel.orderFrontRegardless()
+        followMouse()
     }
 
     /// Called at each session start so the pill follows the display the user is
@@ -64,7 +66,25 @@ final class PillHUDController {
     }
 
     func hide() {
+        stopFollowingMouse()
         panel.orderOut(nil)
+    }
+
+    /// While the pill is up it lives on whichever display the pointer is on.
+    /// People dictate into one screen and glance at another to read from it;
+    /// the pill goes with the glance so the live text is never behind them.
+    private func followMouse() {
+        guard mouseMonitor == nil else { return }
+        mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { [weak self] _ in
+            guard let self, let screen = Self.screenUnderMouse(),
+                  screen.frame != self.panel.screen?.frame else { return }
+            self.place(on: screen)
+        }
+    }
+
+    private func stopFollowingMouse() {
+        if let mouseMonitor { NSEvent.removeMonitor(mouseMonitor) }
+        mouseMonitor = nil
     }
 
     private func updatePanel(for state: PillState) {
@@ -78,8 +98,7 @@ final class PillHUDController {
     }
 
     private func answerPanelSize() -> NSSize {
-        let screen = Self.screenOfFocusedWindow() ?? NSScreen.main
-        let visible = screen?.visibleFrame.size ?? NSSize(width: 600, height: 320)
+        let visible = targetScreen()?.visibleFrame.size ?? NSSize(width: 600, height: 320)
         return NSSize(width: min(560, visible.width - 24), height: min(300, visible.height - 24))
     }
 
@@ -115,20 +134,30 @@ final class PillHUDController {
         NotificationCenter.default.post(name: .pillAnswerDismissed, object: nil)
     }
 
-    /// Bottom-center of the screen hosting the FOCUSED window — where the text
-    /// will actually land. Mouse position is only a fallback: keyboard-first
-    /// users routinely dictate on one display with the pointer parked on
-    /// another (production pass 2). Doesn't jump mid-session (spec §1.1).
     private func reposition() {
-        let screen = Self.screenOfFocusedWindow()
-            ?? NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) })
-            ?? NSScreen.main
-        guard let screen else { return }
+        guard let screen = targetScreen() else { return }
+        place(on: screen)
+    }
+
+    /// Bottom-center of `screen`.
+    private func place(on screen: NSScreen) {
         let frame = screen.visibleFrame
         panel.setFrameOrigin(NSPoint(
             x: frame.midX - panel.frame.width / 2,
             y: frame.minY + 16
         ))
+    }
+
+    /// The display under the pointer, which is where the eyes are. The screen
+    /// hosting the focused window is only a fallback for when the pointer is
+    /// off every display (mid-drag between screens, headless remote session).
+    private func targetScreen() -> NSScreen? {
+        Self.screenUnderMouse() ?? Self.screenOfFocusedWindow() ?? NSScreen.main
+    }
+
+    private static func screenUnderMouse() -> NSScreen? {
+        let point = NSEvent.mouseLocation
+        return NSScreen.screens.first(where: { $0.frame.contains(point) })
     }
 
     /// Screen hosting the frontmost app's front window, via the window list —

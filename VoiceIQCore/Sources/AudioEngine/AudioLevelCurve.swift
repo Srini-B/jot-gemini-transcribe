@@ -14,7 +14,7 @@
 
 import Foundation
 
-/// The one definition of Voice IQ's 0…1 mic level, and its inverse.
+/// The one definition of VoiceiQ's 0…1 mic level, and its inverse.
 ///
 /// `level = min(1, pow(min(rms * 11, 1), 0.65))` — a compressive curve so quiet
 /// speech lands mid-range instead of hugging the floor and loud speech saturates
@@ -35,20 +35,20 @@ public enum AudioLevelCurve {
     /// digital-silence buffer has a finite dB value instead of −∞.
     public static let floorDBFS: Double = -120
 
-    /// RMS (0…1 linear) → Voice IQ level (0…1).
+    /// RMS (0…1 linear) → VoiceiQ level (0…1).
     public static func level(fromRMS rms: Float) -> Float {
         guard rms > 0 else { return 0 }
         return min(1, pow(min(rms * gain, 1), exponent))
     }
 
-    /// Voice IQ level → RMS. Exact inverse below saturation; at level 1.0 it returns
+    /// VoiceiQ level → RMS. Exact inverse below saturation; at level 1.0 it returns
     /// the saturation RMS, which is a floor on the true value, not the value.
     public static func rms(fromLevel level: Float) -> Float {
         guard level > 0 else { return 0 }
         return pow(min(level, 1), 1 / exponent) / gain
     }
 
-    /// Voice IQ level → dBFS. This is the space the noise-floor estimator works in:
+    /// VoiceiQ level → dBFS. This is the space the noise-floor estimator works in:
     /// dB is where "6 dB above the room" is a meaningful sentence and
     /// "0.02 above the room" is not.
     public static func dBFS(fromLevel level: Float) -> Double {

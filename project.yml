@@ -30,7 +30,7 @@ targets:
     platform: macOS
     settings:
       base:
-        PRODUCT_NAME: "Voice IQ"
+        PRODUCT_NAME: "VoiceiQ"
         PRODUCT_BUNDLE_IDENTIFIER: io.blue.voiceiq
         DEVELOPMENT_TEAM: G8K3545FJ2
         CODE_SIGN_STYLE: Automatic
@@ -76,8 +76,8 @@ targets:
     info:
       path: App/Info.plist
       properties:
-        CFBundleDisplayName: Voice IQ
-        CFBundleName: Voice IQ
+        CFBundleDisplayName: VoiceiQ
+        CFBundleName: VoiceiQ
         CFBundleIconFile: VoiceIQ
         # Without these the generated plist keeps xcodegen's default 1.0, so the
         # About panel and the DMG filename disagree about the version.
@@ -85,8 +85,8 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSApplicationCategoryType: public.app-category.productivity
         LSUIElement: true # menu bar app: no Dock icon
-        NSMicrophoneUsageDescription: Voice IQ records audio while you hold the dictation key, so it can transcribe what you say.
-        NSAudioCaptureUsageDescription: Voice IQ records the other side of your calls, so meeting notes include what everyone said.
+        NSMicrophoneUsageDescription: VoiceiQ records audio while you hold the dictation key, so it can transcribe what you say.
+        NSAudioCaptureUsageDescription: VoiceiQ records the other side of your calls, so meeting notes include what everyone said.
         NSHumanReadableCopyright: "Copyright 2026 Google LLC. Apache License 2.0. This is not an officially supported Google product."
         LSMinimumSystemVersion: "14.0"
         CFBundleURLTypes:

@@ -1,4 +1,4 @@
-# Voice IQ vs VoiceInk vs FluidVoice, and the default dictation prompt
+# VoiceiQ vs VoiceInk vs FluidVoice, and the default dictation prompt
 
 Sources: [VoiceInk](https://github.com/Beingpax/VoiceInk) (`VoiceInk/Core/Enhancement/AIPrompts.swift`
 and the engine, Modes, and Dictionary code), [FluidVoice](https://github.com/altic-dev/FluidVoice)
@@ -7,7 +7,7 @@ prompt edits recorded in `activities/2026-09-26-prompt-comparison.md`. Read on 2
 
 ## Feature comparison
 
-| Area | Voice IQ | VoiceInk | FluidVoice |
+| Area | VoiceiQ | VoiceInk | FluidVoice |
 | --- | --- | --- | --- |
 | Speech to text | Gemini only. `gemini-3.5-transcribe-live` streaming with a live preview, batch `gemini-3.5-transcribe` fallback. No local model by design. | Local (whisper.cpp, Parakeet, Apple Speech) and cloud (Groq, Deepgram, ElevenLabs, OpenAI, Gemini `gemini-3.5-transcribe`, Mistral, Soniox). | Local only (Nemotron, Parakeet, Whisper, Apple Speech). |
 | Cleanup model | `gemini-3.8-flash`, temperature 0, low thinking. The FLAC recording and up to 4 screenshots ride along, so the model corrects the transcript against the audio. | Any chat provider, Gemini `gemini-3.8-flash` default. Text only. | Optional. Many providers through OpenAI-compatible endpoints, Google via `gemini-2.5-flash`. Text only, transcript wrapped in a JSON envelope. |
@@ -24,13 +24,13 @@ prompt edits recorded in `activities/2026-09-26-prompt-comparison.md`. Read on 2
 
 ### Verdict
 
-Voice IQ is the strongest for the target user of this repository: dictation that is checked
+VoiceiQ is the strongest for the target user of this repository: dictation that is checked
 against the audio, corrections spoken several sentences later applied in place, screen context
 for names and paths, meetings with notes, and translation, with no settings to tune. VoiceInk
 leads on engine choice, per-app Modes, and history tooling, and it has an updater. FluidVoice
 leads on privacy (nothing leaves the Mac) and on meeting diarization done locally, and its
 updater has rollback. Neither competitor sends audio to the cleanup model, so neither can fix
-a recognition error the way Voice IQ does.
+a recognition error the way VoiceiQ does.
 
 ### What was borrowed into the prompt
 

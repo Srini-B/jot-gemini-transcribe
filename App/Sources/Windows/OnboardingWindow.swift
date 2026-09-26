@@ -47,7 +47,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         window.setContentSize(NSSize(width: 640, height: 560))
         window.center()
         // Setup sends people into System Settings twice (microphone, then
-        // accessibility), and every trip steals focus. Voice IQ is an accessory app,
+        // accessibility), and every trip steals focus. VoiceiQ is an accessory app,
         // so it has no Dock icon and no Cmd-Tab entry — once this window fell
         // behind System Settings there was NO way back to it except finding the
         // menu bar icon, and users reported exactly that. Floating keeps it in
@@ -371,7 +371,7 @@ private struct APIKeyScreen: View {
     private var showingField: Bool { !storedKeyExists || replacing }
 
     var body: some View {
-        ScreenScaffold("Bring your own key.", "Voice IQ uses your Gemini API key. It's stored in your Mac's Keychain and only ever sent to Google.") {
+        ScreenScaffold("Bring your own key.", "VoiceiQ uses your Gemini API key. It's stored in your Mac's Keychain and only ever sent to Google.") {
             VStack(spacing: VoiceIQUI.Spacing.s) {
                 if !showingField {
                     Label("Key already in your Keychain", systemImage: "checkmark.circle.fill")
@@ -417,7 +417,7 @@ private struct APIKeyScreen: View {
                             .foregroundStyle(VoiceIQUI.Colors.error)
                     }
                     if noModelAccess {
-                        Text("That key works, but it can't reach Voice IQ's transcription model yet. Setup continues — ask for access, then try a dictation.")
+                        Text("That key works, but it can't reach VoiceiQ's transcription model yet. Setup continues — ask for access, then try a dictation.")
                             .font(VoiceIQUI.TypeScale.labelSmall())
                             .foregroundStyle(VoiceIQUI.Colors.error)
                             .multilineTextAlignment(.center)
@@ -474,7 +474,7 @@ private struct APIKeyScreen: View {
 
             if check == .valid {
                 // "Your key works" must mean dictation works. Check the model
-                // Voice IQ actually ships on — and only report, never substitute.
+                // VoiceiQ actually ships on — and only report, never substitute.
                 let config = SettingsStore().geminiConfig
                 noModelAccess = await client.resolveAvailableModel(
                     from: [config.transcribeModel], endpoint: config.endpoint
@@ -534,17 +534,17 @@ private struct MicScreen: View {
         || AVCaptureDevice.authorizationStatus(for: .audio) == .restricted
 
     // "Can we listen?" read as surveillance (dogfood). This screen is a mic
-    // CHECK, so it behaves like one: say hello, Voice IQ hears you, it moves on.
+    // CHECK, so it behaves like one: say hello, VoiceiQ hears you, it moves on.
     private var headline: String {
         if granted { return "Say hello." }
         return denied ? "The mic is switched off." : "Turn on the mic."
     }
     private var sub: String {
         if heard { return "Heard you loud and clear." }
-        if granted { return "Voice IQ is listening — this just checks your mic." }
+        if granted { return "VoiceiQ is listening — this just checks your mic." }
         return denied
-            ? "macOS only asks once. Turn Voice IQ on under Privacy & Security → Microphone, then come back."
-            : "macOS asks once. Voice IQ only ever records while you're dictating."
+            ? "macOS only asks once. Turn VoiceiQ on under Privacy & Security → Microphone, then come back."
+            : "macOS asks once. VoiceiQ only ever records while you're dictating."
     }
 
     var body: some View {
@@ -589,7 +589,7 @@ private struct MicScreen: View {
                                 guard let newValue, newValue != selectedInput else { return }
                                 selectedInput = newValue
                                 // Moves the SYSTEM default, exactly like the menu
-                                // bar picker and Control Center — Voice IQ always
+                                // bar picker and Control Center — VoiceiQ always
                                 // records from the default rather than pinning a
                                 // device, which kills the tap on macOS 26.
                                 AudioInputDevices.setDefault(id: newValue)
@@ -685,7 +685,7 @@ private struct MicScreen: View {
         guard !heard else { return nil }
         let name = currentInputName ?? "this input"
         if deadDevice {
-            return ("No sound is reaching Voice IQ from \(name). Pick a different input below.", true)
+            return ("No sound is reaching VoiceiQ from \(name). Pick a different input below.", true)
         }
         if maxLevel >= 0.06 {
             // Something is definitely arriving — say so, even before it is loud
@@ -755,7 +755,7 @@ private struct AccessibilityScreen: View {
     @State private var slowGrant = false
 
     var body: some View {
-        ScreenScaffold("Let it type for you.", "Accessibility places text at your cursor. Screen Recording lets Voice IQ read names and paths on screen while you talk. It is optional.") {
+        ScreenScaffold("Let it type for you.", "Accessibility places text at your cursor. Screen Recording lets VoiceiQ read names and paths on screen while you talk. It is optional.") {
             VStack(spacing: VoiceIQUI.Spacing.m) {
                 PermissionCard(icon: "keyboard", title: "Accessibility", granted: granted) {
                     let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
@@ -833,7 +833,7 @@ private struct GlobeKeyScreen: View {
                 }
 
                 if FnUsageAdvisor.karabinerIsPresent() {
-                    Text("Karabiner-Elements is running — if fn doesn't respond, add Voice IQ to its exclusions.")
+                    Text("Karabiner-Elements is running — if fn doesn't respond, add VoiceiQ to its exclusions.")
                         .font(VoiceIQUI.TypeScale.labelSmall())
                         .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
                         .multilineTextAlignment(.center)
@@ -863,7 +863,7 @@ private struct HowToScreen: View {
     private let shortcuts = ShortcutStore()
 
     var body: some View {
-        ScreenScaffold("Talk to Voice IQ.", "One press starts, one press finishes. Every key is editable in Settings → Dictation.") {
+        ScreenScaffold("Talk to VoiceiQ.", "One press starts, one press finishes. Every key is editable in Settings → Dictation.") {
             VStack(spacing: VoiceIQUI.Spacing.m) {
                 VStack(alignment: .leading, spacing: VoiceIQUI.Spacing.s) {
                     gestureRow(keys: [keyName], title: "Dictate",
@@ -974,7 +974,7 @@ private struct TryItScreen: View {
                     // The two rows ARE the story — no caption needed.
                     VStack(alignment: .leading, spacing: 3) {
                         revealRow(label: "You said", value: raw, emphasized: false)
-                        revealRow(label: "Voice IQ wrote", value: clean, emphasized: true)
+                        revealRow(label: "VoiceiQ wrote", value: clean, emphasized: true)
                     }
                     .padding(VoiceIQUI.Spacing.s)
                     .frame(width: 400, alignment: .leading)
@@ -1056,7 +1056,7 @@ private struct TryItScreen: View {
                     revealClean = clean
                     return
                 }
-                // They read the script: show it against what Voice IQ wrote, but only
+                // They read the script: show it against what VoiceiQ wrote, but only
                 // if the result is actually shorter — otherwise there is no
                 // change of mind to reveal and the celebration is the honest UI.
                 if Self.readTheScript(clean), clean.count < Self.script.count {
@@ -1092,7 +1092,7 @@ private struct DoneScreen: View {
     @State private var launchAtLogin = true
 
     var body: some View {
-        ScreenScaffold("You're set.", "Voice IQ lives in your menu bar now. Press \(SettingsStore().hotkeyKey.displayName) anywhere and start talking.") {
+        ScreenScaffold("You're set.", "VoiceiQ lives in your menu bar now. Press \(SettingsStore().hotkeyKey.displayName) anywhere and start talking.") {
             VStack(spacing: VoiceIQUI.Spacing.m) {
                 // Same voice as the scaffold's subtitle — two type sizes on the
                 // page total (display + body), never three.
@@ -1104,7 +1104,7 @@ private struct DoneScreen: View {
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: 480)
-                Toggle("Start Voice IQ at login", isOn: $launchAtLogin)
+                Toggle("Start VoiceiQ at login", isOn: $launchAtLogin)
                     .toggleStyle(.checkbox)
                 PrimaryButton(title: "Start dictating") {
                     let enabled = SMAppService.mainApp.status == .enabled

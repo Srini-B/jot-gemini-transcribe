@@ -54,7 +54,7 @@ final class StatusItemController: NSObject {
         super.init()
 
         statusItem.button?.image = templateImage
-        statusItem.button?.toolTip = "Voice IQ"
+        statusItem.button?.toolTip = "VoiceiQ"
         statusItem.menu = makeMenu()
     }
 
@@ -127,7 +127,7 @@ final class StatusItemController: NSObject {
 
         menu.addItem(.separator())
 
-        // Which mic Voice IQ hears through — moves the SYSTEM default input, exactly
+        // Which mic VoiceiQ hears through — moves the SYSTEM default input, exactly
         // like Control Center, so AirPods vs built-in is one click (dogfood).
         let micItem = NSMenuItem(title: "Microphone", action: nil, keyEquivalent: "")
         let micMenu = NSMenu(title: "Microphone")
@@ -141,11 +141,11 @@ final class StatusItemController: NSObject {
 
         menu.addItem(.separator())
 
-        let about = NSMenuItem(title: "About Voice IQ", action: #selector(openAbout), keyEquivalent: "")
+        let about = NSMenuItem(title: "About VoiceiQ", action: #selector(openAbout), keyEquivalent: "")
         about.target = self
         menu.addItem(about)
 
-        let quit = NSMenuItem(title: "Quit Voice IQ", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "Quit VoiceiQ", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
 
         return menu

@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Generates the Voice IQ earcon family (original works, repo license).
+"""Generates the VoiceiQ earcon family (original works, repo license).
 
 Musical spec (docs/design/experience.md §2): G-major family, soft mallet/marimba
 timbre (sine fundamental + gentle harmonics, rounded attack, exponential decay),
