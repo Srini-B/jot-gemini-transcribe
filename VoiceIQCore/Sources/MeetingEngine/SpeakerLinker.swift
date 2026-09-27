@@ -77,6 +77,14 @@ public enum SpeakerLinker {
         return out
     }
 
+    /// Each speaker's turns, then all turns in time order. When two people
+    /// talk at once, each keeps one entry instead of alternating word by word.
+    public static func overlappingTurns(_ words: [TimedWord], gap: Double = 1.0) -> [TimedWord] {
+        Dictionary(grouping: words, by: \.speaker).values
+            .flatMap { turns($0.sorted { $0.start < $1.start }, gap: gap) }
+            .sorted { $0.start < $1.start }
+    }
+
     /// The longest turns of each speaker, up to `anchorSeconds` in total.
     public static func anchorClips(_ words: [TimedWord]) -> [String: [ClosedRange<Double>]] {
         var bySpeaker: [String: [TimedWord]] = [:]
@@ -99,5 +107,21 @@ enum TranscriptText {
         let punctuation = CharacterSet(charactersIn: ".,!?;:%)]}")
         if let scalar = word.unicodeScalars.first, punctuation.contains(scalar) { return text + word }
         return text.isEmpty ? word : text + " " + word
+    }
+
+    static func normalized(_ text: String) -> String {
+        String(text.lowercased().unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }.map(Character.init))
+    }
+
+    /// Share of `a`'s character bigrams found in `b`. Works for any script.
+    static func containment(_ a: String, in b: String) -> Double {
+        guard !a.isEmpty, !b.isEmpty else { return 0 }
+        func grams(_ s: String) -> Set<String> {
+            let chars = Array(s)
+            guard chars.count > 1 else { return [s] }
+            return Set((0..<(chars.count - 1)).map { String(chars[$0...($0 + 1)]) })
+        }
+        let x = grams(a), y = grams(b)
+        return Double(x.intersection(y).count) / Double(x.count)
     }
 }

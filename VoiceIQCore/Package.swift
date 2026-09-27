@@ -26,13 +26,24 @@ let package = Package(
         .package(url: "https://github.com/Clipy/Sauce.git", from: "2.2.0"),
     ],
     targets: [
+        // WebRTC's AEC3 echo canceller and a small C bridge, built by
+        // Vendor/WebRTCAEC/build.sh. BSD-licensed; see Vendor/WebRTCAEC/Notices.
+        .binaryTarget(
+            name: "CVoiceIQAEC",
+            path: "Vendor/WebRTCAEC/CVoiceIQAEC.xcframework"
+        ),
         .target(
             name: "VoiceIQCore",
             dependencies: [
                 .product(name: "GRDB", package: "GRDB.swift"),
                 "Sauce",
+                "CVoiceIQAEC",
             ],
-            path: "Sources"
+            path: "Sources",
+            linkerSettings: [
+                .linkedLibrary("c++"),
+                .linkedFramework("CoreFoundation"),
+            ]
         ),
         .testTarget(
             name: "VoiceIQCoreTests",

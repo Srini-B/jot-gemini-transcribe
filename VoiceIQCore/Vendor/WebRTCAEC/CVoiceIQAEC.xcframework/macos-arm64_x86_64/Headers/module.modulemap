@@ -1,0 +1,5 @@
+module CVoiceIQAEC {
+    header "voiceiq_aec.h"
+    link "c++"
+    export *
+}

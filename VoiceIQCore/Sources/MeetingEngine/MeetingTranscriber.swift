@@ -58,11 +58,10 @@ public struct MeetingTranscriber: Sendable {
     /// A Tier 1 key needs about one minute of waiting per window; a two-hour
     /// call has twenty windows.
     static let rateLimitBudget: TimeInterval = 45 * 60
-    static let cacheVersion = "v4"
+    static let cacheVersion = "v5"
 
     public func transcribe(folder: URL) async throws -> [TranscriptSegment] {
-        let audio = CallAudio(mic: try TrackAudio(url: folder.appendingPathComponent("mic.caf")),
-                              system: try TrackAudio(url: folder.appendingPathComponent("system.caf")))
+        let audio = try Self.callAudio(folder: folder)
         let window = Self.windowSpeech(providers().first)
         let cache = folder.appendingPathComponent("transcribe-\(Self.cacheVersion)-\(Int(window))", isDirectory: true)
         try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
@@ -80,10 +79,90 @@ public struct MeetingTranscriber: Sendable {
             words += placed
         }
         if audio.isOnline { words = Self.markOwner(words, audio: audio) }
-        return SpeakerLinker.turns(words.sorted { $0.start < $1.start }).map { turn in
+        let overlaps = audio.overlapRegions()
+        if !overlaps.isEmpty {
+            let file = cache.appendingPathComponent("overlap.json")
+            let owner: [TimedWord]
+            if let data = try? Data(contentsOf: file), let cached = try? JSONDecoder().decode([TimedWord].self, from: data) {
+                owner = cached
+            } else {
+                owner = try await transcribeOwner(overlaps, audio: audio, budget: &budget)
+                try JSONEncoder().encode(owner).write(to: file, options: .atomic)
+            }
+            words = Self.mergeOwner(owner, into: words, overlaps: overlaps)
+        }
+        return SpeakerLinker.overlappingTurns(words).map { turn in
             TranscriptSegment(speaker: turn.speaker, text: turn.text, chunkIndex: 0, start: turn.start, end: turn.end)
         }
     }
+
+    /// Where the owner talked over the far side, a request holding both voices
+    /// comes back with one of them. MEASURED 2026-09-27 on a synthetic call
+    /// where the owner cut in four times, echo cancelled: 2 to 6 of each
+    /// interjection's 8 to 10 words came back, half under the far speaker.
+    /// So those stretches are sent again from the echo-cancelled mic alone,
+    /// and every word in that answer is the owner's. This is how FluidVoice
+    /// keeps double-talk: separate tracks, merged by time.
+    private func transcribeOwner(_ regions: [ClosedRange<Double>], audio: CallAudio,
+                                 budget: inout TimeInterval) async throws -> [TimedWord] {
+        var request = AssembledAudio()
+        try request.appendBody(regions, source: audio.mic.samples)
+        let flac = try FLACEncoder.encode(samples: request.samples)
+        let raw = try await withProviders(label: "overlap", budget: &budget) { via in
+            via == .gemini
+                ? try await client.transcribeSpeakers(audio: flac, model: models.transcribe, endpoint: endpoint, deadline: 600)
+                : try await client.transcribeSpeakers(audio: flac, references: [], model: models.flash, deadline: 600, via: via)
+        }
+        return raw.compactMap { word in
+            guard let start = word.start, let span = request.trackSpan(start, word.end ?? start) else { return nil }
+            return TimedWord(text: word.text, speaker: MeetingSpeaker.you, start: span.lowerBound, end: span.upperBound)
+        }
+    }
+
+    /// The owner's words replace whatever the mixed pass made of the overlap:
+    /// its "You" words there, and far-side words that repeat the owner's.
+    static func mergeOwner(_ owner: [TimedWord], into words: [TimedWord], overlaps: [ClosedRange<Double>]) -> [TimedWord] {
+        func inside(_ word: TimedWord) -> Bool {
+            let middle = (word.start + word.end) / 2
+            return overlaps.contains { $0.contains(middle) }
+        }
+        let kept = words.filter { word in
+            guard inside(word) else { return true }
+            if word.speaker == MeetingSpeaker.you { return false }
+            let key = TranscriptText.normalized(word.text)
+            let nearby = owner.filter { abs($0.start - word.start) <= 2 }.map { TranscriptText.normalized($0.text) }.joined()
+            return key.isEmpty || TranscriptText.containment(key, in: nearby) < 0.5
+        }
+        return kept + owner
+    }
+
+    /// Both tracks, with the mic's echo cancelled when the far side talked.
+    /// The cancelled mic is kept only if it came out echo-free; otherwise the
+    /// raw mic is ducked under the far side as before.
+    static func callAudio(folder: URL) throws -> CallAudio {
+        let micURL = folder.appendingPathComponent("mic.caf"), systemURL = folder.appendingPathComponent("system.caf")
+        let system = try TrackAudio(url: systemURL)
+        let raw = CallAudio(mic: try TrackAudio(url: micURL), system: system)
+        guard raw.isOnline else { return raw }
+        let cancelledURL = folder.appendingPathComponent("mic-aec.caf")
+        do {
+            if !FileManager.default.fileExists(atPath: cancelledURL.path) {
+                let erle = try EchoCanceller.cancel(mic: micURL, system: systemURL, output: cancelledURL)
+                Log.meeting.info("echo cancelled, ERLE \(String(format: "%.1f", erle), privacy: .public) dB")
+            }
+            let cancelled = CallAudio(mic: try TrackAudio(url: cancelledURL), system: system, micIsEchoFree: true)
+            Log.meeting.info("echo left in mic: \(String(format: "%.1f", raw.residualEcho), privacy: .public) dB before, \(String(format: "%.1f", cancelled.residualEcho), privacy: .public) dB after")
+            return cancelled.residualEcho <= maximumResidualEcho ? cancelled : raw
+        } catch {
+            Log.meeting.error("echo cancellation failed: \(String(describing: error), privacy: .public)")
+            return raw
+        }
+    }
+
+    /// Echo left above the mic's room tone, in dB, that still counts as
+    /// echo-free. Measured residuals after cancellation were 0.5 and 0.7 dB;
+    /// before it, 15.5 and 23.5.
+    static let maximumResidualEcho = 6.0
 
     /// The same test as `place`, over the whole meeting: an id heard mostly
     /// from the mic is the note owner even where single windows were too
@@ -135,8 +214,8 @@ public struct MeetingTranscriber: Sendable {
                 // Untimed text (the API's no-annotation fallback) is kept as one turn.
                 return (word.text, label, request.trackTime(request.bodyStart) ?? 0, request.trackTime(request.duration) ?? 0)
             }
-            guard let begin = request.trackTime(start) else { return nil }
-            return (word.text, label, begin, max(begin, request.trackTime(word.end ?? start) ?? begin))
+            guard let span = request.trackSpan(start, word.end ?? start) else { return nil }
+            return (word.text, label, span.lowerBound, span.upperBound)
         }
         var mapping = linked
         if call.isOnline {
@@ -168,17 +247,31 @@ public struct MeetingTranscriber: Sendable {
         return id
     }
 
-    /// One window through the first provider that answers. A throttled
-    /// provider is waited out only when no other provider has a key.
+    /// One window through the first provider that answers.
     private func transcribe(window regions: [ClosedRange<Double>], audio: CallAudio, known: [TimedWord],
                             budget: inout TimeInterval, label: String) async throws -> [TimedWord] {
         let clips = SpeakerLinker.anchorClips(known).sorted { $0.key < $1.key }
+        return try await withProviders(label: label, budget: &budget) { via in
+            try await transcribe(window: regions, audio: audio, clips: clips, known: known, via: via)
+        }
+    }
+
+    /// Runs `body` with each provider in turn. A throttled provider is waited
+    /// out only when no other provider has a key.
+    private func withProviders<T>(label: String, budget: inout TimeInterval,
+                                  _ body: (ModelProvider) async throws -> T) async throws -> T {
         var lastError: Error = TranscriptionError.network("no_provider")
         while true {
             var waits: [TimeInterval] = []
             for via in providers() {
                 do {
-                    return try await transcribe(window: regions, audio: audio, clips: clips, known: known, via: via)
+                    do { return try await body(via) } catch TranscriptionError.safetyBlocked {
+                        // MEASURED 2026-09-27: the flash model blocked one window of a
+                        // call as `content_filter` and passed the same window on the
+                        // next run. One more try before moving on.
+                        Log.meeting.info("\(label, privacy: .public): \(via.rawValue, privacy: .public) safety block, retrying")
+                        return try await body(via)
+                    }
                 } catch TranscriptionError.rateLimitedTransient(let retryAfter) {
                     Log.meeting.info("\(label, privacy: .public): \(via.rawValue, privacy: .public) rate limited")
                     waits.append(retryAfter ?? 60); lastError = TranscriptionError.rateLimitedTransient(retryAfter: retryAfter)

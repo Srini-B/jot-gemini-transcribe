@@ -31,6 +31,13 @@ repository's Apache 2.0 license. See `App/Resources/Sounds/ATTRIBUTION.md`.
 | [GRDB.swift](https://github.com/groue/GRDB.swift) (Gwendal Roué) | MIT |
 | [Sparkle](https://github.com/sparkle-project/Sparkle) (from M8) | Sparkle License (permissive, MIT-style) |
 
+## Vendored libraries
+
+### WebRTC audio processing (AEC3 echo canceller)
+- File: `VoiceIQCore/Vendor/WebRTCAEC/CVoiceIQAEC.xcframework` (static library, arm64 and x86_64)
+- Source: https://gitlab.freedesktop.org/pulseaudio/webrtc-audio-processing at `d0569cfa50c1858ee279d77b3fc8870be6902441`, built by `VoiceIQCore/Vendor/WebRTCAEC/build.sh` together with VoiceiQ's own bridge (`bridge/voiceiq_aec.cc`, Apache 2.0)
+- Licenses: WebRTC BSD 3-Clause plus its patent grant; Abseil Apache 2.0; PFFFT, Ooura FFT, the WebRTC FFT, and the square-root routine under their BSD-style terms. Full texts are in `VoiceIQCore/Vendor/WebRTCAEC/Notices/`.
+
 ## Trademarks
 
 "Google", the Google logo, the Gemini spark, and related marks are trademarks of

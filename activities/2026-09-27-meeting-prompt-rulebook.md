@@ -35,3 +35,18 @@ Each run used the real APIs, through a temporary opt-in XCTest probe on copies o
 ## Rollback
 
 Revert the commit. Recordings are unaffected. Transcripts and notes written by this version carry extra optional fields that the older code ignores. Cached windows sit in `transcribe-v4-*` folders beside the audio and can be deleted.
+
+## Update: talking over the far side (echo cancellation)
+
+The owner's words were lost whenever they talked over the far side, because the mic was ducked to cancel speaker echo. Research on GitHub found three approaches. FluidVoice cancels echo with WebRTC AEC3, using the app audio as reference. pasrom/meeting-transcriber uses an ML canceller, which is ruled out here. Several projects remove repeated mic text after transcription, which pasrom and FluidVoice both warn can drop quiet interjections. FluidVoice's approach was built, from upstream BSD WebRTC source rather than from FluidVoice, whose code is GPL-3.
+
+- `VoiceIQCore/Vendor/WebRTCAEC/build.sh` builds WebRTC's audio processing module at `d0569cf` plus an Apache-2.0 C bridge into `CVoiceIQAEC.xcframework`, a 13 MB universal static library.
+- After a call, `EchoCanceller` cancels echo in `mic.caf` against `system.caf`. Echo left above the mic's room tone fell from 23.5 dB to 0.7 dB on the Tamil call, and from 15.5 dB to 0.7 dB on the synthetic call. If more than 6 dB remains, the old ducked mix is used.
+- Overlap stretches are transcribed again from the cancelled mic alone and merged, following FluidVoice's separate-tracks approach.
+
+Verification used real APIs through a temporary probe, deleted afterwards.
+- Synthetic call with four interjections: all four came back whole on Gemini (10/10, 8/8, 9/9, 8/8 words) and on OpenRouter (10/10, 7/8 to 8/8, 9/9, 8/8). Before this change they came back as 2 to 6 words, often under the far speaker. Other turns were 100% correct on Gemini and 78% on OpenRouter.
+- Four-person call without interjections: Gemini 98%, OpenRouter 100%.
+- 30-minute Tamil call: 949 words through OpenRouter (807 before this change) and 876 through Gemini (907 before). The Gemini difference is deterministic: two runs gave the same 876 words. Most changed turns are different spellings of the same speech, and without ground truth for this call the two counts cannot be ranked. Turning the cancelled mic down under the far side, except where it has speech, gave 870, so that variant was dropped.
+- One OpenRouter run failed on a `content_filter` block, and the same window passed on the next run. A safety block is now retried once before moving to the next provider.
+- `swift test`: 193 tests, 9 skipped, 0 failures. `./scripts/build.sh` succeeded.

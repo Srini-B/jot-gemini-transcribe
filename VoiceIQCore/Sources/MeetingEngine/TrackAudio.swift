@@ -116,19 +116,25 @@ public struct TrackAudio: Sendable {
 
 /// Both tracks of a call as one timeline.
 ///
-/// The mix is not an average: each track is brought to speech level first and
-/// the mic is ducked while the far side talks, so the far side's echo in the
-/// mic does not double it. MEASURED 2026-09-27 on the first four minutes of a
-/// Meet call: the averaged mix gave 110 words under one label; this mix gave
-/// 155 words under two labels that matched who was talking.
+/// The mix is not an average: each track is brought to speech level first.
+/// When the mic still carries the far side's echo, it is ducked while the far
+/// side talks so the echo does not double it; that also ducks the owner
+/// talking over the far side. A mic that went through `EchoCanceller` is
+/// mixed at full level instead. MEASURED 2026-09-27 on the first four
+/// minutes of a Meet call: the averaged mix gave 110 words under one label;
+/// the levelled, ducked mix gave 155 words under two labels.
 public struct CallAudio: Sendable {
     public let mic: TrackAudio
     public let system: TrackAudio
     /// The far side's speech per 100 ms window.
     let systemSpeech: [Bool]
-    /// The same, held 300 ms after it stops, for ducking the mic's echo tail.
+    /// Windows where the mic is turned down: the far side's speech, held 300
+    /// ms after it stops for the echo tail. Empty when the mic is echo-free.
     let duck: [Bool]
     let micSpeech: [Bool]
+    /// The mic carries no echo worth ducking; speech on it is the owner's
+    /// even while the far side talks.
+    public let micIsEchoFree: Bool
 
     /// A window belongs to the far side when the system track is near its own
     /// speech level and, relative to each track's speech level, louder than
@@ -136,31 +142,35 @@ public struct CallAudio: Sendable {
     /// tone was -87 dBFS and its speech -32, so "above room tone" also caught
     /// keyboard clicks and hiss, and the owner's id counted 758 far-side
     /// windows to 229 mic-only ones. With this test it counted 119 to 422.
-    ///
-    /// The owner talking over the far side is ducked with the echo. MEASURED
-    /// 2026-09-27 on a synthetic call where the owner cut in four times: the
-    /// interjections came back partly (3 to 5 of 8 to 10 words). Keeping the
-    /// mic at full level whenever it was 10 dB above the echo recovered no
-    /// more of them on Google's endpoint and dropped correct turns from 100%
-    /// to 73%, so it was not kept.
-    public init(mic: TrackAudio, system: TrackAudio) {
-        self.mic = mic; self.system = system
+    public init(mic: TrackAudio, system: TrackAudio, micIsEchoFree: Bool = false) {
+        self.mic = mic; self.system = system; self.micIsEchoFree = micIsEchoFree
         let micSpeech = mic.speechLevel, systemSpeech = system.speechLevel
         let count = max(mic.levels.count, system.levels.count)
         let far = (0..<count).map { index -> Bool in
             guard index < system.levels.count else { return false }
             let level = system.levels[index]
             let micLevel = index < mic.levels.count ? mic.levels[index] : -120
-            return level > systemSpeech - 15 && level - systemSpeech >= micLevel - micSpeech
+            // An echo-free mic's level says nothing about the far side.
+            return level > systemSpeech - 15 && (micIsEchoFree || level - systemSpeech >= micLevel - micSpeech)
         }
         var held = far
         for (index, active) in far.enumerated() where active {
             for next in max(0, index - 1)..<min(held.count, index + 4) { held[next] = true }
         }
         self.systemSpeech = far
-        self.duck = held
+        self.duck = micIsEchoFree ? [] : held
         let micThreshold = mic.floor + 10
         self.micSpeech = mic.levels.map { $0 > micThreshold }
+    }
+
+    /// How far the mic sits above its own room tone while only the far side
+    /// talks, in dB: the echo left in it. MEASURED 2026-09-27 on a Meet call
+    /// through laptop speakers: 23.5 dB before `EchoCanceller`, 0.5 dB after;
+    /// on a synthetic call 15.5 and 0.7.
+    public var residualEcho: Double {
+        let levels = systemSpeech.indices.filter { systemSpeech[$0] && $0 < mic.levels.count }.map { mic.levels[$0] }.sorted()
+        guard !levels.isEmpty else { return 0 }
+        return levels[levels.count / 2] - mic.floor
     }
 
     public var duration: Double { max(mic.duration, system.duration) }
@@ -192,15 +202,40 @@ public struct CallAudio: Sendable {
         }
     }
 
-    /// Which track a stretch of speech came from: 100 ms windows where only
-    /// the mic had speech, and windows where the far side had speech.
+    /// Stretches where the owner talks over the far side, padded and merged.
+    /// Only meaningful with an echo-free mic: otherwise mic sound under the
+    /// far side is mostly echo.
+    public func overlapRegions(minimum: Double = 0.5, pad: Double = 0.5) -> [ClosedRange<Double>] {
+        guard micIsEchoFree else { return [] }
+        var regions: [ClosedRange<Double>] = [], start: Int?
+        let count = min(systemSpeech.count, micSpeech.count)
+        for index in 0...count {
+            let both = index < count && systemSpeech[index] && micSpeech[index]
+            if both, start == nil { start = index }
+            if !both, let first = start {
+                start = nil
+                guard Double(index - first) / 10 >= minimum else { continue }
+                let region = max(0, Double(first) / 10 - pad)...min(duration, Double(index) / 10 + pad)
+                if let last = regions.last, region.lowerBound <= last.upperBound + 1 {
+                    regions[regions.count - 1] = last.lowerBound...region.upperBound
+                } else { regions.append(region) }
+            }
+        }
+        return regions
+    }
+
+    /// Which track a stretch of speech came from, in 100 ms windows. With an
+    /// echo-free mic, a window where both talk counts for both; otherwise mic
+    /// speech under the far side may be echo and counts for the far side.
     public func sources(_ range: ClosedRange<Double>) -> (mic: Int, system: Int) {
         let first = max(0, Int(range.lowerBound * 10)), last = Int(range.upperBound * 10)
         guard first <= last else { return (0, 0) }
         var result = (mic: 0, system: 0)
         for index in first...last {
-            if index < systemSpeech.count, systemSpeech[index] { result.system += 1 }
-            else if index < micSpeech.count, micSpeech[index] { result.mic += 1 }
+            let far = index < systemSpeech.count && systemSpeech[index]
+            let near = index < micSpeech.count && micSpeech[index]
+            if far { result.system += 1 }
+            if near && (!far || micIsEchoFree) { result.mic += 1 }
         }
         return result
     }
@@ -234,14 +269,35 @@ public struct AssembledAudio: Sendable {
     }
 
     mutating func appendBody(_ regions: [ClosedRange<Double>], from audio: CallAudio) throws {
+        try appendBody(regions, source: audio.samples)
+    }
+
+    mutating func appendBody(_ regions: [ClosedRange<Double>], source: (ClosedRange<Double>) throws -> [Int16]) throws {
         bodyStart = duration
         for region in regions {
             let at = duration
-            let piece = try audio.samples(region)
+            let piece = try source(region)
             samples.append(contentsOf: piece)
             pieces.append((at, region.lowerBound, Double(piece.count) / TrackAudio.sampleRate))
             appendSilence(Self.gap)
         }
+    }
+
+    /// Meeting time for a span inside the body, kept inside the one stretch
+    /// it overlaps most: a segment the model stamps across the silence
+    /// between two stretches would otherwise swallow everything between them,
+    /// and one stamped slightly early would land in the stretch before.
+    public func trackSpan(_ start: Double, _ end: Double) -> ClosedRange<Double>? {
+        guard start >= bodyStart - 0.2, start <= duration + 1, !pieces.isEmpty else { return nil }
+        let finish = max(start, end)
+        let piece = pieces.max { a, b in
+            func overlap(_ p: (at: Double, track: Double, length: Double)) -> Double {
+                min(finish, p.at + p.length) - max(start, p.at) - (start == finish ? abs(start - p.at) : 0)
+            }
+            return overlap(a) < overlap(b)
+        }!
+        let begin = piece.track + min(max(0, start - piece.at), piece.length)
+        return begin...max(begin, piece.track + min(max(0, finish - piece.at), piece.length))
     }
 
     /// Meeting time for a time inside the body, or nil for anchor audio.
