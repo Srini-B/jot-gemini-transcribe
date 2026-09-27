@@ -56,4 +56,11 @@ public enum ModelProvider: String, CaseIterable, Sendable, Codable, Identifiable
         if available.contains(preferred) { return preferred }
         return allCases.first(where: available.contains) ?? .gemini
     }
+
+    /// The resolved provider, then every other provider with a key. A long
+    /// meeting moves on to the next one when a provider throttles or refuses.
+    public static func fallbackOrder(preferred: ModelProvider, available: Set<ModelProvider>) -> [ModelProvider] {
+        let first = resolve(preferred: preferred, available: available)
+        return [first] + allCases.filter { $0 != first && available.contains($0) }
+    }
 }

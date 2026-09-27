@@ -61,6 +61,13 @@ struct MeetingsPane: View {
             if let meeting = selected, case .failed = meeting.status {
                 Button("Retry", systemImage: "arrow.clockwise") { engine.retry(id: meeting.id) }
                     .disabled(engine.phase != .idle)
+            } else if let meeting = selected, meeting.status == .done {
+                Menu {
+                    Button("Notes") { engine.regenerateNotes(id: meeting.id) }.disabled(transcript.isEmpty)
+                    Button("Transcript and notes") { engine.retry(id: meeting.id) }
+                } label: { Label("Redo", systemImage: "arrow.clockwise") }
+                    .fixedSize()
+                    .disabled(engine.phase != .idle)
             }
             Button("Export", systemImage: "square.and.arrow.up") { export() }.disabled(selection == nil)
             Button("Delete", systemImage: "trash", role: .destructive) { remove() }.disabled(selection == nil)
@@ -84,8 +91,12 @@ struct MeetingsPane: View {
 
     private var notesView: some View {
         VStack(alignment: .leading, spacing: 16) {
+            if let kind = notes?.type.flatMap(MeetingKind.init(rawValue:)), kind != .general {
+                Text(kind.displayName).font(VoiceIQUI.TypeScale.labelSmall()).foregroundStyle(.secondary)
+            }
             Text(notes?.title ?? "Meeting").font(VoiceIQUI.TypeScale.title())
             section("Summary", notes.map { [$0.summary] } ?? [])
+            ForEach(Array((notes?.sections ?? []).enumerated()), id: \.offset) { _, part in section(part.title, part.items) }
             section("Decisions", notes?.decisions ?? [])
             if let actions = notes?.actions, !actions.isEmpty {
                 VStack(alignment: .leading, spacing: 8) { Text("Action items").font(VoiceIQUI.TypeScale.labelSmall()).foregroundStyle(.secondary); ForEach(Array(actions.enumerated()), id: \.offset) { _, item in Text("• \(item.text)\(actionSuffix(item))") } }
@@ -100,7 +111,9 @@ struct MeetingsPane: View {
         VStack(alignment: .leading, spacing: VoiceIQUI.Spacing.s) {
             HStack(spacing: VoiceIQUI.Spacing.s) {
                 ForEach(speakerLabels, id: \.self) { label in
-                    SpeakerName(label: label, name: meeting.speakerNames[label]) { name in
+                    SpeakerName(label: MeetingSpeaker.defaultName(label),
+                                name: MeetingSpeaker.displayName(label, names: meeting.speakerNames, suggested: notes?.speakers),
+                                evidence: meeting.speakerNames[label] == nil ? suggestion(for: label)?.evidence : nil) { name in
                         try? store.renameSpeaker(id: meeting.id, label: label, name: name); reload()
                     }
                 }
@@ -108,6 +121,10 @@ struct MeetingsPane: View {
             RichTextView(text: transcriptText(meeting))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func suggestion(for label: String) -> SpeakerSuggestion? {
+        notes?.speakers?.first { $0.label == MeetingSpeaker.defaultName(label) }
     }
 
     private var speakerLabels: [String] {
@@ -126,8 +143,9 @@ struct MeetingsPane: View {
         nameParagraph.paragraphSpacing = 2
         let out = NSMutableAttributedString()
         for segment in transcript {
-            let speaker = meeting.speakerNames[segment.speaker] ?? segment.speaker
-            out.append(NSAttributedString(string: speaker + "\n", attributes: [
+            let speaker = MeetingSpeaker.displayName(segment.speaker, names: meeting.speakerNames, suggested: notes?.speakers)
+            let time = segment.start.map { "  " + MeetingNotesPrompt.clock($0) } ?? ""
+            out.append(NSAttributedString(string: speaker + time + "\n", attributes: [
                 .font: name, .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: nameParagraph,
             ]))
             out.append(NSAttributedString(string: segment.text + "\n", attributes: [
@@ -174,12 +192,15 @@ struct MeetingsPane: View {
 }
 
 private struct SpeakerName: View {
-    let label: String, name: String?
+    let label: String, name: String
+    /// The words that gave a suggested name, shown on hover.
+    let evidence: String?
     let save: (String) -> Void
     @State private var editing = false
     @State private var draft = ""
     var body: some View {
-        Button(name ?? label, systemImage: "pencil") { draft = name ?? ""; editing = true }.buttonStyle(.bordered).controlSize(.small)
+        Button(name, systemImage: "pencil") { draft = name == label ? "" : name; editing = true }.buttonStyle(.bordered).controlSize(.small)
+            .help(evidence ?? label)
             .popover(isPresented: $editing) { HStack { TextField("Name", text: $draft).onSubmit { save(draft); editing = false }; Button("Save") { save(draft); editing = false } }.padding().frame(width: 220) }
     }
 }

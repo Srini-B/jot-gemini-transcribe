@@ -112,7 +112,11 @@ final class DictationController {
         meetings = MeetingEngine(
             client: client,
             config: { SettingsStore().geminiConfig },
-            summaryModel: SettingsStore().geminiConfig.cleanupModel
+            summaryModel: SettingsStore().geminiConfig.cleanupModel,
+            providers: {
+                let settings = SettingsStore()
+                return ModelProvider.fallbackOrder(preferred: settings.preferredProvider, available: KeychainStore.providersWithKeys)
+            }
         )
         coordinator = DictationCoordinator(
             audioFactory: { [warmEngines] in warmEngines.take() },

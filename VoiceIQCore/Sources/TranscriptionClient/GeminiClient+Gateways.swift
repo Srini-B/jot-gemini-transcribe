@@ -26,6 +26,12 @@ import Foundation
 ///
 /// Live (WebSocket) transcription has no gateway equivalent, so the
 /// coordinator skips the live session whenever a gateway is active.
+/// Extra message content after the prompt, in order.
+public enum ChatPart: Sendable {
+    case text(String)
+    case flac(Data)
+}
+
 extension GeminiClient {
     static let openRouterEndpoint = URL(string: "https://openrouter.ai/api/v1")!
     static let vercelEndpoint = URL(string: "https://ai-gateway.vercel.sh/v1")!
@@ -79,9 +85,15 @@ extension GeminiClient {
 
     func gatewayChat(prompt: String, images: [Data] = [], audioFLAC: Data? = nil, model: String,
                      deadline: TimeInterval, stage: UsageStage, jsonObject: Bool = false,
-                     via: ModelProvider) async throws -> String {
+                     jsonSchema: [String: Any]? = nil, parts: [ChatPart] = [], via: ModelProvider) async throws -> String {
         let modelID = Self.gatewayModelID(model)
         var content: [[String: Any]] = [["type": "text", "text": prompt]]
+        for part in parts {
+            switch part {
+            case let .text(text): content.append(["type": "text", "text": text])
+            case let .flac(data): content.append(Self.audioPart(flac: data, via: via))
+            }
+        }
         content.append(contentsOf: images.map {
             ["type": "image_url", "image_url": ["url": "data:image/jpeg;base64,\($0.base64EncodedString())"]]
         })
@@ -95,7 +107,12 @@ extension GeminiClient {
             // Same knob as thinkingLevel "low" on the native API.
             "reasoning": ["effort": "low"],
         ]
-        if jsonObject { body["response_format"] = Self.jsonResponseFormat(via: via) }
+        if let jsonSchema {
+            body["response_format"] = ["type": "json_schema",
+                                       "json_schema": ["name": "result", "strict": true, "schema": jsonSchema] as [String: Any]]
+        } else if jsonObject {
+            body["response_format"] = Self.jsonResponseFormat(via: via)
+        }
         let data = try await post(
             path: "chat/completions",
             body: try JSONSerialization.data(withJSONObject: body),

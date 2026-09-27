@@ -53,13 +53,17 @@ public final class MeetingStore: @unchecked Sendable {
         let notes = try loadNotes(id: id), transcript = try loadTranscript(id: id)
         var lines = ["# \(notes.title)", "", meta.startedAt.formatted(date: .long, time: .shortened),
                      String(format: "%.0f minutes", meta.durationSeconds / 60), "", "## Summary", notes.summary]
+        for section in notes.sections ?? [] { append(section.title, section.items, to: &lines) }
         append("Decisions", notes.decisions, to: &lines)
         if !notes.actions.isEmpty { lines += ["", "## Action items"] + notes.actions.map { item in
             var suffix = [item.owner, item.deadline].compactMap { $0 }.joined(separator: " · ")
             if !suffix.isEmpty { suffix = " (\(suffix))" }; return "- \(item.text)\(suffix)"
         }}
         append("Notes", notes.notes, to: &lines)
-        lines += ["", "## Transcript"] + transcript.map { "**\(meta.speakerNames[$0.speaker] ?? $0.speaker):** \($0.text)" }
+        lines += ["", "## Transcript"] + transcript.map { segment in
+            let time = segment.start.map { "[\(MeetingNotesPrompt.clock($0))] " } ?? ""
+            return "\(time)**\(MeetingSpeaker.displayName(segment.speaker, names: meta.speakerNames, suggested: notes.speakers)):** \(segment.text)"
+        }
         let markdown = lines.joined(separator: "\n") + "\n"
         try markdown.write(to: folder.appendingPathComponent("notes.md"), atomically: true, encoding: .utf8)
         return markdown

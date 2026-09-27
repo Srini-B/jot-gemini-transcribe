@@ -14,29 +14,28 @@
 
 import Foundation
 
+/// A word or phrase with the request-local speaker label and its time inside
+/// the audio that was sent.
 public struct DiarizedWord: Equatable, Sendable {
     public var text: String
     public var speaker: String?
-    public init(text: String, speaker: String?) { self.text = text; self.speaker = speaker }
+    public var start: Double?
+    public var end: Double?
+    public init(text: String, speaker: String?, start: Double? = nil, end: Double? = nil) {
+        self.text = text; self.speaker = speaker; self.start = start; self.end = end
+    }
 }
 
 public extension GeminiClient {
-    func transcribeDiarized(audio: Data, mimeType: String = "audio/flac", model: String,
-                            endpoint: URL, deadline: TimeInterval) async throws -> [DiarizedWord] {
-        let via = provider()
-        if via != .gemini {
-            // No diarization on the gateways' transcription endpoints: one
-            // unlabelled speaker, which the summary prompt already tolerates.
-            let text = try await gatewayTranscribe(audio: audio, mimeType: mimeType, model: model,
-                                                   deadline: deadline, stage: .meetingTranscribe, via: via)
-            return text.isEmpty ? [] : [DiarizedWord(text: text, speaker: nil)]
-        }
+    /// Speaker-labelled, timed transcription through Google's own endpoint.
+    /// Labels are per request ("spk:0"); `SpeakerLinker` maps them.
+    func transcribeSpeakers(audio: Data, model: String, endpoint: URL, deadline: TimeInterval) async throws -> [DiarizedWord] {
         // `timestamp_granularities` is required in practice: with `diarization_mode`
         // alone the API returned no word_info annotations and a single text block
         // whose speaker turns were concatenated without spaces (verified 2026-09-26).
         let body: [String: Any] = [
             "model": model,
-            "input": [["type": "audio", "mime_type": mimeType, "data": audio.base64EncodedString()]],
+            "input": [["type": "audio", "mime_type": "audio/flac", "data": audio.base64EncodedString()]],
             "generation_config": ["transcription_config": [
                 "mode": ["type": "verbatim", "diarization_mode": "speaker", "timestamp_granularities": ["word"]]
             ]],
@@ -44,34 +43,40 @@ public extension GeminiClient {
         let data = try await post(path: "v1beta/interactions",
                                   body: try JSONSerialization.data(withJSONObject: body), endpoint: endpoint,
                                   deadline: deadline, modelLabel: model, modelIsInPath: false,
-                                  stage: .meetingTranscribe)
+                                  stage: .meetingTranscribe, via: .gemini)
         return try Self.parseDiarizedWords(data)
     }
 
-    func summarizeMeeting(transcript: String, model: String, endpoint: URL,
-                          deadline: TimeInterval) async throws -> MeetingNotes {
-        let prompt = """
-        Return ONLY JSON matching this shape exactly:
-        {"title":"","summary":"","decisions":[],"actions":[{"text":"","owner":null,"deadline":null}],"notes":[]}
+    /// The same through a gateway, where no transcription endpoint diarizes.
+    /// VERIFIED 2026-09-27: OpenRouter's `/audio/transcriptions` for
+    /// `google/gemini-3.5-transcribe` returns one untimed segment whatever
+    /// options are passed, and Vercel's drops `word_info` too (Vercel community
+    /// thread 48498). The flash model is sent each known speaker's clips as
+    /// separate audio parts under their ids, then the window, and answers with
+    /// those ids. MEASURED 2026-09-27: its timestamps drift too far for the
+    /// overlap vote the native path uses, which split one person into two ids.
+    func transcribeSpeakers(audio: Data, references: [(id: String, audio: Data)], model: String,
+                            deadline: TimeInterval, via: ModelProvider) async throws -> [DiarizedWord] {
+        var parts: [ChatPart] = []
+        if references.isEmpty {
+            parts.append(.text("Reference clips: none yet."))
+        } else {
+            parts.append(.text("Reference clips:"))
+            for reference in references { parts += [.text("Reference \(reference.id):"), .flac(reference.audio)] }
+        }
+        parts += [.text("Window audio:"), .flac(audio)]
+        let text = try await gatewayChat(prompt: Self.speakerTranscriptPrompt, model: model, deadline: deadline,
+                                         stage: .meetingTranscribe, jsonSchema: Self.speakerTranscriptSchema,
+                                         parts: parts, via: via)
+        return try Self.parseSpeakerSegments(text)
+    }
 
-        Create faithful meeting notes from the transcript. Speaker labels such as "spk:0" and "Speaker 1" identify turns, not names. Never invent participants, facts, decisions, owners, deadlines, or context. Write the title, summary, decisions, actions, and notes in the language the participants spoke most; when the meeting mixes languages, use the one that carries most of the discussion, and never translate into English unless English was that language. Ignore greetings, small talk, and verbal filler unless they affect the meeting.
-
-        - title: A short, specific title of at most 8 words based on the main subject. Do not use a generic title when a specific topic is available.
-        - summary: A few short prose paragraphs describing what was discussed in the order it was discussed. Preserve important nuance and disagreement. Combine repeated statements so each point appears once; do not turn repetition into extra significance.
-        - decisions: Include only outcomes explicitly agreed or clearly finalized in the transcript. Use short standalone sentences. Proposals, preferences, unresolved suggestions, and assumptions are not decisions.
-        - actions: Include only concrete follow-up tasks. Phrase each "text" as an imperative task that stands alone without the transcript, including the relevant object or context. Set "owner" only when the transcript names a person or clearly attributes the task to a named person; a bare speaker label is not a person, so otherwise use null. Set "deadline" only when a date, time, or deadline is spoken; otherwise use null. Do not infer either from roles or context.
-        - notes: Capture open questions, risks, blockers, important numbers, dates, links, constraints, and follow-ups that do not fit elsewhere. Do not duplicate decisions or actions.
-
-        Refer to a speaker label exactly as given only when attribution matters and no name is revealed. If the transcript is empty or too short to summarize meaningfully, return empty arrays, a short title or empty title as appropriate, and a one-sentence summary stating that there was not enough meeting content. Preserve every key exactly and return valid JSON with no markdown or extra text.
-
-        Transcript:
-        \(transcript)
-        """
-        let via = provider()
+    /// Notes JSON for a prompt built by `MeetingNotesPrompt`.
+    func meetingNotesJSON(prompt: String, model: String, endpoint: URL, deadline: TimeInterval,
+                          via: ModelProvider) async throws -> String {
         if via != .gemini {
-            let text = try await gatewayChat(prompt: prompt, model: model, deadline: deadline,
-                                             stage: .meetingSummary, jsonObject: true, via: via)
-            return try Self.parseMeetingNotes(text)
+            return try await gatewayChat(prompt: prompt, model: model, deadline: deadline,
+                                         stage: .meetingSummary, jsonObject: true, via: via)
         }
         let body: [String: Any] = [
             "contents": [["role": "user", "parts": [["text": prompt]]]],
@@ -80,9 +85,46 @@ public extension GeminiClient {
                 "thinkingConfig": ["thinkingLevel": "low"],
             ],
         ]
-        let text = try await generateContent(body: body, model: model, endpoint: endpoint, deadline: deadline,
-                                             stage: .meetingSummary)
-        return try Self.parseMeetingNotes(text)
+        return try await generateContent(body: body, model: model, endpoint: endpoint, deadline: deadline,
+                                         stage: .meetingSummary)
+    }
+
+    /// MEASURED 2026-09-27: asking the flash model to judge speakers "by voice
+    /// (pitch, timbre, accent)" got `content_filter` every time. This wording
+    /// passed.
+    static let speakerTranscriptPrompt = """
+    Transcribe this window of a recorded call and label who speaks.
+
+    Speaker ids must stay the same across the whole call, which is processed in consecutive windows. Each reference clip is a person already identified earlier in the call, under a fixed id. When the same person talks in this window, use their id. Use a new id (the next unused one of s1, s2, s3, ...) only for a person who matches no reference. Never give two different people the same id, and never give one person two ids.
+
+    Return ONLY JSON: {"segments":[{"speaker":"s1","start":0.0,"end":0.0,"text":""}]}
+    - One segment per speaker turn, in time order. Start a new segment when the speaker changes or after a pause longer than one second.
+    - "start" and "end": seconds from the start of the window audio, to one decimal place.
+    - "text": exactly what is said, in the language and script spoken. Do not translate, correct, summarize, or add words. Leave out silence, music, and noise.
+    """
+
+    /// Strict schema, because the same request with `json_object` returned an
+    /// unterminated string on a Tamil call (2026-09-27).
+    static let speakerTranscriptSchema: [String: Any] = [
+        "type": "object",
+        "properties": ["segments": ["type": "array", "items": [
+            "type": "object",
+            "properties": ["speaker": ["type": "string"], "start": ["type": "number"],
+                           "end": ["type": "number"], "text": ["type": "string"]],
+            "required": ["speaker", "start", "end", "text"],
+            "additionalProperties": false,
+        ] as [String: Any]]],
+        "required": ["segments"],
+        "additionalProperties": false,
+    ]
+
+    static func parseSpeakerSegments(_ text: String) throws -> [DiarizedWord] {
+        struct Segment: Decodable { var speaker: String; var start: Double; var end: Double; var text: String }
+        struct Envelope: Decodable { var segments: [Segment] }
+        let envelope = try JSONDecoder().decode(Envelope.self, from: Data(stripFences(text).utf8))
+        return envelope.segments.filter { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty }.map {
+            DiarizedWord(text: $0.text, speaker: $0.speaker, start: $0.start, end: $0.end)
+        }
     }
 
     static func parseDiarizedWords(_ data: Data) throws -> [DiarizedWord] {
@@ -98,7 +140,8 @@ public extension GeminiClient {
         let words = content.flatMap { item -> [DiarizedWord] in
             (item["annotations"] as? [[String: Any]] ?? []).compactMap { annotation in
                 guard annotation["type"] as? String == "word_info", let text = annotation["text"] as? String else { return nil }
-                return DiarizedWord(text: text, speaker: annotation["speaker"] as? String)
+                return DiarizedWord(text: text, speaker: annotation["speaker"] as? String,
+                                    start: seconds(annotation["start_offset"]), end: seconds(annotation["end_offset"]))
             }
         }
         if !words.isEmpty { return words }
@@ -106,12 +149,17 @@ public extension GeminiClient {
         return fallback.isEmpty ? [] : [DiarizedWord(text: fallback, speaker: nil)]
     }
 
-    static func parseMeetingNotes(_ text: String) throws -> MeetingNotes {
+    /// "12.340s" → 12.34
+    static func seconds(_ value: Any?) -> Double? {
+        guard let string = value as? String else { return value as? Double }
+        return Double(string.hasSuffix("s") ? String(string.dropLast()) : string)
+    }
+
+    static func stripFences(_ text: String) -> String {
         var cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if cleaned.hasPrefix("```") {
-            cleaned = cleaned.replacingOccurrences(of: #"^```(?:json)?\s*|\s*```$"#,
-                                                    with: "", options: .regularExpression)
+            cleaned = cleaned.replacingOccurrences(of: #"^```(?:json)?\s*|\s*```$"#, with: "", options: .regularExpression)
         }
-        return try JSONDecoder().decode(MeetingNotes.self, from: Data(cleaned.utf8))
+        return cleaned
     }
 }

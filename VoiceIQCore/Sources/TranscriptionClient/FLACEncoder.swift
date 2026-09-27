@@ -29,6 +29,31 @@ public enum FLACEncoder {
         case writeFailed(String)
     }
 
+    /// 16 kHz mono samples to FLAC bytes, through a temporary file.
+    public static func encode(samples: [Int16], sampleRate: Double = 16_000) throws -> Data {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("voiceiq-\(UUID()).flac")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let format = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: sampleRate, channels: 1, interleaved: true)!
+        let settings: [String: Any] = [AVFormatIDKey: kAudioFormatFLAC, AVSampleRateKey: sampleRate, AVNumberOfChannelsKey: 1]
+        do {
+            let writer = try AVAudioFile(forWriting: url, settings: settings, commonFormat: .pcmFormatInt16, interleaved: true)
+            var offset = 0
+            while offset < samples.count {
+                let count = min(65_536, samples.count - offset)
+                let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(count))!
+                buffer.frameLength = AVAudioFrameCount(count)
+                samples.withUnsafeBufferPointer { source in
+                    buffer.int16ChannelData![0].update(from: source.baseAddress! + offset, count: count)
+                }
+                try writer.write(from: buffer)
+                offset += count
+            }
+        } catch {
+            throw EncodeError.writeFailed(String(describing: error))
+        }
+        return try Data(contentsOf: url)
+    }
+
     public static func encode(cafURL: URL, flacURL: URL) throws -> Output {
         try encode(cafURL: cafURL, flacURL: flacURL, frameRange: nil)
     }

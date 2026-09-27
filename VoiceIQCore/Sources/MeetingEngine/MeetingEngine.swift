@@ -32,6 +32,8 @@ import Foundation
     private let config: () -> GeminiConfig
     private let transcribeModel: String?
     private let summaryModel: String
+    /// Providers to try in order; see `ModelProvider.fallbackOrder`.
+    private let providers: @Sendable () -> [ModelProvider]
     private lazy var detector = CallDetector()
     private var mic: MicTap?, system: SystemAudioTap?
     private var currentFolder: URL?, currentMeta: MeetingMeta?
@@ -39,9 +41,10 @@ import Foundation
     public private(set) var detectedSource: CallSource?
 
     public init(client: GeminiClient, store: MeetingStore = MeetingStore(), config: @escaping () -> GeminiConfig,
-                transcribeModel: String? = nil, summaryModel: String = "gemini-3.8-flash") {
+                transcribeModel: String? = nil, summaryModel: String = "gemini-3.8-flash",
+                providers: @escaping @Sendable () -> [ModelProvider] = { [.gemini] }) {
         self.client = client; self.store = store; self.config = config
-        self.transcribeModel = transcribeModel; self.summaryModel = summaryModel
+        self.transcribeModel = transcribeModel; self.summaryModel = summaryModel; self.providers = providers
         detector.onChange = { [weak self] source in self?.detected(source) }
         failInterruptedRecordings()
     }
@@ -108,32 +111,51 @@ import Foundation
         meta.endedAt = Date(); meta.durationSeconds = max(micDuration, systemDuration); meta.status = .transcribing
         currentMeta = meta; try? store.save(meta: meta)
         Task { await UsageMeter.$scope.withValue(UsageScope(activity: .meeting, sessionID: id.uuid.uuidString)) {
-            await process(id: id, folder: folder, meta: meta, remix: true)
+            await process(id: id, folder: folder, meta: meta)
         } }
     }
 
+    /// Transcribes again from the audio (finished windows are reused) and writes new notes.
     public func retry(id: MeetingID) {
+        switch phase { case .idle, .failed, .callDetected: break; default: return }
         guard let folder = store.folder(for: id), let meta = store.list().first(where: { $0.id == id }) else { return }
         phase = .processing(id)
         Task { await UsageMeter.$scope.withValue(UsageScope(activity: .meeting, sessionID: id.uuid.uuidString)) {
-            await process(id: id, folder: folder, meta: meta, remix: false)
+            await process(id: id, folder: folder, meta: meta)
         } }
     }
 
-    private func process(id: MeetingID, folder: URL, meta original: MeetingMeta, remix: Bool) async {
+    /// New notes from the saved transcript, using the speaker names typed since.
+    public func regenerateNotes(id: MeetingID) {
+        switch phase { case .idle, .failed, .callDetected: break; default: return }
+        guard var meta = store.list().first(where: { $0.id == id }),
+              let transcript = try? store.loadTranscript(id: id), !transcript.isEmpty else { return }
+        phase = .processing(id)
+        Task { await UsageMeter.$scope.withValue(UsageScope(activity: .meeting, sessionID: id.uuid.uuidString)) {
+            do {
+                meta.status = .summarizing; try store.save(meta: meta)
+                let notes = try await writeNotes(transcript: transcript, meta: meta)
+                try finish(id: id, meta: &meta, transcript: transcript, notes: notes)
+            } catch { meta.status = .failed(String(describing: error)); try? store.save(meta: meta); fail(id, error) }
+        } }
+    }
+
+    private func process(id: MeetingID, folder: URL, meta original: MeetingMeta) async {
         var meta = original
         do {
-            let mixed = folder.appendingPathComponent("mixed.caf")
-            if remix { meta.durationSeconds = try AudioMixer.mixToMono(micURL: folder.appendingPathComponent("mic.caf"), systemURL: folder.appendingPathComponent("system.caf"), outputURL: mixed) }
-            let cfg = config(), model = transcribeModel ?? cfg.transcribeModel
-            let stats = try AudioMixer.speechStats(url: mixed)
-            guard stats.hasSpeech else {
-                Log.meeting.info("no speech in recording (\(String(format: "%.1f", stats.activeSeconds), privacy: .public)s active, \(String(format: "%.1f", stats.spreadDB), privacy: .public) dB spread) — skipping transcription")
+            let cfg = config()
+            let mic = try AudioMixer.speechStats(url: folder.appendingPathComponent("mic.caf"))
+            let system = try AudioMixer.speechStats(url: folder.appendingPathComponent("system.caf"))
+            guard mic.hasSpeech || system.hasSpeech else {
+                Log.meeting.info("no speech in recording (mic \(String(format: "%.1f", mic.activeSeconds), privacy: .public)s, system \(String(format: "%.1f", system.activeSeconds), privacy: .public)s active) — skipping transcription")
                 try finish(id: id, meta: &meta, transcript: [], notes: Self.emptyNotes(reason: "No speech was recorded."))
                 return
             }
             meta.status = .transcribing; try store.save(meta: meta)
-            let transcript = try await MeetingTranscriber(client: client).transcribe(cafURL: mixed, model: model, endpoint: cfg.endpoint, deadline: 1800)
+            let transcriber = MeetingTranscriber(client: client,
+                                                 models: .init(transcribe: transcribeModel ?? cfg.transcribeModel, flash: summaryModel),
+                                                 endpoint: cfg.endpoint, providers: providers)
+            let transcript = try await transcriber.transcribe(folder: folder)
             let words = transcript.reduce(0) { $0 + $1.text.split(whereSeparator: \.isWhitespace).count }
             guard words >= Self.minimumSummarizableWords else {
                 Log.meeting.info("transcript too short to summarize (\(words, privacy: .public) words)")
@@ -142,10 +164,28 @@ import Foundation
             }
             try store.save(transcript: transcript, id: id)
             meta.status = .summarizing; try store.save(meta: meta)
-            let text = transcript.map { "\($0.speaker): \($0.text)" }.joined(separator: "\n")
-            let notes = try await client.summarizeMeeting(transcript: text, model: summaryModel, endpoint: cfg.endpoint, deadline: 300)
+            let notes = try await writeNotes(transcript: transcript, meta: meta)
             try finish(id: id, meta: &meta, transcript: transcript, notes: notes)
         } catch { meta.status = .failed(String(describing: error)); try? store.save(meta: meta); fail(id, error) }
+    }
+
+    private func writeNotes(transcript: [TranscriptSegment], meta: MeetingMeta) async throws -> MeetingNotes {
+        let cfg = config()
+        let prompt = MeetingNotesPrompt.build(transcript: transcript, context: .init(
+            startedAt: meta.startedAt, durationSeconds: meta.durationSeconds,
+            app: meta.source.map(Self.name), names: meta.speakerNames))
+        var lastError: Error = TranscriptionError.network("no_provider")
+        for via in providers() {
+            do {
+                let text = try await client.meetingNotesJSON(prompt: prompt, model: summaryModel, endpoint: cfg.endpoint,
+                                                             deadline: 300, via: via)
+                return try MeetingNotesPrompt.parse(text)
+            } catch {
+                Log.meeting.error("notes via \(via.rawValue, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+                lastError = error
+            }
+        }
+        throw lastError
     }
 
     /// Fewer words than this and the notes model has nothing to work with; it
