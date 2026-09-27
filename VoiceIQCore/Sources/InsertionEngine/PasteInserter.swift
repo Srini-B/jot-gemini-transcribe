@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#if os(macOS)
 import AppKit
 import Carbon.HIToolbox
 import Foundation
@@ -153,3 +154,4 @@ public final class PasteInserter {
         pasteboard.writeObjects(items)
     }
 }
+#endif

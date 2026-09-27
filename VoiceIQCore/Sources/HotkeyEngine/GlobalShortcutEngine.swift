@@ -1,6 +1,7 @@
 // Copyright 2026 Google LLC
 // Licensed under the Apache License, Version 2.0.
 
+#if os(macOS)
 import CoreGraphics
 import Foundation
 
@@ -197,3 +198,4 @@ public final class GlobalShortcutEngine: @unchecked Sendable {
         healthTimer = timer
     }
 }
+#endif

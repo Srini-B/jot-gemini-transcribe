@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#if os(macOS)
 import AppKit
 import CoreGraphics
 import Foundation
@@ -301,3 +302,4 @@ public final class EventTapEngine {
         healthTimer = timer
     }
 }
+#endif

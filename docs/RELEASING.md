@@ -1,8 +1,41 @@
 # Releasing VoiceiQ
 
-Releases are built locally with `scripts/release.sh`. The script produces a Developer ID signed, notarized, and stapled app and DMG. It stops on any signing, entitlement, notarization, or Gatekeeper failure.
+VoiceiQ ships two apps from one project, built on the same `VoiceIQCore`
+package, and each has its own release script:
 
-## Prerequisites
+| | macOS | iPhone |
+| --- | --- | --- |
+| Script | `scripts/release.sh` | `scripts/release-ios.sh` |
+| Channel | Notarized DMG and ZIP, shared directly | TestFlight, app "VoiceiQ Dictation" (6816685189) |
+| Bundle ID | `io.blue.voiceiq` | `io.blue.voiceiq.ios` (+ `.keyboard`, `.liveactivity`) |
+
+Both scripts follow the same flow and stop at the first failure:
+
+```text
+preflight (tools, identity, credentials)
+  → scripts/test.sh (VoiceIQCore)
+  → xcodegen generate
+  → Release build or archive, manual signing
+  → verify signature and entitlements
+  → publish (notarize + DMG, or upload to TestFlight)
+```
+
+`SKIP_TESTS=1` skips the test step when it has just been run.
+
+## Before any release
+
+1. Bump `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in `project.yml`.
+   All four targets carry the same values.
+2. Confirm `./scripts/build.sh` and `./scripts/build-ios.sh` pass.
+3. Confirm the production Gemini models are available with a real dictation.
+
+## macOS
+
+`scripts/release.sh` produces a Developer ID signed, notarized, and stapled app
+and DMG. It stops on any signing, entitlement, notarization, or Gatekeeper
+failure.
+
+### Prerequisites
 
 The login keychain must contain this identity:
 
@@ -20,12 +53,7 @@ export APPLE_TEAM_ID=...
 
 The values are stored in `~/.zshrc` on the release machine. Source that file in the calling shell. The script checks that all three variables exist and never prints them.
 
-## Build a release
-
-1. Confirm `./scripts/test.sh` and `./scripts/build.sh` pass.
-2. Bump `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in `project.yml`.
-3. Confirm the production Gemini models are available with a real dictation.
-4. Run the release script.
+### Build a release
 
 ```bash
 source ~/.zshrc
@@ -34,14 +62,15 @@ source ~/.zshrc
 
 The script performs this sequence:
 
-1. Regenerates `VoiceIQ.xcodeproj` with XcodeGen.
-2. Builds Release with manual Developer ID signing, hardened runtime, and a secure timestamp.
-3. Verifies the app signature and rejects `get-task-allow`.
-4. Creates a ZIP with `ditto` and submits it to Apple notarization.
-5. Staples the app, checks it with Gatekeeper, and re-creates
+1. Runs the `VoiceIQCore` tests.
+2. Regenerates `VoiceIQ.xcodeproj` with XcodeGen.
+3. Builds Release with manual Developer ID signing, hardened runtime, and a secure timestamp.
+4. Verifies the app signature and rejects `get-task-allow`.
+5. Creates a ZIP with `ditto` and submits it to Apple notarization.
+6. Staples the app, checks it with Gatekeeper, and re-creates
    `build/release/VoiceiQ-<version>.zip` from the stapled app.
-6. Builds `build/release/VoiceiQ-<version>.dmg` with `scripts/make-dmg.sh`.
-7. Signs, notarizes, staples, and Gatekeeper-checks the DMG.
+7. Builds `build/release/VoiceiQ-<version>.dmg` with `scripts/make-dmg.sh`.
+8. Signs, notarizes, staples, and Gatekeeper-checks the DMG.
 
 Both `VoiceiQ-<version>.zip` and `VoiceiQ-<version>.dmg` are shareable as they
 are: the app inside each carries a stapled notarization ticket, so testers can
@@ -49,7 +78,7 @@ open it after the usual first-launch confirmation without an internet check.
 
 The bundle identifier is `io.blue.voiceiq`. Changing it resets the app's UserDefaults domain and requires users to grant microphone, Accessibility, and other TCC permissions again. `FileLayout` and `KeychainStore` migrate the previous VoiceiQ folder and API-key service, but macOS permissions cannot be migrated.
 
-## Verification
+### Verification
 
 Inspect an existing release without submitting another notarization job:
 
@@ -63,8 +92,118 @@ spctl -a -t open --context context:primary-signature -vv "build/release/VoiceiQ-
 
 Do not distribute an artifact if any command fails. There is no unsigned or unnotarized fallback.
 
-## Every release
+### Every macOS release
 
 1. Complete the product reliability checklist in `docs/design/product-reliability.md`.
 2. Smoke-test onboarding, API-key storage, permissions, dictation, history, and the DMG install flow on a clean macOS account.
 3. Publish the verified DMG and release notes.
+
+## iPhone (TestFlight)
+
+`scripts/release-ios.sh` archives the `VoiceIQiOS` scheme, signs the app and
+both extensions for the App Store, uploads the build, and waits until App Store
+Connect has processed it. The internal group "VoiceiQ Internal" has automatic
+distribution, so a processed build reaches its testers without another step.
+
+```bash
+./scripts/release-ios.sh                 # upload with asc (default)
+UPLOAD=xcode ./scripts/release-ios.sh    # upload with Xcode's signed-in account
+UPLOAD=none ./scripts/release-ios.sh     # everything except the upload
+BUILD=14 ./scripts/release-ios.sh        # force a build number
+```
+
+The script performs this sequence:
+
+1. Checks xcodegen, the Apple Distribution identity, the three App Store
+   profiles and, for `UPLOAD=asc`, that the asc profile can see the app.
+2. Runs the `VoiceIQCore` tests.
+3. Picks the build number: `BUILD`, otherwise the larger of
+   `CURRENT_PROJECT_VERSION` and asc's next free build number.
+4. Runs `scripts/archive-ios.sh`, which regenerates the project, archives
+   Release to `build/ios/VoiceiQ.xcarchive` and exports
+   `build/ios/export/VoiceiQ.ipa`.
+5. Verifies every bundle's signature, checks for the App Group
+   `group.io.blue.voiceiq`, and rejects `get-task-allow`.
+6. Uploads with `asc publish testflight --upload-only --wait` and lists the
+   TestFlight groups. With `UPLOAD=xcode` it runs `xcodebuild -exportArchive`
+   with the `upload` destination instead.
+
+### One-time setup on a release Mac
+
+**Signing.** The identity `Apple Distribution: Blue Lobster Technology PTE. LTD
+(G8K3545FJ2)` must be in a keychain, and these profiles must be installed in
+`~/Library/Developer/Xcode/UserData/Provisioning Profiles`:
+
+| Profile | Bundle ID |
+| --- | --- |
+| VoiceiQ iOS App Store | `io.blue.voiceiq.ios` |
+| VoiceiQ Keyboard App Store | `io.blue.voiceiq.ios.keyboard` |
+| VoiceiQ Live Activity App Store | `io.blue.voiceiq.ios.liveactivity` |
+
+On the Mac mini the key lives in `~/Library/Keychains/voiceiq-signing.keychain-db`,
+which the script unlocks with `~/.voiceiq-signing/keychain.pass`. With an asc
+key the profiles can be recreated from the terminal:
+
+```bash
+asc --profile voiceiq profiles list --profile-type IOS_APP_STORE
+asc --profile voiceiq profiles download --id PROFILE_ID --output profile.mobileprovision
+```
+
+**asc (App Store Connect CLI, https://asccli.sh).** Uploads, build numbers
+and TestFlight go through asc with the App Store Connect team API key
+"VoiceiQ release" (App Manager role). On the Mac mini it is set up already:
+
+| Item | Location |
+| --- | --- |
+| asc | `brew install asc` (`/opt/homebrew/bin/asc`), telemetry disabled |
+| Private key | `~/.asc/keys/AuthKey_<KEY_ID>.p8` (0600) |
+| asc profile `voiceiq` | `~/.asc/config.json` (0600). The login keychain cannot be written from SSH or agent sessions, so asc keeps it in its config file. |
+
+Check it with `asc --profile voiceiq apps view --id 6816685189`. To set up
+another Mac, download a Team Key (App Store Connect → Users and Access →
+Integrations → App Store Connect API → Team Keys, App Manager role; the `.p8`
+downloads only once) and run:
+
+```bash
+KEY_FILE=~/Downloads/AuthKey_XXXXXXXXXX.p8 ISSUER_ID=<issuer ID above the Team Keys table> ./scripts/setup-asc.sh
+```
+
+`setup-asc.sh` can also create the key itself through an Apple web session
+(`APPLE_ID=… ./scripts/setup-asc.sh`, prompts for the password and a
+two-factor code). If a key leaks, revoke it on the same page.
+
+Exporting an App Store IPA reserves its build number in App Store Connect
+("awaiting upload"). `release-ios.sh` deletes that reservation before it
+uploads and after a dry run, so it does not block the number.
+
+**Xcode fallback.** Without an asc key, `UPLOAD=xcode` uploads through the
+Apple Account signed in to Xcode (Settings → Accounts). Run it from the
+logged-in desktop session, not a plain SSH shell, because signing needs the
+unlocked login keychain.
+
+### What asc can and cannot do with the API key
+
+With the key: builds and uploads, build numbers, TestFlight groups and
+testers, bundle IDs and their capabilities, certificates, and provisioning
+profiles (`asc --profile voiceiq profiles list --profile-type IOS_APP_STORE`).
+
+The public API does not create App Groups, assign them to bundle IDs, or
+create app records. For those, asc needs an Apple web session
+(`asc web auth login`: password and two-factor code), which expires, so they
+stay out of the release script:
+
+```bash
+asc web app-groups create --name "VoiceiQ Shared" --identifier group.io.blue.voiceiq --confirm
+asc web apps create --name "VoiceiQ Dictation" --bundle-id io.blue.voiceiq.ios --sku voiceiq-ios
+```
+
+The first release was set up in the Developer portal by hand; the current
+state is listed in [IOS.md](IOS.md#apple-developer-setup-team-g8k3545fj2).
+
+### Every iPhone release
+
+1. Install the TestFlight build on a physical iPhone. Add the keyboard, allow
+   Full Access, dictate in two apps (the second without a bounce), end the
+   session from the Dynamic Island, and record a short meeting.
+2. External testers need Beta App Review: create an external group and run
+   `asc publish testflight --app 6816685189 --build-id BUILD_ID --group "<group>" --submit --confirm`.

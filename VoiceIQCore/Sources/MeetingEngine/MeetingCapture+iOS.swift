@@ -1,0 +1,130 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#if os(iOS)
+import AVFoundation
+import Foundation
+
+/// Records the phone's microphone to a 16 kHz mono CAF for meeting notes.
+///
+/// The app's audio session must already be active (`.playAndRecord`); this
+/// only builds the engine, so it keeps recording after the app is backgrounded.
+public final class MicTap: @unchecked Sendable {
+    public enum MicError: Error { case format, noDevice }
+    public var pcmSink: (@Sendable (Data) -> Void)?
+    private let url: URL
+    private let target = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16_000,
+                                       channels: 1, interleaved: true)!
+    private let queue = DispatchQueue(label: "io.blue.voiceiq.meeting.mic.io", qos: .userInitiated)
+    private var engine: AVAudioEngine?
+    private var converter: AVAudioConverter?
+    private var writer: CAFWriter?
+    private var frames: Int64 = 0
+    private var configObserver: NSObjectProtocol?
+
+    public init(url: URL) { self.url = url }
+
+    public func start() throws {
+        writer = try CAFWriter(url: url, format: target)
+        frames = 0
+        try buildEngine()
+    }
+
+    public func stop() -> Double {
+        if let configObserver { NotificationCenter.default.removeObserver(configObserver) }
+        configObserver = nil
+        engine?.inputNode.removeTap(onBus: 0)
+        engine?.stop()
+        engine = nil
+        queue.sync { writer?.close(); writer = nil }
+        Log.meeting.notice("mic stopped: frames=\(self.frames)")
+        return Double(frames) / target.sampleRate
+    }
+
+    private func buildEngine() throws {
+        let engine = AVAudioEngine()
+        let input = engine.inputNode
+        let format = input.outputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0 else { throw MicError.noDevice }
+        guard let converter = AVAudioConverter(from: format, to: target) else { throw MicError.format }
+        self.converter = converter
+        input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
+            self?.queue.async { self?.write(buffer, rate: format.sampleRate) }
+        }
+        engine.prepare()
+        try engine.start()
+        self.engine = engine
+        // A route change (AirPods in or out) stops the engine. Rebuild on the new
+        // route and keep appending to the same file.
+        configObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
+        ) { [weak self] _ in
+            guard let self, self.writer != nil else { return }
+            self.engine?.inputNode.removeTap(onBus: 0)
+            self.engine = nil
+            do { try self.buildEngine() } catch {
+                Log.meeting.error("mic rebuild failed: \(String(describing: error), privacy: .public)")
+            }
+        }
+    }
+
+    private func write(_ buffer: AVAudioPCMBuffer, rate: Double) {
+        guard let converter, let writer else { return }
+        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * target.sampleRate / rate) + 64
+        guard let out = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity) else { return }
+        var fed = false
+        converter.convert(to: out, error: nil) { _, status in
+            if fed { status.pointee = .noDataNow; return nil }
+            fed = true; status.pointee = .haveData; return buffer
+        }
+        guard out.frameLength > 0 else { return }
+        do {
+            try writer.write(out)
+            frames += Int64(out.frameLength)
+            if let sink = pcmSink, let channel = out.int16ChannelData {
+                sink(Data(bytes: channel[0], count: Int(out.frameLength) * 2))
+            }
+        } catch { Log.meeting.error("mic write failed: \(String(describing: error), privacy: .public)") }
+    }
+}
+
+/// iOS does not let an app record other apps' audio or call audio. The meeting
+/// pipeline mixes a mic file with a system file, so this writes an empty one.
+public final class SystemAudioTap: @unchecked Sendable {
+    public var pcmSink: (@Sendable (Data) -> Void)?
+    private let url: URL
+    public init(url: URL) { self.url = url }
+
+    public func start() throws {
+        let format = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16_000, channels: 1, interleaved: true)!
+        CAFWriter.touch(url: url, format: format)
+    }
+
+    public func stop() -> Double { 0 }
+}
+
+/// Call detection reads other apps' audio and windows, which iOS forbids.
+@MainActor public final class CallDetector {
+    public var onChange: ((CallSource?) -> Void)?
+    public init() {}
+    public func start() {}
+    public func stop() {}
+}
+
+extension CAFWriter {
+    static func touch(url: URL, format: AVAudioFormat) {
+        (try? CAFWriter(url: url, format: format))?.close()
+    }
+}
+#endif

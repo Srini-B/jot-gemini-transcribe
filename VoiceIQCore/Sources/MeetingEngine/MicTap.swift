@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#if os(macOS)
 import AudioToolbox
 import AVFoundation
 import CoreAudio
@@ -133,3 +134,4 @@ public final class MicTap: @unchecked Sendable {
 
     private func check(_ status: OSStatus) throws { if status != noErr { throw MicError.coreAudio(status) } }
 }
+#endif

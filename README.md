@@ -6,7 +6,7 @@
 
 **Press a key. Speak. It types.**
 
-Smart dictation, Ask Anything, Translate, and meeting notes for macOS, all on Gemini.
+Smart dictation, Ask Anything, Translate, and meeting notes for macOS and iPhone, all on Gemini.
 
 </div>
 
@@ -162,25 +162,56 @@ A few decisions worth knowing about, because they are what make it feel solid:
 The full design specs — including the failure matrix the reliability work is
 built from — are in [docs/design/](docs/design/).
 
+## iPhone
+
+VoiceiQ also ships as an iPhone app (iOS 17+) with a voice-only keyboard. Add
+the VoiceiQ keyboard with Full Access, tap the mic in any app, and the text
+lands where you were typing.
+
+- **One trip to the app, once.** The first tap starts a background session and
+  sends you back to the app you were in. After that the mic starts in place,
+  and the session shows in the Dynamic Island until you end it.
+- **Same settings as the Mac.** Your own Gemini, OpenRouter or Vercel key
+  (stored in the iOS Keychain), dictionary, writing rules, Ask Anything,
+  Translate, History and Cost.
+- **Meetings are a recorder.** Record in the app, stop, and the notes are
+  written with the same pipeline as on the Mac. The iPhone records the room
+  mic only, because iOS does not let an app capture call audio.
+
+It is distributed through TestFlight as "VoiceiQ Dictation". Details in
+[docs/IOS.md](docs/IOS.md).
+
 ## Development
 
-Requires macOS 14+, Xcode 16+, and [xcodegen](https://github.com/yonaskolb/XcodeGen).
-The `.xcodeproj` is generated, not checked in.
+Requires macOS 14+, Xcode 16+ with the iOS SDK, and
+[xcodegen](https://github.com/yonaskolb/XcodeGen). The `.xcodeproj` is
+generated from `project.yml`, not checked in. One project holds both apps:
+`VoiceIQ` (macOS) and `VoiceIQiOS` with its `VoiceIQKeyboard` and
+`VoiceIQLiveActivity` extensions. All of them build on the `VoiceIQCore`
+package; the extensions link only its small `VoiceIQBridge` library.
 
 ```bash
 brew install xcodegen
-./scripts/build.sh          # xcodegen generate + xcodebuild
-./scripts/test.sh           # swift test on VoiceIQCore
-open VoiceIQ.xcodeproj          # or work in Xcode
+./scripts/test.sh           # swift test on VoiceIQCore (shared by both apps)
+./scripts/build.sh          # macOS app, Debug
+./scripts/build-ios.sh      # iPhone app, keyboard and Live Activity (Simulator)
+open VoiceIQ.xcodeproj      # or work in Xcode
 ```
 
 Debug builds sign ad-hoc, so a clean clone needs no Apple account, certificate,
-or team membership — `./scripts/build.sh` works as-is. To build under your own
-team instead: `./scripts/build.sh DEVELOPMENT_TEAM=XXXXXXXXXX`. Only release
-builds (`scripts/release.sh`) need a real Developer ID.
+or team membership. To build under your own team instead:
+`./scripts/build.sh DEVELOPMENT_TEAM=XXXXXXXXXX`, or for an iPhone
+`./scripts/build-ios.sh DEVICE=1 DEVELOPMENT_TEAM=XXXXXXXXXX`. Only release
+builds need the team's signing material.
+
+Code shared by both apps lives in `VoiceIQCore`. Mac-only code (event taps,
+Accessibility insertion, screen capture, system audio) is wrapped in
+`#if os(macOS)`, and the iPhone gets small stand-ins in files ending `+iOS`.
+CI builds both apps on every pull request.
 
 ```
 App/            menu bar item, HUD pill, windows, design tokens, icon + sounds
+iOS/            iPhone app, voice keyboard extension, Live Activity
 VoiceIQCore/        all engine logic, headless and testable
   HotkeyEngine/     CGEventTap + the pure hold/lock/cancel grammar
   AudioEngine/      crash-safe CAF capture, device changes, prewarming
@@ -192,7 +223,8 @@ VoiceIQCore/        all engine logic, headless and testable
   ScreenContext/        screenshots on app switch for spelling context
   Learning/             dictionary auto-learn from your edits
   Usage/                token metering, price book, cost ledger
-scripts/        build, test, icon, DMG, release
+  Bridge/               VoiceIQBridge: keyboard ↔ app protocol, return-link table
+scripts/        build, test, icon, DMG, macOS and iOS release
 docs/           privacy, releasing, cost tracking, design specs, research
 ```
 
@@ -211,6 +243,15 @@ Transcript text is logged as `private` and never appears in those logs.
 
 ### Releasing
 
-`./scripts/release.sh` archives, signs with Developer ID, notarizes, staples,
-and builds the installer DMG. It refuses to produce a shareable DMG that is not
-notarized. See [docs/RELEASING.md](docs/RELEASING.md) for the certificate setup.
+| | macOS | iPhone |
+| --- | --- | --- |
+| Command | `./scripts/release.sh` | `./scripts/release-ios.sh` |
+| Signing | Developer ID Application | Apple Distribution + three App Store profiles |
+| Output | Notarized, stapled DMG and ZIP in `build/release/` | Build on TestFlight ("VoiceiQ Internal") |
+| Credentials | `APPLE_ID`, app-specific password, team ID | asc API key (`scripts/setup-asc.sh`, once) or a signed-in Xcode |
+
+Both scripts run the `VoiceIQCore` tests first and refuse to publish anything
+whose signature or entitlements fail verification. Bump `MARKETING_VERSION`
+and `CURRENT_PROJECT_VERSION` in `project.yml` before a release. The full
+process, one-time setup and checks are in
+[docs/RELEASING.md](docs/RELEASING.md).

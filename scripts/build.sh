@@ -48,4 +48,4 @@ exec env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.bareRepository GIT_CONFIG_VALU
     -scheme VoiceIQ \
     -configuration Debug \
     -destination 'platform=macOS,arch=arm64' \
-    -quiet "${signing_args[@]}" "$@"
+    -quiet ${signing_args[@]+"${signing_args[@]}"} "$@"

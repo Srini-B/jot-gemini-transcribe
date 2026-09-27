@@ -1,6 +1,7 @@
 // Copyright 2026 Google LLC
 // Licensed under the Apache License, Version 2.0.
 
+#if os(macOS)
 import ApplicationServices
 import Foundation
 
@@ -30,3 +31,4 @@ public enum SelectedTextCapture {
         return Snapshot(text: trimmed?.isEmpty == false ? text : nil, isSettable: settable.boolValue)
     }
 }
+#endif

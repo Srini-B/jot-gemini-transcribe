@@ -2,8 +2,14 @@
 # Copyright 2026 Google LLC
 # Licensed under the Apache License, Version 2.0.
 
-# Build, sign, notarize, staple, and package VoiceiQ.
+# Test, build, sign, notarize, staple, and package the macOS app.
 # The caller must source ~/.zshrc first. This script never prints credentials.
+#
+#   scripts/release.sh
+#   SKIP_TESTS=1 scripts/release.sh
+#
+# The iPhone app has its own script: scripts/release-ios.sh.
+# See docs/RELEASING.md.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -22,6 +28,11 @@ APP_PATH="$DERIVED_DATA/Build/Products/Release/$APP_NAME.app"
 ZIP_PATH="$BUILD_DIR/VoiceiQ-$VERSION.zip"
 DMG_PATH="$BUILD_DIR/VoiceiQ-$VERSION.dmg"
 SIGN_IDENTITY="Developer ID Application"
+
+if [[ -z "${SKIP_TESTS:-}" ]]; then
+  echo "▸ Testing VoiceIQCore"
+  scripts/test.sh
+fi
 
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"

@@ -1,6 +1,7 @@
 // Copyright 2026 Google LLC
 // Licensed under the Apache License, Version 2.0.
 
+#if os(macOS)
 import CoreAudio
 import Foundation
 
@@ -218,3 +219,4 @@ public final class AudioOutputMute {
         return AudioObjectSetPropertyData(device, &address, 0, nil, UInt32(MemoryLayout<Float32>.size), &value) == noErr
     }
 }
+#endif

@@ -14,7 +14,9 @@
 
 import AVFoundation
 import Accelerate
+#if os(macOS)
 import CoreAudio
+#endif
 import Foundation
 
 /// The crash-safe recorder.
@@ -550,6 +552,7 @@ public final class AudioCaptureEngine: AudioCapturing {
 
 // MARK: - CoreAudio device helpers
 
+#if os(macOS)
 enum AudioDeviceQuery {
     static func defaultInputDevice() -> AudioDeviceID? {
         var address = AudioObjectPropertyAddress(
@@ -602,3 +605,33 @@ enum AudioDeviceQuery {
     // AUAudioUnit.setDeviceID on the input node) was probed on macOS 26 and leaves
     // the engine running with a silent tap — do not reintroduce it on AVAudioEngine.
 }
+#else
+/// iOS has no HAL device IDs: the audio session's route is the device. A
+/// route change still has to read as "the mic switched", so the current input
+/// port's UID stands in for the device ID.
+typealias AudioDeviceID = Int
+
+enum AudioDeviceQuery {
+    static func defaultInputDevice() -> AudioDeviceID? {
+        AVAudioSession.sharedInstance().currentRoute.inputs.first?.uid.hashValue
+    }
+
+    static func transportDescription() -> String {
+        guard let port = AVAudioSession.sharedInstance().currentRoute.inputs.first else { return "no-device" }
+        switch port.portType {
+        case .builtInMic: return "built-in"
+        case .bluetoothHFP, .bluetoothLE: return "bluetooth"
+        case .headsetMic: return "headset"
+        case .usbAudio: return "usb"
+        case .carAudio: return "car"
+        default: return port.portType.rawValue
+        }
+    }
+}
+
+enum AudioInputDevices {
+    static func currentDefaultName() -> String? {
+        AVAudioSession.sharedInstance().currentRoute.inputs.first?.portName
+    }
+}
+#endif

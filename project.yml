@@ -19,6 +19,7 @@ options:
   createIntermediateGroups: true
   deploymentTarget:
     macOS: "14.0"
+    iOS: "17.0"
 
 packages:
   VoiceIQCore:
@@ -95,3 +96,166 @@ targets:
     scheme:
       testTargets: []
       gatherCoverageData: false
+
+  # iOS: the app owns audio, keys and transcription; the keyboard is a remote
+  # control; the Live Activity shows the background session in the Dynamic
+  # Island. See docs/IOS.md.
+  VoiceIQiOS:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    settings:
+      base:
+        PRODUCT_NAME: "VoiceiQ"
+        PRODUCT_BUNDLE_IDENTIFIER: io.blue.voiceiq.ios
+        DEVELOPMENT_TEAM: G8K3545FJ2
+        CODE_SIGN_STYLE: Automatic
+        SWIFT_VERSION: "5.10"
+        MARKETING_VERSION: "0.4.3"
+        CURRENT_PROJECT_VERSION: "12"
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+      configs:
+        Debug:
+          CODE_SIGN_IDENTITY: "-"
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGNING_REQUIRED: NO
+        # App Store builds (scripts/archive-ios.sh). The profile is created in
+        # the Developer portal; see docs/IOS.md "TestFlight".
+        Release:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: "Apple Distribution"
+          PROVISIONING_PROFILE_SPECIFIER: "VoiceiQ iOS App Store"
+    sources:
+      - path: iOS/App/Sources
+      - path: iOS/App/Resources
+    entitlements:
+      path: iOS/App/VoiceIQiOS.entitlements
+      properties:
+        com.apple.security.application-groups: [group.io.blue.voiceiq]
+    dependencies:
+      - package: VoiceIQCore
+        product: VoiceIQCore
+      - package: VoiceIQCore
+        product: VoiceIQBridge
+      - target: VoiceIQKeyboard
+      - target: VoiceIQLiveActivity
+    info:
+      path: iOS/App/Info.plist
+      properties:
+        CFBundleDisplayName: VoiceiQ
+        CFBundleName: VoiceiQ
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSApplicationCategoryType: public.app-category.productivity
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIBackgroundModes: [audio]
+        NSSupportsLiveActivities: true
+        ITSAppUsesNonExemptEncryption: false
+        NSMicrophoneUsageDescription: VoiceiQ records audio when you tap the microphone in the VoiceiQ keyboard or record a meeting, so it can transcribe what you say.
+        NSHumanReadableCopyright: "Copyright 2026 Google LLC. Apache License 2.0. This is not an officially supported Google product."
+        CFBundleURLTypes:
+          - CFBundleURLName: io.blue.voiceiq.ios.url
+            CFBundleURLSchemes: [voiceiq]
+    scheme:
+      testTargets: []
+      gatherCoverageData: false
+
+  VoiceIQKeyboard:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "17.0"
+    settings:
+      base:
+        PRODUCT_NAME: "VoiceIQKeyboard"
+        PRODUCT_BUNDLE_IDENTIFIER: io.blue.voiceiq.ios.keyboard
+        DEVELOPMENT_TEAM: G8K3545FJ2
+        CODE_SIGN_STYLE: Automatic
+        SWIFT_VERSION: "5.10"
+        MARKETING_VERSION: "0.4.3"
+        CURRENT_PROJECT_VERSION: "12"
+        TARGETED_DEVICE_FAMILY: "1"
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SWIFT_OBJC_BRIDGING_HEADER: iOS/Keyboard/Sources/Keyboard-Bridging-Header.h
+      configs:
+        Debug:
+          CODE_SIGN_IDENTITY: "-"
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGNING_REQUIRED: NO
+        # App Store builds (scripts/archive-ios.sh). The profile is created in
+        # the Developer portal; see docs/IOS.md "TestFlight".
+        Release:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: "Apple Distribution"
+          PROVISIONING_PROFILE_SPECIFIER: "VoiceiQ Keyboard App Store"
+    sources:
+      - path: iOS/Keyboard/Sources
+    entitlements:
+      path: iOS/Keyboard/VoiceIQKeyboard.entitlements
+      properties:
+        com.apple.security.application-groups: [group.io.blue.voiceiq]
+    dependencies:
+      - package: VoiceIQCore
+        product: VoiceIQBridge
+    info:
+      path: iOS/Keyboard/Info.plist
+      properties:
+        CFBundleDisplayName: VoiceiQ
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.keyboard-service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).KeyboardViewController
+          NSExtensionAttributes:
+            IsASCIICapable: false
+            PrefersRightToLeft: false
+            PrimaryLanguage: mul
+            RequestsOpenAccess: true
+
+  VoiceIQLiveActivity:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "17.0"
+    settings:
+      base:
+        PRODUCT_NAME: "VoiceIQLiveActivity"
+        PRODUCT_BUNDLE_IDENTIFIER: io.blue.voiceiq.ios.liveactivity
+        DEVELOPMENT_TEAM: G8K3545FJ2
+        CODE_SIGN_STYLE: Automatic
+        SWIFT_VERSION: "5.10"
+        MARKETING_VERSION: "0.4.3"
+        CURRENT_PROJECT_VERSION: "12"
+        TARGETED_DEVICE_FAMILY: "1"
+        APPLICATION_EXTENSION_API_ONLY: YES
+      configs:
+        Debug:
+          CODE_SIGN_IDENTITY: "-"
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGNING_REQUIRED: NO
+        # App Store builds (scripts/archive-ios.sh). The profile is created in
+        # the Developer portal; see docs/IOS.md "TestFlight".
+        Release:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: "Apple Distribution"
+          PROVISIONING_PROFILE_SPECIFIER: "VoiceiQ Live Activity App Store"
+    sources:
+      - path: iOS/LiveActivity/Sources
+    entitlements:
+      path: iOS/LiveActivity/VoiceIQLiveActivity.entitlements
+      properties:
+        com.apple.security.application-groups: [group.io.blue.voiceiq]
+    dependencies:
+      - package: VoiceIQCore
+        product: VoiceIQBridge
+      - sdk: WidgetKit.framework
+      - sdk: SwiftUI.framework
+    info:
+      path: iOS/LiveActivity/Info.plist
+      properties:
+        CFBundleDisplayName: VoiceiQ
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension

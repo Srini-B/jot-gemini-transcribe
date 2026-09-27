@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#if os(macOS)
 import AppKit
 import ApplicationServices
 import Foundation
@@ -158,3 +159,4 @@ public enum AXInserter {
     /// without the VoiceOver-reserved side effects. First set can take a moment on
     /// big apps — the ladder's fallback covers the not-ready case.
 }
+#endif

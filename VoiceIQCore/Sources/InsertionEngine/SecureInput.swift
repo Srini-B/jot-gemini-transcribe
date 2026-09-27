@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#if os(macOS)
 import Carbon.HIToolbox
 import Darwin
 import Foundation
@@ -70,3 +71,4 @@ public enum SecureInput {
         return name.isEmpty ? nil : name
     }
 }
+#endif

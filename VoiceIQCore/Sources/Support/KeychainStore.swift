@@ -183,6 +183,7 @@ public enum KeychainStore {
         return deleted
     }
 
+    #if os(macOS)
     /// Dev bootstrap until onboarding (M7): if ~/.config/voiceiq/apikey.dev
     /// exists, migrate its contents into the Keychain and DELETE the file. Lets
     /// contributors seed a key without any UI, without leaving plaintext behind.
@@ -197,4 +198,5 @@ public enum KeychainStore {
             Log.permissions.info("KeychainStore: migrated dev key file into Keychain (file deleted)")
         }
     }
+    #endif
 }

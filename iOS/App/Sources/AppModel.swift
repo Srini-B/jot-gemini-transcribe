@@ -1,0 +1,421 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+import AVFoundation
+import Combine
+import UIKit
+import VoiceIQBridge
+import VoiceIQCore
+
+/// Composition root for the iOS app: the same dictation pipeline as macOS,
+/// driven by keyboard commands instead of a hotkey, delivering to the keyboard
+/// instead of the focused field.
+@MainActor
+final class AppModel: ObservableObject {
+    let coordinator: DictationCoordinator
+    let meetings: MeetingEngine
+    let session = VoiceSession()
+    let hostReturn = HostReturn()
+    let historyStore: HistoryStore?
+    let transcription: GeminiTranscriptionService
+
+    /// Shown after the one-time bounce when the app could not send the user
+    /// back on its own.
+    @Published var showSwipeBack = false
+    @Published var banner: String?
+
+    private let store = SharedStore.shared
+    private let inserter = KeyboardInserter()
+    private var retryQueue: RetryQueue?
+    private var recoveryScanner: RecoveryScanner?
+    private var cancellables: Set<AnyCancellable> = []
+    private var commandObserver: UUID?
+    /// Commands acted on in this process. Guards against acting twice when a
+    /// command arrives both by Darwin ping and by URL.
+    private var processed: Set<UUID> = []
+    private var lastActivityRequestID: UUID?
+    /// The app the current dictation is for. A box so the coordinator's
+    /// context closure can read it without capturing `self` during init.
+    private let target = DictationTarget()
+    private var currentMode: KeyboardMode = .dictate
+    private var lastLevelWrite = Date.distantPast
+    private var previousState: DictationState = .idle
+
+    init() {
+        let client = GeminiClient(
+            apiKey: { KeychainStore.loadAPIKey() },
+            openRouterKey: { KeychainStore.loadOpenRouterKey() },
+            vercelKey: { KeychainStore.loadVercelKey() },
+            provider: { SettingsStore().activeProvider }
+        )
+        transcription = GeminiTranscriptionService(client: client)
+        historyStore = try? HistoryStore.standard()
+        UsageMeter.store = try? UsageStore.standard()
+        meetings = MeetingEngine(
+            client: client,
+            config: { SettingsStore().geminiConfig },
+            summaryModel: SettingsStore().geminiConfig.cleanupModel,
+            providers: {
+                let settings = SettingsStore()
+                return ModelProvider.fallbackOrder(preferred: settings.preferredProvider, available: KeychainStore.providersWithKeys)
+            }
+        )
+        let inserter = self.inserter
+        coordinator = DictationCoordinator(
+            audioFactory: {
+                #if DEBUG
+                if let simulated = SimulatedMicrophone.make() { return simulated }
+                #endif
+                return AudioCaptureEngine()
+            },
+            transcription: transcription,
+            insertion: inserter,
+            contextProvider: { [target] in
+                DictationContext(
+                    targetAppBundleID: target.host,
+                    targetAppName: target.host.map(AppNames.displayName(for:))
+                )
+            },
+            makeLiveSession: LiveTranscriber.makeFromSettings
+        )
+        inserter.onDeliver = { [weak self] text, mode in self?.deliver(text, mode: mode) }
+
+        // Commands already in the App Group belong to an earlier process. Only
+        // a command named in a launch URL may still be acted on.
+        store.handledCommandID = store.commands.last?.id
+        lastActivityRequestID = store.activityRequest?.id
+
+        bind()
+        startHistoryServices()
+        commandObserver = DarwinNotifier.observe(.command) { [weak self] in
+            Task { @MainActor in self?.drainCommands() }
+        }
+    }
+
+    // MARK: - Wiring
+
+    private func bind() {
+        coordinator.$state
+            .sink { [weak self] state in self?.stateChanged(state) }
+            .store(in: &cancellables)
+        coordinator.$micLevel
+            .sink { [weak self] level in self?.levelChanged(level) }
+            .store(in: &cancellables)
+        coordinator.onAnswerReady = { [weak self] answer in
+            self?.deliver(answer, mode: .ask)
+        }
+        coordinator.onSessionUpdate = { [weak self] meta, folder in
+            self?.historyStore?.upsert(meta: meta, folder: folder)
+            if SettingsStore().audioRetentionDays < 0, meta.rawTranscript != nil || meta.status == .silent {
+                for audio in [FileLayout.audioCAF(in: folder), FileLayout.audioFLAC(in: folder)] {
+                    try? FileManager.default.removeItem(at: audio)
+                }
+            }
+        }
+        coordinator.onSessionDiscard = { [weak self] id in
+            self?.historyStore?.delete(id: id.uuidString, removeFolder: false)
+        }
+        meetings.$phase
+            .sink { [weak self] phase in
+                guard let self else { return }
+                if case let .recording(_, since) = phase {
+                    self.session.meetingStartedAt = since
+                } else {
+                    self.session.meetingStartedAt = nil
+                }
+            }
+            .store(in: &cancellables)
+        meetings.onNotice = { [weak self] message in self?.banner = message }
+        session.onInterruptionBegan = { [weak self] in
+            guard let self else { return }
+            if case .recording = self.coordinator.state {
+                Log.session.info("interruption — finalizing the dictation")
+                self.session.holdBackgroundTime()
+                self.coordinator.handle(.finalize)
+            }
+            if self.meetings.isRecording { self.meetings.stopRecording() }
+        }
+    }
+
+    private func startHistoryServices() {
+        guard let historyStore else { return }
+        let scanner = RecoveryScanner(store: historyStore, transcription: transcription)
+        scanner.onRecovered = { [weak self] message in self?.banner = message }
+        recoveryScanner = scanner
+        let queue = RetryQueue(store: historyStore, transcription: transcription)
+        queue.onDrained = { [weak self] count in
+            self?.banner = count == 1 ? "A queued dictation is ready in History" : "\(count) queued dictations are ready in History"
+        }
+        retryQueue = queue
+        Task {
+            await scanner.scanAndRecover()
+            queue.start()
+            Task.detached(priority: .utility) { RetentionPolicy().purgeExpiredAudio() }
+        }
+    }
+
+    func retry(_ record: DictationRecord) async -> String? {
+        guard let retryQueue else { return nil }
+        switch await retryQueue.retrySingle(record) {
+        case .recovered, .alreadyDone: return nil
+        case .stillOffline: return "Still offline. It will retry when you're back online."
+        case .rateLimited(let wait): return "Rate limited. Retrying in \(Int(wait.rounded()))s."
+        case .blocked: return "Check your API key in Settings"
+        case .failed: return "Retry failed"
+        case .busy: return "Already retrying"
+        }
+    }
+
+    // MARK: - Commands from the keyboard
+
+    private func drainCommands() {
+        let commands = store.commands
+        let start = commands.lastIndex { $0.id == store.handledCommandID }.map { $0 + 1 } ?? 0
+        for command in commands[start...] where command.isFresh() && !processed.contains(command.id) {
+            // Without a live session the app cannot start the mic from the
+            // background. Leave the command for the launch URL the keyboard
+            // opens next.
+            if command.action == .start, !session.isActive { continue }
+            accept(command)
+            handle(command)
+            if command.action == .start, let host = command.hostBundleID {
+                hostReturn.note(host: host, outcome: .inPlace)
+            }
+        }
+        if let request = store.activityRequest, request.id != lastActivityRequestID,
+           Date().timeIntervalSince(request.issuedAt) < KeyboardCommand.maximumAge {
+            lastActivityRequestID = request.id
+            handle(request)
+        }
+    }
+
+    private func accept(_ command: KeyboardCommand) {
+        processed.insert(command.id)
+        store.handledCommandID = command.id
+    }
+
+    private func handle(_ command: KeyboardCommand) {
+        switch command.action {
+        case .start:
+            start(command)
+        case .stop:
+            if case .recording = coordinator.state { coordinator.handle(.finalize) }
+        case .cancel:
+            coordinator.handle(.cancel)
+        }
+    }
+
+    private func handle(_ request: ActivityRequest) {
+        switch request.action {
+        case .stopDictation:
+            if case .recording = coordinator.state { coordinator.handle(.finalize) }
+        case .stopMeeting:
+            meetings.stopRecording()
+        case .endSession:
+            endSession()
+        }
+    }
+
+    private func start(_ command: KeyboardCommand) {
+        if let problem = startBlocker() {
+            session.post(notice: problem)
+            return
+        }
+        target.host = command.hostBundleID
+        currentMode = command.mode
+        session.mode = command.mode
+        let mode: DictationMode
+        switch command.mode {
+        case .dictate: mode = .dictate
+        case .translate: mode = .translate(target: SettingsStore().translationTargetLanguage)
+        case .ask: mode = .askAnything(selectedText: command.context)
+        }
+        guard coordinator.handle(.begin, mode: mode) else {
+            session.post(notice: coordinator.coachingHint ?? "Still working on the last one")
+            return
+        }
+        coordinator.handle(.lockIn)
+    }
+
+    private func startBlocker() -> String? {
+        if !KeychainStore.hasModelKey { return "Add an API key in VoiceiQ" }
+        if AVAudioApplication.shared.recordPermission != .granted { return "Allow the microphone in VoiceiQ" }
+        if meetings.isRecording { return "A meeting is recording" }
+        switch coordinator.state {
+        case .idle, .done, .cancelled, .failed: return nil
+        case .recording, .warming: return nil
+        default: return "Still working on the last one"
+        }
+    }
+
+    // MARK: - Launch URLs
+
+    func open(_ url: URL) {
+        switch BridgeURL.parse(url) {
+        case .start(let id, let host):
+            startFromKeyboard(commandID: id, host: host)
+        case .setup:
+            banner = nil
+            NotificationCenter.default.post(name: .voiceIQShowKeyboardSetup, object: nil)
+        case nil:
+            break
+        }
+    }
+
+    /// The one-time bounce: the keyboard found no live session and opened the
+    /// app. Start the session while in the foreground, start the dictation,
+    /// then send the user back.
+    private func startFromKeyboard(commandID: UUID, host: String?) {
+        if !session.isActive {
+            do {
+                try session.begin()
+            } catch {
+                banner = "Couldn't start the microphone: \(error.localizedDescription)"
+                return
+            }
+        }
+        if !processed.contains(commandID), let command = store.commands.first(where: { $0.id == commandID }),
+           command.isFresh() {
+            accept(command)
+            start(command)
+        }
+        hostReturn.returnToHost(host, isRecording: { [weak self] in
+            if case .recording = self?.coordinator.state { return true }
+            return false
+        }) { [weak self] returned in
+            if !returned { self?.showSwipeBack = true }
+        }
+    }
+
+    // MARK: - Session controls in the app
+
+    func startSession() {
+        do { try session.begin() } catch {
+            banner = "Couldn't start the microphone: \(error.localizedDescription)"
+        }
+    }
+
+    func endSession() {
+        if case .recording = coordinator.state {
+            session.holdBackgroundTime()
+            coordinator.handle(.finalize)
+        }
+        if meetings.isRecording { meetings.stopRecording() }
+        session.end()
+    }
+
+    func startMeeting() {
+        if !session.isActive { startSession() }
+        guard session.isActive else { return }
+        if case .recording = coordinator.state { coordinator.handle(.finalize) }
+        meetings.startRecording()
+    }
+
+    func stopMeeting() {
+        meetings.stopRecording()
+    }
+
+    func appBecameActive() {
+        drainCommands()
+    }
+
+    func appEnteredBackground() {
+        showSwipeBack = false
+    }
+
+    func prepareForTermination() {
+        if case .recording = coordinator.state { coordinator.handle(.finalize) }
+        if meetings.isRecording { meetings.stopRecording() }
+        session.end()
+    }
+
+    // MARK: - Pipeline → keyboard
+
+    private func stateChanged(_ state: DictationState) {
+        defer { previousState = state }
+        switch state {
+        case .warming, .recording:
+            if session.recordingStartedAt == nil { session.recordingStartedAt = Date() }
+            session.dictationPhase = .recording
+        case .finalizing, .transcribing, .inserting:
+            session.recordingStartedAt = nil
+            session.dictationPhase = .processing
+        case .idle, .done, .cancelled, .failed:
+            session.recordingStartedAt = nil
+            session.dictationPhase = .warm
+            session.releaseBackgroundTime()
+            if state != previousState, let message = Self.notice(for: state, coordinator: coordinator) {
+                session.post(notice: message)
+            }
+        }
+    }
+
+    private func levelChanged(_ level: Float) {
+        let now = Date()
+        guard now.timeIntervalSince(lastLevelWrite) > 0.06 else { return }
+        lastLevelWrite = now
+        session.setLevel(level)
+    }
+
+    private func deliver(_ text: String, mode: KeyboardMode) {
+        session.deliver(Delivery(mode: mode, text: text, hostBundleID: target.host))
+    }
+
+    static func notice(for state: DictationState, coordinator: DictationCoordinator) -> String? {
+        switch state {
+        case .failed(let failure):
+            if let message = coordinator.modeFailureMessage { return message }
+            switch failure {
+            case .auth: return "API key rejected. Check it in VoiceiQ."
+            case .modelAccess: return "Model unavailable. Check Settings › Advanced."
+            case .network: return "Couldn't reach the model. It's saved in History."
+            case .rateLimited: return "Rate limited. Retry from History."
+            case .quotaExhausted: return "Daily quota reached"
+            case .timeout: return "Timed out. Retry from History."
+            case .audio, .noMicrophone, .noAudio: return "Microphone unavailable"
+            case .storage: return "Storage is full"
+            case .badRequest, .validation, .safetyBlocked: return "Couldn't transcribe. It's in History."
+            }
+        case .done(.queuedForRetry): return "Offline. It will send when you're back."
+        case .done(.silent): return "Didn't catch that"
+        default: return nil
+        }
+    }
+}
+
+@MainActor
+final class DictationTarget {
+    var host: String?
+}
+
+/// Hands results to the keyboard. The keyboard does the actual typing.
+@MainActor
+final class KeyboardInserter: TextInserting {
+    var onDeliver: ((String, KeyboardMode) -> Void)?
+
+    func insert(_ text: String, context: DictationContext) async -> InsertionOutcome {
+        let mode: KeyboardMode
+        switch context.mode {
+        case .dictate: mode = .dictate
+        case .translate: mode = .translate
+        case .askAnything: mode = .ask
+        }
+        onDeliver?(text, mode)
+        return .inserted
+    }
+}
+
+extension Notification.Name {
+    static let voiceIQShowKeyboardSetup = Notification.Name("voiceIQShowKeyboardSetup")
+}

@@ -46,6 +46,7 @@ public enum HotkeyKey: String, CaseIterable, Codable, Sendable {
         self = key
     }
 
+    #if os(macOS)
     /// Whether this key is DOWN per the event's flags. Sided keys use the raw
     /// device-specific bits (NX_DEVICERCMDKEYMASK etc.) — the generic masks stay
     /// set while the opposite-side twin is held, which made us miss releases
@@ -68,6 +69,7 @@ public enum HotkeyKey: String, CaseIterable, Codable, Sendable {
             return flags.rawValue & 0x01 != 0 // NX_DEVICELCTLKEYMASK
         }
     }
+    #endif
 
     public var displayName: String {
         switch self {

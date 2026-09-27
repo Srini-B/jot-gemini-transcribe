@@ -46,3 +46,22 @@ jobs:
             -destination 'platform=macOS' \
             CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM= \
             | tail -20
+
+  ios-build:
+    name: iOS build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install xcodegen
+        run: brew install xcodegen
+      - name: Generate project
+        run: xcodegen generate
+      - name: Build app, keyboard and Live Activity (Simulator, unsigned)
+        run: |
+          xcodebuild build \
+            -project VoiceIQ.xcodeproj \
+            -scheme VoiceIQiOS \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM= \
+            | tail -20

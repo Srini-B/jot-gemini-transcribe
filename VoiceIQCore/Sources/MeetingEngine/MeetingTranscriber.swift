@@ -144,6 +144,7 @@ public struct MeetingTranscriber: Sendable {
         let system = try TrackAudio(url: systemURL)
         let raw = CallAudio(mic: try TrackAudio(url: micURL), system: system)
         guard raw.isOnline else { return raw }
+        #if os(macOS)
         let cancelledURL = folder.appendingPathComponent("mic-aec.caf")
         do {
             if !FileManager.default.fileExists(atPath: cancelledURL.path) {
@@ -157,6 +158,11 @@ public struct MeetingTranscriber: Sendable {
             Log.meeting.error("echo cancellation failed: \(String(describing: error), privacy: .public)")
             return raw
         }
+        #else
+        // iOS records the mic alone (`SystemAudioTap` writes silence), so
+        // there is no far-side reference to cancel against.
+        return raw
+        #endif
     }
 
     /// Echo left above the mic's room tone, in dB, that still counts as

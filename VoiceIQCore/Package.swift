@@ -17,9 +17,12 @@ import PackageDescription
 
 let package = Package(
     name: "VoiceIQCore",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v14), .iOS(.v17)],
     products: [
-        .library(name: "VoiceIQCore", targets: ["VoiceIQCore"])
+        .library(name: "VoiceIQCore", targets: ["VoiceIQCore"]),
+        // The keyboard and Live Activity extensions link only this: it is
+        // extension-safe and carries no network or audio code.
+        .library(name: "VoiceIQBridge", targets: ["VoiceIQBridge"]),
     ],
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.0.0"),
@@ -36,14 +39,21 @@ let package = Package(
             name: "VoiceIQCore",
             dependencies: [
                 .product(name: "GRDB", package: "GRDB.swift"),
-                "Sauce",
-                "CVoiceIQAEC",
+                .product(name: "Sauce", package: "Sauce", condition: .when(platforms: [.macOS])),
+                // The vendored xcframework carries a macOS slice only. iOS
+                // meetings record the mic alone, so there is no echo to cancel.
+                .target(name: "CVoiceIQAEC", condition: .when(platforms: [.macOS])),
             ],
             path: "Sources",
+            exclude: ["Bridge"],
             linkerSettings: [
-                .linkedLibrary("c++"),
+                .linkedLibrary("c++", .when(platforms: [.macOS])),
                 .linkedFramework("CoreFoundation"),
             ]
+        ),
+        .target(
+            name: "VoiceIQBridge",
+            path: "Sources/Bridge"
         ),
         .testTarget(
             name: "VoiceIQCoreTests",

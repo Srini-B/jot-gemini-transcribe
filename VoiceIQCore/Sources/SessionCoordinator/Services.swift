@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#if os(macOS)
 import AppKit
+#endif
 import Foundation
 
 /// Transcription seam. M3 provides the Gemini implementation; tests use fakes.
@@ -126,6 +128,7 @@ public struct StubTranscriptionService: TranscriptionServicing {
 }
 
 /// Until the insertion ladder lands, put the text on the clipboard.
+#if os(macOS)
 public struct StubClipboardInserter: TextInserting {
     public init() {}
     @MainActor public func insert(_ text: String, context: DictationContext) async -> InsertionOutcome {
@@ -135,3 +138,4 @@ public struct StubClipboardInserter: TextInserting {
         return .fellBackToClipboard
     }
 }
+#endif

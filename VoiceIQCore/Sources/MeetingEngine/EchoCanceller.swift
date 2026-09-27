@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#if os(macOS)
 import AVFoundation
 import CVoiceIQAEC
 import Foundation
@@ -74,3 +75,4 @@ public enum EchoCanceller {
         return voiceiq_aec_erle_db(aec)
     }
 }
+#endif

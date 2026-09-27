@@ -13,10 +13,10 @@ public struct KeyShortcut: Codable, Equatable, Sendable {
 
         fileprivate var genericMask: UInt64 {
             switch self {
-            case .command: return CGEventFlags.maskCommand.rawValue
-            case .option: return CGEventFlags.maskAlternate.rawValue
-            case .control: return CGEventFlags.maskControl.rawValue
-            case .shift: return CGEventFlags.maskShift.rawValue
+            case .command: return 0x10_0000 // CGEventFlags.maskCommand
+            case .option: return 0x08_0000 // CGEventFlags.maskAlternate
+            case .control: return 0x04_0000 // CGEventFlags.maskControl
+            case .shift: return 0x02_0000 // CGEventFlags.maskShift
             }
         }
 
@@ -73,9 +73,11 @@ public struct KeyShortcut: Codable, Equatable, Sendable {
         return prefix + modifierSymbols + Self.keyLabel(for: keyCode)
     }
 
+    #if os(macOS)
     public func matches(eventFlags flags: CGEventFlags, keyCode: UInt16) -> Bool {
         matches(rawFlags: flags.rawValue, keyCode: keyCode)
     }
+    #endif
 
     public func matches(rawFlags: UInt64, keyCode: UInt16) -> Bool {
         guard keyCode == self.keyCode else { return false }
