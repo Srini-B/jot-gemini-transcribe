@@ -28,11 +28,15 @@ public enum KeychainStore {
     public enum Secret: String {
         case gemini = "gemini-api-key"
         case tinyFish = "tinyfish-api-key"
+        case openRouter = "openrouter-api-key"
+        case vercel = "vercel-ai-gateway-key"
 
         var label: String {
             switch self {
             case .gemini: return "VoiceiQ — Gemini API key"
             case .tinyFish: return "VoiceiQ — TinyFish API key"
+            case .openRouter: return "VoiceiQ — OpenRouter API key"
+            case .vercel: return "VoiceiQ — Vercel AI Gateway key"
             }
         }
 
@@ -41,6 +45,8 @@ public enum KeychainStore {
             switch self {
             case .gemini: return "apiKey"
             case .tinyFish: return "tinyFishKey"
+            case .openRouter: return "openRouterKey"
+            case .vercel: return "vercelKey"
             }
         }
     }
@@ -84,6 +90,40 @@ public enum KeychainStore {
 
     @discardableResult
     public static func deleteTinyFishKey(notify: Bool = false) -> Bool { delete(.tinyFish, notify: notify) }
+
+    // MARK: - OpenRouter
+
+    public static func loadOpenRouterKey() -> String? { load(.openRouter, service: service) }
+
+    @discardableResult
+    public static func saveOpenRouterKey(_ key: String) -> Bool { save(key, for: .openRouter) }
+
+    @discardableResult
+    public static func deleteOpenRouterKey(notify: Bool = false) -> Bool { delete(.openRouter, notify: notify) }
+
+    // MARK: - Vercel AI Gateway
+
+    public static func loadVercelKey() -> String? { load(.vercel, service: service) }
+
+    @discardableResult
+    public static func saveVercelKey(_ key: String) -> Bool { save(key, for: .vercel) }
+
+    @discardableResult
+    public static func deleteVercelKey(notify: Bool = false) -> Bool { delete(.vercel, notify: notify) }
+
+    /// The providers a key is stored for; `ModelProvider.resolve` picks among them.
+    public static var providersWithKeys: Set<ModelProvider> {
+        var set = Set<ModelProvider>()
+        if loadAPIKey() != nil { set.insert(.gemini) }
+        if loadOpenRouterKey() != nil { set.insert(.openRouter) }
+        if loadVercelKey() != nil { set.insert(.vercel) }
+        return set
+    }
+
+    /// Any provider key. This is what "the app can transcribe" means now;
+    /// `loadAPIKey() != nil` alone would tell a gateway-only user to add a
+    /// Gemini key they do not need.
+    public static var hasModelKey: Bool { !providersWithKeys.isEmpty }
 
     // MARK: - Generic
 

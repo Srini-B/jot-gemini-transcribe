@@ -110,33 +110,52 @@ public enum LiveProtocol {
     /// transcribing someone's sentence, and the fallback to the batch path is
     /// reserved for failures that actually cost words.
     ///
-    /// Order matters. `interimInputTranscription` is checked before
-    /// `inputTranscription` because a single frame may carry both, and treating
-    /// an interim as final is the one mistake in this file that puts speculative
-    /// text on the user's cursor.
+    /// The first event in the frame; see `decodeAll`.
     public static func decode(_ data: Data) -> LiveEvent? {
+        decodeAll(data).first
+    }
+
+    /// Decodes every event in one server frame.
+    ///
+    /// A frame can carry both a final (`inputTranscription`) for the turn that
+    /// just closed and an interim for the one that opened. Both matter: the
+    /// final is text that reaches the cursor, the interim is what the pill
+    /// shows. The final comes first so the two are never confused, and an
+    /// interim is never returned as a final.
+    public static func decodeAll(_ data: Data) -> [LiveEvent] {
         guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
-            return nil
+            return []
         }
         if root["setupComplete"] != nil || root["setup_complete"] != nil {
-            return .setupComplete
+            return [.setupComplete]
         }
         if let error = root["error"] as? [String: Any] {
             let message = error["message"] as? String ?? "unknown live error"
-            return .failed(message)
+            return [.failed(message)]
         }
         let content = (root["serverContent"] ?? root["server_content"]) as? [String: Any]
         if let content {
-            if content["goAway"] != nil || content["go_away"] != nil { return .goAway }
-            if let text = transcriptText(content, "interimInputTranscription", "interim_input_transcription") {
-                return .partial(text)
-            }
+            if content["goAway"] != nil || content["go_away"] != nil { return [.goAway] }
+            var events: [LiveEvent] = []
             if let text = transcriptText(content, "inputTranscription", "input_transcription") {
-                return .final(text)
+                events.append(.final(text))
             }
+            if let text = transcriptText(content, "interimInputTranscription", "interim_input_transcription") {
+                events.append(.partial(text))
+            }
+            return events
         }
-        if root["goAway"] != nil || root["go_away"] != nil { return .goAway }
-        return nil
+        if root["goAway"] != nil || root["go_away"] != nil { return [.goAway] }
+        return []
+    }
+
+    /// True for the frame the server sends once it has finished transcribing a
+    /// closed turn. It follows the turn's final, in its own frame.
+    public static func isGenerationComplete(_ data: Data) -> Bool {
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let content = (root["serverContent"] ?? root["server_content"]) as? [String: Any]
+        else { return false }
+        return (content["generationComplete"] ?? content["generation_complete"]) as? Bool == true
     }
 
     /// Accepts both camelCase and snake_case because the two documented clients

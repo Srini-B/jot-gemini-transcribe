@@ -49,7 +49,7 @@ struct MeetingsPane: View {
         }
         .onAppear(perform: reload)
         .onChange(of: selection) { _, _ in loadSelection() }
-        .onChange(of: engine.phase) { _, phase in if phase == .idle { reload() } }
+        .onChange(of: engine.phase) { _, _ in reload() }
     }
 
     private var toolbar: some View {
@@ -58,6 +58,10 @@ struct MeetingsPane: View {
                 recording ? engine.stopRecording() : engine.startRecording()
             }
             Spacer()
+            if let meeting = selected, case .failed = meeting.status {
+                Button("Retry", systemImage: "arrow.clockwise") { engine.retry(id: meeting.id) }
+                    .disabled(engine.phase != .idle)
+            }
             Button("Export", systemImage: "square.and.arrow.up") { export() }.disabled(selection == nil)
             Button("Delete", systemImage: "trash", role: .destructive) { remove() }.disabled(selection == nil)
         }
@@ -70,7 +74,11 @@ struct MeetingsPane: View {
         VStack(spacing: 0) {
             Picker("", selection: $tab) { Text("Notes").tag(0); Text("Transcript").tag(1) }
                 .pickerStyle(.segmented).labelsHidden().padding(.horizontal, VoiceIQUI.Spacing.l)
-            ScrollView { if tab == 0 { notesView } else { transcriptView(meeting) } }.padding(VoiceIQUI.Spacing.l)
+            if tab == 0 {
+                ScrollView { notesView }.padding(VoiceIQUI.Spacing.l)
+            } else {
+                transcriptView(meeting).padding(VoiceIQUI.Spacing.l)
+            }
         }
     }
 
@@ -86,15 +94,47 @@ struct MeetingsPane: View {
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// One text view for the whole transcript. A SwiftUI Text per segment with
+    /// selection enabled froze the window on scroll at twenty minutes of speech.
     private func transcriptView(_ meeting: MeetingMeta) -> some View {
-        LazyVStack(alignment: .leading, spacing: 14) {
-            ForEach(Array(transcript.enumerated()), id: \.offset) { _, segment in
-                HStack(alignment: .top, spacing: 10) {
-                    SpeakerName(label: segment.speaker, name: meeting.speakerNames[segment.speaker]) { name in try? store.renameSpeaker(id: meeting.id, label: segment.speaker, name: name); reload() }
-                    Text(segment.text).textSelection(.enabled)
+        VStack(alignment: .leading, spacing: VoiceIQUI.Spacing.s) {
+            HStack(spacing: VoiceIQUI.Spacing.s) {
+                ForEach(speakerLabels, id: \.self) { label in
+                    SpeakerName(label: label, name: meeting.speakerNames[label]) { name in
+                        try? store.renameSpeaker(id: meeting.id, label: label, name: name); reload()
+                    }
                 }
             }
-        }.frame(maxWidth: .infinity, alignment: .leading)
+            RichTextView(text: transcriptText(meeting))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var speakerLabels: [String] {
+        var seen: [String] = []
+        for segment in transcript where !seen.contains(segment.speaker) { seen.append(segment.speaker) }
+        return seen
+    }
+
+    private func transcriptText(_ meeting: MeetingMeta) -> NSAttributedString {
+        let body = GTFont.nsFlex(14, weight: 400)
+        let name = GTFont.nsFlex(12, weight: 600)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = 2
+        paragraph.paragraphSpacing = 12
+        let nameParagraph = NSMutableParagraphStyle()
+        nameParagraph.paragraphSpacing = 2
+        let out = NSMutableAttributedString()
+        for segment in transcript {
+            let speaker = meeting.speakerNames[segment.speaker] ?? segment.speaker
+            out.append(NSAttributedString(string: speaker + "\n", attributes: [
+                .font: name, .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: nameParagraph,
+            ]))
+            out.append(NSAttributedString(string: segment.text + "\n", attributes: [
+                .font: body, .foregroundColor: NSColor.labelColor, .paragraphStyle: paragraph,
+            ]))
+        }
+        return out
     }
 
     private func section(_ title: String, _ items: [String]) -> some View {
@@ -139,7 +179,7 @@ private struct SpeakerName: View {
     @State private var editing = false
     @State private var draft = ""
     var body: some View {
-        Button(name ?? label) { draft = name ?? ""; editing = true }.buttonStyle(.borderless).font(.caption.bold()).frame(width: 80, alignment: .leading)
+        Button(name ?? label, systemImage: "pencil") { draft = name ?? ""; editing = true }.buttonStyle(.bordered).controlSize(.small)
             .popover(isPresented: $editing) { HStack { TextField("Name", text: $draft).onSubmit { save(draft); editing = false }; Button("Save") { save(draft); editing = false } }.padding().frame(width: 220) }
     }
 }

@@ -82,7 +82,9 @@ public struct UsageRecord: Codable, Equatable, Identifiable, FetchableRecord, Pe
         self.textIn = usage.textIn; self.audioIn = usage.audioIn; self.imageIn = usage.imageIn
         self.cachedIn = usage.cachedIn; self.textOut = usage.textOut; self.audioOut = usage.audioOut
         self.thoughtOut = usage.thoughtOut; self.isEstimated = usage.isEstimated
-        self.costUSD = PriceBook.cost(model: model, usage: usage, at: at)
+        // OpenRouter states the charge on every response; the price book is
+        // for providers that only report tokens.
+        self.costUSD = usage.reportedCostUSD ?? PriceBook.cost(model: model, usage: usage, at: at)
     }
 
     public var usage: TokenUsage {

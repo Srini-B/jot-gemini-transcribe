@@ -60,10 +60,20 @@ public extension GeminiClient {
 /// showed the transcribe model delivers its entire result in one SSE lump anyway,
 /// so streaming buys nothing but parsing complexity today. The bidi live model is the future streaming path.
 public actor GeminiClient {
-    private let session: URLSession
+    let session: URLSession
     private let apiKey: @Sendable () -> String?
+    let openRouterKey: @Sendable () -> String?
+    let vercelKey: @Sendable () -> String?
+    /// Read per call, so flipping the provider in Settings takes effect on the
+    /// next request without rebuilding the client.
+    let provider: @Sendable () -> ModelProvider
 
-    public init(apiKey: @escaping @Sendable () -> String?) {
+    public init(
+        apiKey: @escaping @Sendable () -> String?,
+        openRouterKey: @escaping @Sendable () -> String? = { nil },
+        vercelKey: @escaping @Sendable () -> String? = { nil },
+        provider: @escaping @Sendable () -> ModelProvider = { .gemini }
+    ) {
         let config = URLSessionConfiguration.ephemeral
         config.waitsForConnectivity = false // fail fast into the retry/queue path
         // Recordings are no longer capped at 10 minutes; a one-hour upload on a
@@ -71,6 +81,9 @@ public actor GeminiClient {
         config.timeoutIntervalForResource = 3_600
         self.session = URLSession(configuration: config)
         self.apiKey = apiKey
+        self.openRouterKey = openRouterKey
+        self.vercelKey = vercelKey
+        self.provider = provider
     }
 
     // MARK: - Calls
@@ -82,6 +95,10 @@ public actor GeminiClient {
         flacData: Data, model: String, endpoint: URL, deadline: TimeInterval,
         customVocabulary: [String] = []
     ) async throws -> String {
+        let via = provider()
+        if via != .gemini {
+            return try await gatewayTranscribe(audio: flacData, model: model, deadline: deadline, stage: .transcribe, via: via)
+        }
         let parts: [[String: Any]] = [
             ["inline_data": ["mime_type": "audio/flac", "data": flacData.base64EncodedString()]],
         ]
@@ -116,6 +133,11 @@ public actor GeminiClient {
         deadline: TimeInterval,
         stage: UsageStage = .cleanup
     ) async throws -> String {
+        let via = provider()
+        if via != .gemini {
+            return try await gatewayChat(prompt: prompt, images: images, audioFLAC: audioFLAC,
+                                         model: model, deadline: deadline, stage: stage, via: via)
+        }
         let thinkingConfig: [String: Any] = model.hasPrefix("gemini-2")
             ? ["thinkingBudget": 0]
             : ["thinkingLevel": "low"]
@@ -223,14 +245,19 @@ public actor GeminiClient {
         modelIsInPath: Bool = true,
         /// Attributed to the current `UsageMeter.scope` for the Cost pane.
         stage: UsageStage,
-        isRetryAfter429: Bool = false
+        isRetryAfter429: Bool = false,
+        /// Gateway calls share this transport: same deadline, same status →
+        /// error mapping, different base URL, auth header and usage envelope.
+        via: ModelProvider = .gemini,
+        extraHeaders: [String: String] = [:]
     ) async throws -> Data {
         let url = endpoint.appendingPathComponent(path)
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        for (field, value) in extraHeaders { request.setValue(value, forHTTPHeaderField: field) }
         request.timeoutInterval = deadline
-        applyAuth(&request)
+        applyAuth(&request, via: via)
         request.httpBody = body
 
         let data: Data
@@ -262,11 +289,19 @@ public actor GeminiClient {
             // Every billed call passes through here, so this is the one place
             // usage is read. Both envelopes are tried; a body with neither is
             // simply not metered.
-            if let usage = TokenUsage.fromGenerateContent(data) ?? TokenUsage.fromInteraction(data) {
+            let usage = via == .gemini
+                ? TokenUsage.fromGenerateContent(data) ?? TokenUsage.fromInteraction(data)
+                : TokenUsage.fromOpenAI(data) ?? TokenUsage.fromVercelTranscription(data)
+            if let usage {
                 UsageMeter.record(stage: stage, model: modelLabel, usage: usage)
             }
         case 401:
             throw TranscriptionError.auth
+        case 402:
+            // Gateways: the key is fine, the account balance is not. Retryable
+            // so the recording stays queued until credits are added.
+            Log.transcription.error("GeminiClient: 402 on \(path, privacy: .public) — \(Self.errorMessage(from: data) ?? "no detail", privacy: .private)")
+            throw TranscriptionError.network("gateway_insufficient_credits")
         case 403, 404:
             // Key authenticated but this model is not available to it — gated,
             // renamed, or unknown. "Fix your key" would misdirect — name the
@@ -281,13 +316,15 @@ public actor GeminiClient {
             }
             throw TranscriptionError.modelUnavailable(model: modelLabel, detail: message)
         case 429:
+            let retryAfter = Self.retryDelaySeconds(from: data, headers: http)
+            Log.transcription.info("GeminiClient: 429 on \(path, privacy: .public) (\(modelLabel, privacy: .public)) retryAfter=\(retryAfter ?? -1, format: .fixed(precision: 0)) — \(Self.errorMessage(from: data) ?? "no detail", privacy: .private)")
             // F5: per-minute throttles carry a short retryDelay — honor it once.
-            if !isRetryAfter429, let delay = Self.retryDelaySeconds(from: data, headers: http), delay <= 8 {
+            if !isRetryAfter429, let delay = retryAfter, delay <= 8 {
                 Log.transcription.info("GeminiClient: 429 with retryDelay \(delay, format: .fixed(precision: 1))s — waiting once")
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 return try await post(path: path, body: body, endpoint: endpoint, deadline: deadline,
                                       modelLabel: modelLabel, modelIsInPath: modelIsInPath, stage: stage,
-                                      isRetryAfter429: true)
+                                      isRetryAfter429: true, via: via, extraHeaders: extraHeaders)
             }
             // Only a real daily/hard quota is terminal; a per-minute throttle
             // (or an unparseable body) clears on its own and stays retryable.
@@ -296,7 +333,7 @@ public actor GeminiClient {
                !range.isEmpty {
                 throw TranscriptionError.rateLimitedDaily
             }
-            throw TranscriptionError.rateLimitedTransient
+            throw TranscriptionError.rateLimitedTransient(retryAfter: retryAfter)
         case 400:
             // Permanent: malformed request — retrying is pointless.
             let message = Self.errorMessage(from: data) ?? "http_\(http.statusCode)"
@@ -332,6 +369,13 @@ public actor GeminiClient {
         customVocabulary: [String],
         deadline: TimeInterval
     ) async throws -> String {
+        let via = provider()
+        if via != .gemini {
+            // The gateways' transcription endpoints have no smart mode or custom
+            // vocabulary; the cleanup pass carries the dictionary instead.
+            return try await gatewayTranscribe(audio: audio, mimeType: mimeType, model: model,
+                                               deadline: deadline, stage: .transcribe, via: via)
+        }
         var body: [String: Any] = [
             "model": model,
             "input": [["type": "audio", "mime_type": mimeType, "data": audio.base64EncodedString()]],
@@ -444,10 +488,21 @@ public actor GeminiClient {
         session.invalidateAndCancel() // transient clients (key validation) must not leak (audit L33)
     }
 
-    private func applyAuth(_ request: inout URLRequest) {
+    func applyAuth(_ request: inout URLRequest, via: ModelProvider = .gemini) {
         // Header, never ?key= — query strings leak into logs and proxies.
-        if let key = apiKey() {
-            request.setValue(key, forHTTPHeaderField: "x-goog-api-key")
+        switch via {
+        case .gemini:
+            if let key = apiKey() {
+                request.setValue(key, forHTTPHeaderField: "x-goog-api-key")
+            }
+        case .openRouter:
+            if let key = openRouterKey() {
+                request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+            }
+        case .vercel:
+            if let key = vercelKey() {
+                request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+            }
         }
     }
 

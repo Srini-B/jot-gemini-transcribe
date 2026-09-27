@@ -32,12 +32,34 @@ public struct MeetingTranscriber: Sendable {
             let url = FileManager.default.temporaryDirectory.appendingPathComponent("voiceiq-meeting-\(UUID()).flac")
             defer { try? FileManager.default.removeItem(at: url) }
             _ = try FLACEncoder.encode(cafURL: cafURL, flacURL: url, frameRange: start..<end)
-            let words = try await client.transcribeDiarized(audio: Data(contentsOf: url), model: model,
-                                                            endpoint: endpoint, deadline: deadline)
+            let words = try await transcribeChunk(Data(contentsOf: url), model: model, endpoint: endpoint,
+                                                  deadline: deadline, index: index)
             result.append(contentsOf: Self.group(words: words, chunkIndex: index))
             start = end; index += 1
         }
         return result
+    }
+
+    /// A per-minute token throttle names its own wait. The second chunk of a
+    /// long meeting lands inside the first chunk's minute, so sitting the wait
+    /// out (twice at most, never past `TimeoutPolicy.rateLimitWait`) is the
+    /// difference between notes and a failed meeting on a tier-1 key.
+    static let rateLimitWaits = 2
+
+    private func transcribeChunk(_ audio: Data, model: String, endpoint: URL, deadline: TimeInterval,
+                                 index: Int) async throws -> [DiarizedWord] {
+        var waits = 0
+        while true {
+            do {
+                return try await client.transcribeDiarized(audio: audio, model: model, endpoint: endpoint, deadline: deadline)
+            } catch TranscriptionError.rateLimitedTransient(let retryAfter) where waits < Self.rateLimitWaits {
+                let wait = retryAfter ?? TimeoutPolicy.rateLimitWait
+                guard wait <= TimeoutPolicy.rateLimitWait else { throw TranscriptionError.rateLimitedTransient(retryAfter: retryAfter) }
+                waits += 1
+                Log.meeting.info("chunk \(index, privacy: .public) rate limited — waiting \(Int(wait), privacy: .public)s (\(waits, privacy: .public)/\(Self.rateLimitWaits, privacy: .public))")
+                try await Task.sleep(nanoseconds: UInt64((wait + 2) * 1_000_000_000))
+            }
+        }
     }
 
     public static func group(words: [DiarizedWord], chunkIndex: Int) -> [TranscriptSegment] {

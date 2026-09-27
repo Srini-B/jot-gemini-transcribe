@@ -38,7 +38,7 @@ usage, it estimates: audio seconds × 25 tokens/s for the transcribe models
 
 `UsageMeter.scope` is a task-local `UsageScope(activity, sessionID)`. It is set
 around the dictation finalize task in `DictationCoordinator`, the retry queue's
-transcribe, `MeetingEngine` processing, and the meeting live preview's start.
+transcribe, and `MeetingEngine` processing.
 Calls without a scope are booked as `other`.
 
 ## Pricing
@@ -52,6 +52,17 @@ a ≈ prefix.
 
 The app cannot tell whether a key is on the free tier, so it always shows the
 paid-tier figure.
+
+Calls served by a gateway (`SettingsStore.activeProvider` is `.openRouter` or
+`.vercel`) report their charge in the response: `usage.cost` on chat and
+OpenRouter transcription calls (`TokenUsage.fromOpenAI`), and
+`providerMetadata.gateway.cost` on Vercel's transcription protocol
+(`TokenUsage.fromVercelTranscription`, which also reads the per-modality token
+counts under `providerMetadata.google.usage`). `TokenUsage.reportedCostUSD`
+carries it and `UsageRecord` stores it instead of the `PriceBook` figure. Those
+rows show the gateway model label (`google/gemini-3.8-flash`); `PriceBook`
+strips the `google/` prefix when a gateway response carries no cost. The Cost
+pane footer names the active provider's price source (`ModelProvider.pricingNote`).
 
 ## UI
 

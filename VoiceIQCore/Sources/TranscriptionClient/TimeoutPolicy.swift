@@ -31,6 +31,12 @@ public enum TimeoutPolicy {
     /// When the HUD flips to the "Still working…" slow state.
     public static let slowStateUI: TimeInterval = 3
 
+    /// Longest a transcription waits out a per-minute throttle before giving
+    /// the row back to History. Tier 1 meters gemini-3.5-transcribe at 10 000
+    /// input tokens per minute (~400 s of audio), so a second chunk right after
+    /// a ten-minute one is refused with Retry-After up to 60 s.
+    public static let rateLimitWait: TimeInterval = 65
+
     /// Overall per-request deadline. Scales gently with audio length:
     /// 5s clip → 31s; 10min clip → 2.5min. Never the unbounded 2×duration formula.
     public static func overallDeadline(audioDuration: TimeInterval) -> TimeInterval {

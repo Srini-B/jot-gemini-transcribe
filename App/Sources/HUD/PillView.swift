@@ -134,8 +134,8 @@ struct PillView: View {
             }
 
         case .meetingRecording(let since):
-            pillSurface(width: model.meetingPreview.isEmpty ? 300 : 560) {
-                MeetingRecordingContent(since: since, preview: model.meetingPreview)
+            pillSurface(width: 300) {
+                MeetingRecordingContent(since: since)
             }
         }
     }
@@ -150,8 +150,12 @@ struct PillView: View {
         tint: Color? = nil,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        content()
-            .padding(.horizontal, VoiceIQUI.Spacing.m)
+        HStack(spacing: VoiceIQUI.Spacing.xs) {
+            PillDragHandle()
+            content()
+        }
+            .padding(.leading, VoiceIQUI.Spacing.s)
+            .padding(.trailing, VoiceIQUI.Spacing.m)
             .frame(width: width, height: 48)
             .frame(maxWidth: width == nil ? 560 : nil)
             // Content is clipped to the capsule, not merely framed by it. A frame

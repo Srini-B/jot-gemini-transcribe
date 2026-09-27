@@ -90,4 +90,16 @@ public enum FormattingSettingsMigration {
         defaults.removeObject(forKey: "gateTrips")
         Log.session.info("writing rules migration: cleanup pass enabled")
     }
+
+    private static let liveOffFlag = "didDisableLiveTranscription"
+
+    /// Third one-time step: live transcription becomes opt-in. Installs that
+    /// had it on (the old default, stored or implied) are switched off once;
+    /// whatever the user picks in Settings afterwards persists as usual.
+    public static func disableLiveTranscriptionOnce(defaults: UserDefaults = .standard) {
+        guard !defaults.bool(forKey: liveOffFlag) else { return }
+        defaults.set(true, forKey: liveOffFlag)
+        defaults.set(false, forKey: "liveTranscription")
+        Log.session.info("live transcription migration: switched off, now opt-in")
+    }
 }

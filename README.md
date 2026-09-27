@@ -26,7 +26,7 @@ while you talk, and a History window that proves nothing was ever lost.
 
 | Key | What happens |
 | --- | --- |
-| **Dictation key** (default `fn`) | One press starts, one press finishes. Hands-free, no holding. |
+| **Dictation key** (default `fn`) | One press starts, one press finishes. Hands-free, no holding. A bare modifier or a combination like ⌥D. |
 | **`Esc`** | Cancels. Anything over 10 seconds is still kept in History. |
 | **⌃⌥A** | Ask Anything. Speak a question or a command over selected text. |
 | **⌃⌥T** | Translate. Speak in any language; the target language is typed. |
@@ -106,7 +106,11 @@ you through it:
 
 1. **Paste a Gemini API key** — get one at
    [Google AI Studio](https://aistudio.google.com/apikey). It is stored in your
-   macOS Keychain and only ever sent to Google.
+   macOS Keychain and only ever sent to Google. If your AI Studio key keeps
+   hitting rate limits, add an [OpenRouter](https://openrouter.ai/settings/keys)
+   or [Vercel AI Gateway](https://vercel.com/ai-gateway) key in Settings →
+   Advanced instead; both run the same Gemini models, and with more than one
+   key stored you pick the provider there.
 2. **Allow the microphone** — say hello and it advances by itself.
 3. **Allow Accessibility** — macOS requires this for any app that types into
    another app.

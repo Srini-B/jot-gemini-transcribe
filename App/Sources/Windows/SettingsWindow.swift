@@ -366,6 +366,8 @@ struct AdvancedPane: View {
 
     var body: some View {
         Form {
+            ProviderSection()
+
             Section {
                 HStack {
                     LabeledContent("API key") {
@@ -406,6 +408,10 @@ struct AdvancedPane: View {
             } footer: {
                 Text("Stored in your Mac's Keychain and only ever sent to Google.")
             }
+
+            GatewayKeySection(.openRouter)
+
+            GatewayKeySection(.vercel)
 
             TinyFishKeySection()
 

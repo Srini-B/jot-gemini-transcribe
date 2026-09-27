@@ -61,11 +61,20 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
         // One request per chunk. A short dictation is one chunk, so this is the
         // old single-request path for everything under ten minutes.
         let ranges = try AudioChunker.ranges(cafURL: audioURL)
+        // A multi-chunk upload can fail half way (Tier 1 meters ~400 s of audio
+        // per minute, so chunk 1 is often refused right after chunk 0). Finished
+        // chunks are kept next to the audio so a retry sends only the rest.
+        let cacheURL = FileLayout.chunkTranscripts(in: audioURL.deletingLastPathComponent())
+        var done = ranges.count > 1 ? ChunkTranscripts.read(from: cacheURL) : ChunkTranscripts()
         if ranges.count > 1 {
-            Log.transcription.info("long recording (\(Int(durationSeconds))s) split into \(ranges.count) chunks")
+            Log.transcription.info("long recording (\(Int(durationSeconds))s) split into \(ranges.count) chunks, \(done.count) already transcribed")
         }
         var pieces: [String] = []
         for (index, range) in ranges.enumerated() {
+            if let earlier = done[range] {
+                if !earlier.isEmpty { pieces.append(earlier) }
+                continue
+            }
             let flacData = try encodeChunk(audioURL: audioURL, range: range, index: index)
             let seconds = durationSeconds * Double(range.count) / Double(max(1, ranges.reduce(0) { $0 + $1.count }))
             let deadline = TimeoutPolicy.overallDeadline(audioDuration: seconds)
@@ -88,6 +97,13 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
                 trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             }
             if !trimmed.isEmpty { pieces.append(trimmed) }
+            if ranges.count > 1 {
+                done[range] = trimmed
+                done.write(to: cacheURL)
+            }
+        }
+        if ranges.count > 1 {
+            try? FileManager.default.removeItem(at: cacheURL)
         }
 
         let trimmedRaw = pieces.joined(separator: " ")
@@ -131,7 +147,9 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
     /// Live output has already had dictionary rules applied by `LiveTranscriber`;
     /// the pass here works from the raw transcript so the gate has a true
     /// reference, and re-applies the rules on whatever comes back.
-    public func polish(_ result: TranscriptionResult, context: DictationContext, audioURL: URL?) async -> TranscriptionResult {
+    public func polish(
+        _ result: TranscriptionResult, context: DictationContext, audioURL: URL?, durationSeconds: Double
+    ) async -> TranscriptionResult {
         guard context.mode == .dictate else { return result }
         guard settings.formattingPolicy.cleanupPass else { return result }
         let config = settings.geminiConfig
@@ -148,7 +166,20 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
             guard encoded.byteCount <= Self.maxPolishAudioBytes else { return nil }
             return try? Data(contentsOf: encoded.url)
         }
-        let cleaned = await cleanupOrFallback(raw: raw, context: context, config: config, audio: audio)
+        let outcome = await runCleanup(raw: raw, context: context, config: config, audio: audio)
+        // A cleanup that comes back much longer than the live text is the
+        // cleanup model transcribing speech the stream never wrote down: the
+        // live server stops mid-dictation on long turns (measured 2026-09-27,
+        // 15 of 29 sentences). The recording is complete, so upload it instead
+        // of pasting the half that the stream kept. Not a gate trip: the
+        // cleanup did its job, the reference was short.
+        if case .rejected(let reason) = outcome, reason.hasPrefix("expansion_ratio"), let audioURL, durationSeconds > 0 {
+            Log.transcription.warning("live text shorter than the audio (\(reason, privacy: .public)) — uploading the recording instead")
+            if let batch = try? await transcribe(audioURL: audioURL, durationSeconds: durationSeconds, context: context) {
+                return batch
+            }
+        }
+        let cleaned = settle(outcome, raw: raw)
         return TranscriptionResult(
             rawTranscript: result.rawTranscript,
             cleanedTranscript: cleaned,
@@ -196,12 +227,25 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
             deadline: Self.cleanupDeadline(forCharacters: max(raw.count, prompt.count / 3)),
             stage: stage
         )
-        let cleaned = ValidationGate.stripArtifacts(response).trimmingCharacters(in: .whitespacesAndNewlines)
+        var cleaned = ValidationGate.stripArtifacts(response).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { throw TranscriptionError.emptyTranscript }
         if case .translate = context.mode, cleaned == Self.untranslatableToken {
             throw TranscriptionError.emptyTranscript
         }
+        if case .askAnything = context.mode { cleaned = Self.separateSources(cleaned) }
         return cleaned
+    }
+
+    /// Puts the "Sources" line the answer prompt asks for on its own paragraph.
+    /// The model writes it inline about half the time ("…$84,413.Sources: …"),
+    /// and the card shows exactly what comes back, so the break is made here.
+    static func separateSources(_ answer: String) -> String {
+        guard let match = answer.range(
+            of: #"[ \t]*\n*[ \t]*\**Sources?\**[ \t]*:?\**[ \t]*(?=\S)"#,
+            options: [.regularExpression, .caseInsensitive, .backwards]
+        ), match.lowerBound > answer.startIndex else { return answer }
+        return answer[..<match.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
+            + "\n\nSources: " + answer[match.upperBound...]
     }
 
     private func encodeChunk(audioURL: URL, range: Range<AVAudioFramePosition>, index: Int) throws -> Data {
@@ -299,6 +343,18 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
                     flacData: flacData, config: config, policy: policy,
                     vocabulary: vocabulary, deadline: deadline
                 )
+            case .rateLimitedTransient(let retryAfter):
+                // A per-minute throttle names its own wait. Sitting it out once
+                // keeps a long dictation on the pill instead of failing it to
+                // History, where the retry would hit the same wall.
+                let wait = retryAfter ?? TimeoutPolicy.rateLimitWait
+                guard wait <= TimeoutPolicy.rateLimitWait else { throw error }
+                Log.transcription.info("transcribe rate limited — waiting \(Int(wait))s once")
+                try await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+                return try await sendTranscribe(
+                    flacData: flacData, config: config, policy: policy,
+                    vocabulary: vocabulary, deadline: deadline
+                )
             default:
                 throw error
             }
@@ -309,9 +365,38 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
     /// 16 kHz FLAC is about 8 MB, so this only trips on an override.
     static let maxPolishAudioBytes = 12_000_000
 
+    private enum CleanupOutcome {
+        case accepted(String)
+        case rejected(reason: String)
+        case unavailable
+    }
+
     private func cleanupOrFallback(
         raw: String, context: DictationContext, config: GeminiConfig, audio: Data? = nil
     ) async -> String {
+        settle(await runCleanup(raw: raw, context: context, config: config, audio: audio), raw: raw)
+    }
+
+    /// Turns a cleanup outcome into the text to insert. The dictionary's hard
+    /// guarantee applies on every branch: explicit wrong→right rules always win.
+    private func settle(_ outcome: CleanupOutcome, raw: String) -> String {
+        let rules = DictionaryStore().replacementRules()
+        switch outcome {
+        case .accepted(let cleaned):
+            return ReplacementEngine.apply(rules, to: cleaned)
+        case .rejected(let reason):
+            let trips = settings.recordGateTrip()
+            Log.transcription.warning("cleanup gate REJECTED (\(reason, privacy: .public), trip #\(trips) in 24h) — inserting raw")
+            autoDegradeIfNeeded(trips: trips)
+            return ReplacementEngine.apply(rules, to: raw)
+        case .unavailable:
+            return ReplacementEngine.apply(rules, to: raw)
+        }
+    }
+
+    private func runCleanup(
+        raw: String, context: DictationContext, config: GeminiConfig, audio: Data?
+    ) async -> CleanupOutcome {
         let dictionary = DictionaryStore()
         let prompt = PromptV1.cleanupPrompt(
             raw: raw,
@@ -334,19 +419,13 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
             )
             let cleaned = ValidationGate.stripArtifacts(response)
             let verdict = ValidationGate.validate(raw: raw, cleaned: cleaned)
-            guard verdict.accepted else {
-                let trips = settings.recordGateTrip()
-                Log.transcription.warning("cleanup gate REJECTED (\(verdict.reason ?? "?", privacy: .public), trip #\(trips) in 24h) — inserting raw")
-                autoDegradeIfNeeded(trips: trips)
-                return ReplacementEngine.apply(dictionary.replacementRules(), to: raw)
-            }
-            // The dictionary's hard guarantee: explicit wrong→right rules always win.
-            return ReplacementEngine.apply(dictionary.replacementRules(), to: cleaned)
+            guard verdict.accepted else { return .rejected(reason: verdict.reason ?? "?") }
+            return .accepted(cleaned)
         } catch {
             // Deadline miss / network hiccup on cleanup never costs the dictation —
             // and the dictionary guarantee still holds (audit L9).
             Log.transcription.info("cleanup unavailable (\(String(describing: error), privacy: .public)) — inserting raw")
-            return ReplacementEngine.apply(dictionary.replacementRules(), to: raw)
+            return .unavailable
         }
     }
 

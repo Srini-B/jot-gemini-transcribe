@@ -74,7 +74,8 @@ public enum PriceBook {
 
     /// Price for a model ID, or nil when the pricing page has no entry.
     public static func price(for model: String, at date: Date = Date()) -> ModelPrice? {
-        let id = model.lowercased()
+        // Gateways label models `google/<id>`; the list price is the same.
+        let id = model.lowercased().split(separator: "/").last.map(String.init) ?? model.lowercased()
         return prices(at: date)
             .filter { id.hasPrefix($0.prefix) }
             .max { $0.prefix.count < $1.prefix.count }?

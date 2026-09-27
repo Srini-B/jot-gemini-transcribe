@@ -150,7 +150,7 @@ private struct OnboardingFlow: View {
         // Skip the Globe screen when the dictation key is not Globe, or when the
         // system action is already Do Nothing.
         if next == .globeKey,
-           SettingsStore().hotkeyKey != .fn || !FnUsageAdvisor.currentGlobeKeyAction().conflictsWithFnHotkey {
+           SettingsStore().dictationTrigger != .modifier(.fn) || !FnUsageAdvisor.currentGlobeKeyAction().conflictsWithFnHotkey {
             next = .howTo
         }
         backStack.append(screen)
@@ -859,7 +859,7 @@ private struct GlobeKeyScreen: View {
 /// with the user's ACTUAL configured key, before the hands-on Try It.
 private struct HowToScreen: View {
     let onNext: () -> Void
-    private let keyName = SettingsStore().hotkeyKey.displayName
+    private let keyName = SettingsStore().dictationTrigger.displayName
     private let shortcuts = ShortcutStore()
 
     var body: some View {
@@ -931,7 +931,7 @@ private struct TryItScreen: View {
     @State private var revealClean: String?
     @State private var fetchTask: Task<Void, Never>?
 
-    private let keyName = SettingsStore().hotkeyKey.displayName
+    private let keyName = SettingsStore().dictationTrigger.displayName
     private var hasWords: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -1092,7 +1092,7 @@ private struct DoneScreen: View {
     @State private var launchAtLogin = true
 
     var body: some View {
-        ScreenScaffold("You're set.", "VoiceiQ lives in your menu bar now. Press \(SettingsStore().hotkeyKey.displayName) anywhere and start talking.") {
+        ScreenScaffold("You're set.", "VoiceiQ lives in your menu bar now. Press \(SettingsStore().dictationTrigger.displayName) anywhere and start talking.") {
             VStack(spacing: VoiceIQUI.Spacing.m) {
                 // Same voice as the scaffold's subtitle — two type sizes on the
                 // page total (display + body), never three.

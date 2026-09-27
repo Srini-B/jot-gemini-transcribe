@@ -46,6 +46,9 @@ struct CostPane: View {
     }
 
     @State private var period: Period = .month
+    /// Simple view: period totals and cost per action. Detailed adds tokens,
+    /// the per-model table, and the recent-call list.
+    @AppStorage("costPaneDetailed") private var detailed = false
     @State private var totals: [Period: UsageStore.Total] = [:]
     @State private var byActivity: [(key: String, total: UsageStore.Total)] = []
     @State private var byModel: [(key: String, total: UsageStore.Total)] = []
@@ -57,16 +60,24 @@ struct CostPane: View {
         ScrollView {
             VStack(alignment: .leading, spacing: VoiceIQUI.Spacing.l) {
                 summary
-                Picker("Period", selection: $period) {
-                    ForEach(Period.allCases) { Text($0.title).tag($0) }
+                HStack(spacing: VoiceIQUI.Spacing.m) {
+                    Picker("Period", selection: $period) {
+                        ForEach(Period.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .onChange(of: period) { _, _ in reloadBreakdown() }
+                    Toggle("Detailed", isOn: $detailed)
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .font(VoiceIQUI.TypeScale.body(grad: grad))
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .onChange(of: period) { _, _ in reloadBreakdown() }
                 breakdown("By action", rows: byActivity.map { (UsageActivity(rawValue: $0.key)?.displayName ?? $0.key, $0.total) })
-                breakdown("By model", rows: byModel.map { ($0.key, $0.total) })
-                recentCalls
-                Text("Paid-tier Standard prices from the Gemini API pricing page. A free-tier key is billed nothing. ≈ marks estimated tokens or an unpriced model.")
+                if detailed {
+                    breakdown("By model", rows: byModel.map { ($0.key, $0.total) })
+                    recentCalls
+                }
+                Text(footer)
                     .font(VoiceIQUI.TypeScale.labelSmall(grad: grad))
                     .foregroundStyle(.secondary)
             }
@@ -80,6 +91,13 @@ struct CostPane: View {
     }
 
     // MARK: - Sections
+
+    /// Names the active provider's price source. Records from the other
+    /// provider still count; the footer says where the numbers now come from.
+    private var footer: String {
+        let note = SettingsStore().activeProvider.pricingNote
+        return detailed ? note + " ≈ marks estimated tokens or an unpriced model." : note
+    }
 
     private var summary: some View {
         HStack(spacing: VoiceIQUI.Spacing.xl) {
@@ -108,14 +126,18 @@ struct CostPane: View {
             } else {
                 Grid(alignment: .leading, horizontalSpacing: VoiceIQUI.Spacing.l, verticalSpacing: 6) {
                     GridRow {
-                        header(""); header("Calls"); header("Tokens in"); header("Tokens out"); header("Cost")
+                        header(""); header("Calls")
+                        if detailed { header("Tokens in"); header("Tokens out") }
+                        header("Cost")
                     }
                     ForEach(rows, id: \.0) { name, total in
                         GridRow {
                             Text(name).font(VoiceIQUI.TypeScale.body(grad: grad))
                             cell("\(total.calls)")
-                            cell(Self.tokens(total.tokensIn))
-                            cell(Self.tokens(total.tokensOut))
+                            if detailed {
+                                cell(Self.tokens(total.tokensIn))
+                                cell(Self.tokens(total.tokensOut))
+                            }
                             cell(Self.money(total.costUSD, approximate: total.isApproximate))
                         }
                     }

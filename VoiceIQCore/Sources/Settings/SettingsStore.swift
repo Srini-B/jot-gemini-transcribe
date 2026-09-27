@@ -80,6 +80,20 @@ public struct SettingsStore: Sendable {
         return config
     }
 
+    /// The provider chosen in Settings. Only matters when both keys exist.
+    public var preferredProvider: ModelProvider {
+        ModelProvider(rawValue: Self.defaults.string(forKey: "modelProvider") ?? "") ?? .gemini
+    }
+
+    public func setPreferredProvider(_ provider: ModelProvider) {
+        Self.set(provider.rawValue, forKey: "modelProvider")
+    }
+
+    /// The provider that serves calls right now; see `ModelProvider.resolve`.
+    public var activeProvider: ModelProvider {
+        ModelProvider.resolve(preferred: preferredProvider, available: KeychainStore.providersWithKeys)
+    }
+
     /// Show the resting dot at the bottom of the screen when idle. Off = the pill
     /// only appears while dictating.
     public var showIdleIndicator: Bool {
@@ -107,6 +121,20 @@ public struct SettingsStore: Sendable {
         Self.set(trimmed.isEmpty ? "English" : trimmed, forKey: "translationTargetLanguage")
     }
 
+    /// Where the pill sits along the bottom of the screen, as a fraction of the
+    /// visible width: 0 far left, 0.5 centre, 1 far right. Snapped to five
+    /// stops so a drag ends somewhere predictable.
+    public static let pillAnchors: [Double] = [0, 0.25, 0.5, 0.75, 1]
+
+    public var pillAnchor: Double {
+        Self.defaults.object(forKey: "pillAnchor") as? Double ?? 0.5
+    }
+
+    public func setPillAnchor(_ fraction: Double) {
+        let nearest = Self.pillAnchors.min(by: { abs($0 - fraction) < abs($1 - fraction) }) ?? 0.5
+        Self.set(nearest, forKey: "pillAnchor")
+    }
+
     public var muteOtherAudioWhileDictating: Bool {
         Self.defaults.object(forKey: "muteOtherAudioWhileDictating") as? Bool ?? true
     }
@@ -131,8 +159,17 @@ public struct SettingsStore: Sendable {
         Self.set(uid, forKey: "preferredInputDeviceUID")
     }
 
-    public var hotkeyKey: HotkeyKey {
-        (Self.defaults.string(forKey: "hotkeyKey")).flatMap(HotkeyKey.init(rawValue:)) ?? .fn
+    /// The dictation key. `dictationTrigger` (JSON) wins; installs from before
+    /// combos were allowed still carry the bare key under `hotkeyKey`.
+    public var dictationTrigger: DictationTrigger {
+        if let data = Self.defaults.data(forKey: "dictationTrigger"),
+           let trigger = try? JSONDecoder().decode(DictationTrigger.self, from: data) {
+            return trigger
+        }
+        if let key = Self.defaults.string(forKey: "hotkeyKey").flatMap(HotkeyKey.init(rawValue:)) {
+            return .modifier(key)
+        }
+        return .default
     }
 
     // MARK: - Formatting policy
@@ -250,8 +287,8 @@ public struct SettingsStore: Sendable {
         Self.set(enabled, forKey: "legacyTranscribeEndpoint")
     }
 
-    public func setHotkeyKey(_ key: HotkeyKey) {
-        Self.set(key.rawValue, forKey: "hotkeyKey")
+    public func setDictationTrigger(_ trigger: DictationTrigger) {
+        Self.set(try? JSONEncoder().encode(trigger), forKey: "dictationTrigger")
     }
 
     /// Experimental: judge speech RELATIVE to the room instead of against fixed
@@ -273,11 +310,12 @@ public struct SettingsStore: Sendable {
     /// Stream audio to the Live API over a WebSocket and show words as they are
     /// spoken, instead of uploading the clip at key-up.
     ///
-    /// On by default: the CAF is written to disk in parallel, and any live stream
-    /// that fails, drops chunks, or misses byte reconciliation automatically falls
-    /// back to the batch upload over that file.
+    /// Off by default: the live model draws on its own, small daily request
+    /// quota, and a long dictation rotates through several sessions. When on,
+    /// the CAF is still written to disk in parallel, and any live stream that
+    /// fails falls back to the batch upload over that file.
     public var liveTranscription: Bool {
-        Self.defaults.object(forKey: "liveTranscription") as? Bool ?? true
+        Self.defaults.object(forKey: "liveTranscription") as? Bool ?? false
     }
 
     public func setLiveTranscription(_ enabled: Bool) {

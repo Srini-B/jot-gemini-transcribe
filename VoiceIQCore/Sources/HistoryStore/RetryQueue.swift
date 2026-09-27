@@ -26,6 +26,7 @@ public final class RetryQueue {
     private let monitor = NWPathMonitor()
     private var draining = false
     private var lastPathSatisfied = false
+    private var scheduledDrain: Task<Void, Never>?
 
     public var onDrained: ((Int) -> Void)?
     /// Fired once per blocked drain: the queue hit an account-level wall
@@ -55,6 +56,18 @@ public final class RetryQueue {
         Task { await drain() } // launch drain
     }
 
+    /// A per-minute throttle clears by itself, so the network path monitor is
+    /// no signal for it. This is the one timed retry the queue has.
+    public func scheduleDrain(after seconds: TimeInterval) {
+        scheduledDrain?.cancel()
+        scheduledDrain = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            Log.history.info("RetryQueue: rate-limit wait over — draining")
+            await self?.drain()
+        }
+    }
+
     public func drain() async {
         guard !draining else { return }
         draining = true
@@ -71,6 +84,11 @@ public final class RetryQueue {
             case .stillOffline:
                 Log.history.info("RetryQueue: still offline — pausing drain")
                 if recoveredCount > 0 { onDrained?(recoveredCount) }
+                return
+            case .rateLimited(let wait):
+                Log.history.info("RetryQueue: rate limited — draining again in \(Int(wait))s")
+                if recoveredCount > 0 { onDrained?(recoveredCount) }
+                scheduleDrain(after: wait)
                 return
             case .blocked(let error):
                 // Auth/daily-quota walls apply to every remaining row: stop, keep
@@ -102,6 +120,9 @@ public final class RetryQueue {
             return .recovered
         case .stillOffline:
             return .stillOffline
+        case .rateLimited(let wait):
+            scheduleDrain(after: wait)
+            return .rateLimited(retryIn: wait)
         case .blocked(let error):
             onDrainBlocked?(error)
             return .blocked
@@ -113,9 +134,21 @@ public final class RetryQueue {
     }
 
     /// User-facing outcome of a manual Retry — a silent no-op reads as broken.
-    public enum RetryOutcome { case recovered, stillOffline, blocked, failed, alreadyDone, busy }
+    public enum RetryOutcome {
+        case recovered, stillOffline, blocked, failed, alreadyDone, busy
+        /// The throttle named its wait; a drain is already scheduled for it.
+        case rateLimited(retryIn: TimeInterval)
+    }
 
-    private enum ProcessResult { case recovered, stillOffline, blocked(TranscriptionError), failed, skipped }
+    private enum ProcessResult {
+        case recovered, stillOffline, blocked(TranscriptionError), failed, skipped
+        case rateLimited(TimeInterval)
+    }
+
+    /// The server's Retry-After plus slack, or a full minute when it gave none.
+    private static func rateLimitWait(_ retryAfter: TimeInterval?) -> TimeInterval {
+        (retryAfter ?? 60) + 2
+    }
 
     private func process(_ record: DictationRecord) async -> ProcessResult {
         let folder = record.folderURL
@@ -159,6 +192,8 @@ public final class RetryQueue {
             meta.rawTranscript = result.rawTranscript
             meta.cleanedTranscript = result.cleanedTranscript
             meta.modelID = result.modelID
+            meta.errorCode = nil
+            meta.errorMessage = nil
             // .recovered, NOT .awaitingChip: the text was never put on the
             // clipboard, so no chip may promise "Ready to paste".
             meta.status = .recovered
@@ -167,8 +202,10 @@ public final class RetryQueue {
             return .recovered
         } catch let error as TranscriptionError {
             switch error {
-            case .offline, .network, .timeout, .rateLimitedTransient:
+            case .offline, .network, .timeout:
                 return .stillOffline
+            case .rateLimitedTransient(let retryAfter):
+                return .rateLimited(Self.rateLimitWait(retryAfter))
             case .auth, .rateLimitedDaily:
                 // Account-level wall: NOT this row's fault. Keep its queued
                 // status untouched so the promise survives to the next drain.

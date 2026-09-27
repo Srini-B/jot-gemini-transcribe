@@ -6,7 +6,7 @@ import Foundation
 import VoiceIQCore
 
 /// Puts meetings on the pill: the "record it?" offer when a call is noticed,
-/// the recording state with its live preview, and the Option-M toggle.
+/// the recording clock, and the Option-M toggle.
 ///
 /// Dictation owns the pill while a dictation runs. This controller only paints
 /// when dictation is resting, and `DictationController` asks `restingState`
@@ -48,10 +48,6 @@ final class MeetingHUDController {
         meetings.$phase
             .receive(on: DispatchQueue.main)
             .sink { [weak self] phase in self?.phaseChanged(phase) }
-            .store(in: &cancellables)
-        meetings.$livePreview
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] text in self?.hud.model.meetingPreview = text }
             .store(in: &cancellables)
 
         let center = NotificationCenter.default
@@ -111,18 +107,15 @@ final class MeetingHUDController {
     private func phaseChanged(_ phase: MeetingPhase) {
         switch phase {
         case let .recording(_, since):
-            hud.model.meetingPreview = ""
             if !dictationIsActive() { setPill(.meetingRecording(since: since)) }
         case .processing:
             // Same bars the dictation pill shows while it works; the notes
             // take a while, so the "still working" copy comes on straight away.
-            hud.model.meetingPreview = ""
             if !dictationIsActive() {
                 setPill(.processing)
                 hud.model.slow = true
             }
         case .idle, .failed:
-            hud.model.meetingPreview = ""
             if !dictationIsActive() {
                 switch hud.model.state {
                 case .meetingRecording, .processing:

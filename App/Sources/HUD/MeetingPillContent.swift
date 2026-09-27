@@ -43,7 +43,6 @@ struct MeetingPromptContent: View {
 /// The timer is a `TimelineView` over the start date, so no published tick is needed.
 struct MeetingRecordingContent: View {
     let since: Date
-    let preview: String
 
     var body: some View {
         HStack(spacing: VoiceIQUI.Spacing.s) {
@@ -56,21 +55,10 @@ struct MeetingRecordingContent: View {
                     .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
             }
             WaveformView(processing: true)
-            if !preview.isEmpty {
-                Text(preview)
-                    .font(VoiceIQUI.TypeScale.labelSmall())
-                    .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
-                    .lineLimit(1)
-                    .truncationMode(.head)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .animation(nil, value: preview)
-                    .accessibilityHidden(true)
-            } else {
-                Text("Recording meeting")
-                    .font(VoiceIQUI.TypeScale.label())
-                    .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+            Text("Recording meeting")
+                .font(VoiceIQUI.TypeScale.label())
+                .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
+                .frame(maxWidth: .infinity, alignment: .leading)
             Button {
                 NotificationCenter.default.post(name: .pillMeetingStopTapped, object: nil)
             } label: {

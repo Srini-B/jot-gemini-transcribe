@@ -31,12 +31,17 @@ public struct TokenUsage: Equatable, Sendable, Codable {
     /// True when the server never reported counts and these are derived from
     /// audio length and output characters.
     public var isEstimated: Bool = false
+    /// USD the provider itself billed for the call, when it says (OpenRouter
+    /// does). Takes precedence over the price book.
+    public var reportedCostUSD: Double? = nil
 
     public init(textIn: Int = 0, audioIn: Int = 0, imageIn: Int = 0, cachedIn: Int = 0,
-                textOut: Int = 0, audioOut: Int = 0, thoughtOut: Int = 0, isEstimated: Bool = false) {
+                textOut: Int = 0, audioOut: Int = 0, thoughtOut: Int = 0, isEstimated: Bool = false,
+                reportedCostUSD: Double? = nil) {
         self.textIn = textIn; self.audioIn = audioIn; self.imageIn = imageIn; self.cachedIn = cachedIn
         self.textOut = textOut; self.audioOut = audioOut; self.thoughtOut = thoughtOut
         self.isEstimated = isEstimated
+        self.reportedCostUSD = reportedCostUSD
     }
 
     public var totalIn: Int { textIn + audioIn + imageIn + cachedIn }
@@ -49,8 +54,65 @@ public struct TokenUsage: Equatable, Sendable, Codable {
             imageIn: lhs.imageIn + rhs.imageIn, cachedIn: lhs.cachedIn + rhs.cachedIn,
             textOut: lhs.textOut + rhs.textOut, audioOut: lhs.audioOut + rhs.audioOut,
             thoughtOut: lhs.thoughtOut + rhs.thoughtOut,
-            isEstimated: lhs.isEstimated || rhs.isEstimated
+            isEstimated: lhs.isEstimated || rhs.isEstimated,
+            reportedCostUSD: lhs.reportedCostUSD == nil && rhs.reportedCostUSD == nil
+                ? nil : (lhs.reportedCostUSD ?? 0) + (rhs.reportedCostUSD ?? 0)
         )
+    }
+
+    // MARK: - OpenAI-shaped gateways
+
+    /// `usage` from the OpenAI-shaped envelopes OpenRouter and Vercel AI
+    /// Gateway return: token counts plus, on OpenRouter only, `cost` in USD.
+    /// Audio and cached prompt tokens come from `prompt_tokens_details`,
+    /// reasoning tokens from `completion_tokens_details`; OpenRouter's
+    /// transcription endpoint reports `input_tokens`/`output_tokens` instead,
+    /// all of its input being audio.
+    public static func fromOpenAI(_ data: Data) -> TokenUsage? {
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let meta = root["usage"] as? [String: Any] else { return nil }
+        var usage = TokenUsage()
+        let promptDetails = meta["prompt_tokens_details"] as? [String: Any] ?? [:]
+        let outDetails = meta["completion_tokens_details"] as? [String: Any] ?? [:]
+        usage.cachedIn = int(promptDetails, "cached_tokens", "cachedTokens")
+        usage.audioIn = int(promptDetails, "audio_tokens", "audioTokens")
+        usage.thoughtOut = int(outDetails, "reasoning_tokens", "reasoningTokens")
+        usage.audioOut = int(outDetails, "audio_tokens", "audioTokens")
+        if meta["prompt_tokens"] != nil {
+            usage.textIn = max(0, int(meta, "prompt_tokens", "promptTokens") - usage.cachedIn - usage.audioIn)
+            usage.textOut = max(0, int(meta, "completion_tokens", "completionTokens") - usage.thoughtOut - usage.audioOut)
+        } else {
+            usage.audioIn = int(meta, "input_tokens", "inputTokens")
+            usage.textOut = int(meta, "output_tokens", "outputTokens")
+        }
+        usage.reportedCostUSD = (meta["cost"] as? NSNumber)?.doubleValue
+        return usage
+    }
+
+    /// Vercel's `/v4/ai/transcription-model` response has no `usage` block;
+    /// the counts sit in `providerMetadata.google.usage` and the USD charge
+    /// in `providerMetadata.gateway.cost` (probed 2026-09-27).
+    public static func fromVercelTranscription(_ data: Data) -> TokenUsage? {
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let provider = root["providerMetadata"] as? [String: Any] else { return nil }
+        var usage = TokenUsage()
+        if let google = (provider["google"] as? [String: Any])?["usage"] as? [String: Any] {
+            for entry in google["input_tokens_by_modality"] as? [[String: Any]] ?? [] {
+                let tokens = (entry["tokens"] as? NSNumber)?.intValue ?? 0
+                switch entry["modality"] as? String {
+                case "audio": usage.audioIn += tokens
+                case "image": usage.imageIn += tokens
+                default: usage.textIn += tokens
+                }
+            }
+            usage.cachedIn = int(google, "total_cached_tokens", "totalCachedTokens")
+            usage.textOut = int(google, "total_output_tokens", "totalOutputTokens")
+            usage.thoughtOut = int(google, "total_thought_tokens", "totalThoughtTokens")
+        }
+        if let cost = (provider["gateway"] as? [String: Any])?["cost"] {
+            usage.reportedCostUSD = (cost as? NSNumber)?.doubleValue ?? (cost as? String).flatMap(Double.init)
+        }
+        return usage.isEmpty && usage.reportedCostUSD == nil ? nil : usage
     }
 
     // MARK: - Estimation

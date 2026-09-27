@@ -23,12 +23,18 @@ public protocol TranscriptionServicing: Sendable {
     /// that was produced elsewhere, e.g. by a live stream. Never throws: on any
     /// failure the input comes back unchanged.
     /// `audioURL` is the CAF the stream was fed from, so the pass can listen
-    /// again where the stream misheard.
-    func polish(_ result: TranscriptionResult, context: DictationContext, audioURL: URL?) async -> TranscriptionResult
+    /// again where the stream misheard, and re-transcribe it outright when the
+    /// stream turns out to have stopped early. `durationSeconds` is the length
+    /// of that recording.
+    func polish(
+        _ result: TranscriptionResult, context: DictationContext, audioURL: URL?, durationSeconds: Double
+    ) async -> TranscriptionResult
 }
 
 public extension TranscriptionServicing {
-    func polish(_ result: TranscriptionResult, context: DictationContext, audioURL: URL?) async -> TranscriptionResult { result }
+    func polish(
+        _ result: TranscriptionResult, context: DictationContext, audioURL: URL?, durationSeconds: Double
+    ) async -> TranscriptionResult { result }
 }
 
 public struct TranscriptionResult: Equatable, Sendable {
@@ -55,8 +61,9 @@ public enum TranscriptionError: Error, Equatable, Sendable {
     case modelUnavailable(model: String, detail: String?)
     /// 429 that is a real daily/hard quota.
     case rateLimitedDaily
-    /// 429 per-minute throttle — clears on its own; retryable.
-    case rateLimitedTransient
+    /// 429 per-minute throttle — clears on its own; retryable. Carries the
+    /// server's Retry-After so the retry can wait exactly that long.
+    case rateLimitedTransient(retryAfter: TimeInterval?)
     case timeout
     case emptyTranscript
     case safetyBlocked

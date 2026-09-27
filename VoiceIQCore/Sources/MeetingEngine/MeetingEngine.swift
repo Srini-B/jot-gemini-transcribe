@@ -17,16 +17,15 @@ import Foundation
 
 @MainActor public final class MeetingEngine: ObservableObject {
     @Published public private(set) var phase: MeetingPhase = .idle
-    /// Live preview text while recording; empty otherwise. Display only.
-    @Published public private(set) var livePreview: String = ""
     public var onNotice: ((String) -> Void)?
+    /// The notes for a stopped recording are saved. The caller shows the same
+    /// success mark a finished dictation gets.
+    public var onNotesReady: (() -> Void)?
     /// A call was noticed while idle. The caller decides whether to record; nothing starts on its own.
     public var onCallDetected: ((CallSource) -> Void)?
     /// The noticed call went away before anyone accepted it.
     public var onCallEnded: (() -> Void)?
     public var autoDetect: Bool = false { didSet { autoDetect ? detector.start() : detector.stop() } }
-    /// Builds the live socket for the on-pill preview; nil turns the preview off.
-    public var makeLiveSession: MeetingLivePreview.SessionFactory?
 
     public let store: MeetingStore
     private let client: GeminiClient
@@ -35,7 +34,6 @@ import Foundation
     private let summaryModel: String
     private lazy var detector = CallDetector()
     private var mic: MicTap?, system: SystemAudioTap?
-    private var preview: MeetingLivePreview?
     private var currentFolder: URL?, currentMeta: MeetingMeta?
     /// The call the detector currently sees, whether or not it was accepted.
     public private(set) var detectedSource: CallSource?
@@ -89,12 +87,6 @@ import Foundation
             let folder = try store.create(meta: meta)
             let mic = MicTap(url: folder.appendingPathComponent("mic.caf"))
             let system = SystemAudioTap(url: folder.appendingPathComponent("system.caf"))
-            let preview = makeLiveSession.map { MeetingLivePreview(makeSession: $0) }
-            if let preview {
-                preview.onText = { [weak self] text in Task { @MainActor in self?.livePreview = text } }
-                mic.pcmSink = { [weak preview] pcm in preview?.pushMic(pcm) }
-                system.pcmSink = { [weak preview] pcm in preview?.pushSystem(pcm) }
-            }
             // Mic first. MEASURED 2026-09-26 (macOS 26.5, built-in mic): with the
             // tap's aggregate device already running, `AudioDeviceStart` on the
             // mic blocked the main thread for 9 s to forever while coreaudiod
@@ -103,11 +95,8 @@ import Foundation
             // delivered system audio.
             try mic.start()
             do { try system.start() } catch { _ = mic.stop(); throw error }
-            self.mic = mic; self.system = system; self.preview = preview
-            currentFolder = folder; currentMeta = meta; livePreview = ""
-            // The preview's rotation tasks inherit this scope, so its live
-            // sessions are booked to the meeting.
-            UsageMeter.$scope.withValue(UsageScope(activity: .meeting, sessionID: id.uuid.uuidString)) { preview?.start() }
+            self.mic = mic; self.system = system
+            currentFolder = folder; currentMeta = meta
             phase = .recording(id, since: now)
         } catch { fail(id, error) }
     }
@@ -116,8 +105,6 @@ import Foundation
         guard case let .recording(id, _) = phase, let folder = currentFolder, var meta = currentMeta else { return }
         let micDuration = mic?.stop() ?? 0, systemDuration = system?.stop() ?? 0
         mic = nil; system = nil; phase = .processing(id)
-        if let preview { self.preview = nil; Task { await preview.stop() } }
-        livePreview = ""
         meta.endedAt = Date(); meta.durationSeconds = max(micDuration, systemDuration); meta.status = .transcribing
         currentMeta = meta; try? store.save(meta: meta)
         Task { await UsageMeter.$scope.withValue(UsageScope(activity: .meeting, sessionID: id.uuid.uuidString)) {
@@ -173,7 +160,7 @@ import Foundation
         try store.save(transcript: transcript, id: id)
         try store.save(notes: notes, id: id)
         meta.title = notes.title; meta.status = .done; try store.save(meta: meta)
-        phase = .idle; currentFolder = nil; currentMeta = nil; onNotice?("Meeting notes ready")
+        phase = .idle; currentFolder = nil; currentMeta = nil; onNotesReady?()
     }
 
     /// Detection only ever offers. A recording in progress is never stopped by

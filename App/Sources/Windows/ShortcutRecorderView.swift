@@ -17,8 +17,8 @@ struct ShortcutRecorderRow: View {
     @State private var isRecording = false
     @State private var monitor: Any?
 
-    init(title: String, action: ShortcutAction) {
-        self.title = title
+    init(action: ShortcutAction) {
+        self.title = action.displayName
         self.action = action
         _shortcut = State(initialValue: ShortcutStore().shortcut(for: action))
     }
@@ -100,10 +100,7 @@ struct ShortcutRecorderRow: View {
                 return nil
             }
 
-            let modifiers = Self.modifiers(from: event.modifierFlags)
-            guard !modifiers.isEmpty else { return nil }
-            let side = Self.side(for: modifiers, rawFlags: event.modifierFlags.rawValue)
-            let updated = KeyShortcut(keyCode: event.keyCode, modifiers: modifiers, side: side)
+            guard let updated = KeyShortcut.recorded(from: event) else { return nil }
             store.set(updated, for: action)
             shortcut = updated
             stopRecording()
@@ -116,6 +113,17 @@ struct ShortcutRecorderRow: View {
         monitor = nil
         isRecording = false
         ShortcutCapture.end(owner: captureID)
+    }
+}
+
+extension KeyShortcut {
+    /// The combination a keyDown describes, or nil when no modifier is held
+    /// (a bare letter is never a global shortcut).
+    static func recorded(from event: NSEvent) -> KeyShortcut? {
+        let modifiers = modifiers(from: event.modifierFlags)
+        guard !modifiers.isEmpty else { return nil }
+        let side = side(for: modifiers, rawFlags: event.modifierFlags.rawValue)
+        return KeyShortcut(keyCode: event.keyCode, modifiers: modifiers, side: side)
     }
 
     private static func modifiers(from flags: NSEvent.ModifierFlags) -> Set<KeyShortcut.Modifier> {

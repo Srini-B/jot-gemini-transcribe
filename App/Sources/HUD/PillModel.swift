@@ -55,8 +55,8 @@ final class PillModel: ObservableObject {
     /// only: this is a guess the model is still revising, and it is never what
     /// gets inserted.
     @Published var partial: String = ""
-    /// Meeting live preview. Separate from `partial`, which dictation clears on
-    /// every begin and would wipe the meeting text mid-call.
-    @Published var meetingPreview: String = ""
+    /// `SettingsStore.pillAnchor`, mirrored so the pill hugs the panel edge
+    /// the anchor points at instead of floating in the panel's middle.
+    @Published var anchor: Double = SettingsStore().pillAnchor
     let level = LevelSource()
 }

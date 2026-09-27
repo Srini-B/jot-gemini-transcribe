@@ -72,6 +72,17 @@ public actor LiveTranscriptionSession {
 
     private var finals: [String] = []
     private var latestPartial: String = ""
+    /// `ring.acceptedBytes` when the server last said anything about the audio.
+    /// The gap between this and the bytes sent since is how far the transcript
+    /// lags the recording; past `stallSeconds` the stream is not trustworthy.
+    private var acceptedAtLastTranscript: Int64 = 0
+    private var bytesSinceActivityStart = 0
+    /// Turns closed so far. `finish` waits until every closed turn has a final,
+    /// not just until some final exists, because rolled turns leave earlier
+    /// finals in place while the last one is still on its way.
+    private var turnsEnded = 0
+    /// Turns the server has finished transcribing (`generationComplete`).
+    private var turnsCompleted = 0
     /// The socket reports usage per turn; a later frame supersedes an earlier
     /// one for the same turn, so the largest total wins rather than the sum.
     private var reportedUsage: TokenUsage?
@@ -171,6 +182,12 @@ public actor LiveTranscriptionSession {
                 do {
                     try await transport.send(LiveProtocol.audioFrame(chunk))
                     ring.markAccepted(chunk.count)
+                    bytesSinceActivityStart += chunk.count
+                    if !isEnding, Self.shouldRollActivity(bytesSinceStart: bytesSinceActivityStart, chunk: chunk) {
+                        // Chunks already drained from the ring keep flowing
+                        // into the new turn; nothing is dropped.
+                        try await rollActivity()
+                    }
                 } catch {
                     recordFailure("send failed: \(error)")
                     return
@@ -179,6 +196,7 @@ public actor LiveTranscriptionSession {
             if isEnding {
                 do {
                     try await transport.send(LiveProtocol.activityEndFrame())
+                    turnsEnded += 1
                 } catch {
                     recordFailure("activityEnd failed: \(error)")
                 }
@@ -188,27 +206,54 @@ public actor LiveTranscriptionSession {
         }
     }
 
+    /// Closes the current turn and opens the next one.
+    ///
+    /// MEASURED 2026-09-27: sending `activityStart` in the same breath as
+    /// `activityEnd` made the server drop the turn it was closing — no final,
+    /// and the next turn's partials stopped too. It needs to finish the old
+    /// turn (`generationComplete`, about a second after `activityEnd`) before
+    /// a new one opens. Audio keeps landing in the ring during the wait, so
+    /// nothing is lost; it goes out as soon as the new turn is open.
+    private func rollActivity() async throws {
+        try await transport.send(LiveProtocol.activityEndFrame())
+        turnsEnded += 1
+        let seconds = bytesSinceActivityStart / PCMRing.bytesPerSecond
+        let deadline = Date().addingTimeInterval(Self.turnCloseWaitSeconds)
+        while turnsCompleted < turnsEnded, failure == nil, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        Log.transcription.debug("live: rolled activity \(self.turnsEnded) after \(seconds)s, completed=\(self.turnsCompleted >= self.turnsEnded)")
+        try await transport.send(LiveProtocol.activityStartFrame())
+        bytesSinceActivityStart = 0
+    }
+
     private func runReceiveLoop() async {
         while !closed {
             do {
                 let frame = try await transport.receive()
                 if let usage = TokenUsage.fromLiveFrame(frame) { noteUsage(usage) }
-                guard let event = LiveProtocol.decode(frame) else { continue }
-                switch event {
-                case .partial(let text):
-                    latestPartial = text
-                    partialSink.yield(text)
-                case .final(let text):
-                    finals.append(text)
-                    latestPartial = ""
-                case .goAway:
-                    recordFailure("server sent goAway")
-                    return
-                case .failed(let why):
-                    recordFailure(why)
-                    return
-                case .setupComplete:
-                    continue
+                if LiveProtocol.isGenerationComplete(frame) { turnsCompleted += 1 }
+                let events = LiveProtocol.decodeAll(frame)
+                Log.transcription.debug("live frame: \(Self.describe(events, frame: frame), privacy: .public)")
+                for event in events {
+                    switch event {
+                    case .partial(let text):
+                        latestPartial = text
+                        acceptedAtLastTranscript = ring.acceptedBytes
+                        partialSink.yield(text)
+                    case .final(let text):
+                        finals.append(text)
+                        latestPartial = ""
+                        acceptedAtLastTranscript = ring.acceptedBytes
+                    case .goAway:
+                        recordFailure("server sent goAway")
+                        return
+                    case .failed(let why):
+                        recordFailure(why)
+                        return
+                    case .setupComplete:
+                        continue
+                    }
                 }
             } catch {
                 if !closed { recordFailure("receive failed: \(error)") }
@@ -217,8 +262,76 @@ public actor LiveTranscriptionSession {
         }
     }
 
+    /// Event kinds and sizes for the debug log; the raw keys when nothing decoded.
+    private static func describe(_ events: [LiveEvent], frame: Data) -> String {
+        guard !events.isEmpty else {
+            let root = (try? JSONSerialization.jsonObject(with: frame)) as? [String: Any]
+            let inner = (root?["serverContent"] as? [String: Any])?.keys.sorted().joined(separator: ",") ?? ""
+            return "undecoded keys=\(root?.keys.sorted().joined(separator: ",") ?? "?") serverContent=\(inner)"
+        }
+        return events.map {
+            switch $0 {
+            case .partial(let t): return "partial(\(t.count))"
+            case .final(let t): return "final(\(t.count))"
+            case .goAway: return "goAway"
+            case .failed(let w): return "failed(\(w))"
+            case .setupComplete: return "setupComplete"
+            }
+        }.joined(separator: "+")
+    }
+
     private func recordFailure(_ why: String) {
         if failure == nil { failure = why }
+    }
+
+    // MARK: - Activity rollover
+
+    /// One activity is one server-side turn, and the server stops transcribing a
+    /// turn that runs long: measured 2026-09-27, a seven-minute dictation held in
+    /// a single activity produced partials for about four minutes and a final
+    /// covering only the first half of the words, with the socket still healthy.
+    /// Closing the turn every minute or so keeps every minute inside the range
+    /// the server actually transcribes. The cut lands on a quiet frame when one
+    /// comes along, so a word is rarely split; a talker who never pauses is cut
+    /// anyway at the hard limit, and the cleanup pass hears the audio to mend it.
+    static let activityRollSeconds = 60
+    static let activityHardLimitSeconds = 90
+    /// How long a roll waits for the server to finish the closed turn before
+    /// opening the next. Measured at about one second; the cap keeps a stalled
+    /// server from holding up audio.
+    static let turnCloseWaitSeconds: TimeInterval = 2.5
+    /// Below this RMS (int16 scale) a 100 ms frame is treated as a pause.
+    static let quietFrameRMS = 400.0
+
+    static func shouldRollActivity(bytesSinceStart: Int, chunk: Data) -> Bool {
+        let seconds = bytesSinceStart / PCMRing.bytesPerSecond
+        if seconds >= activityHardLimitSeconds { return true }
+        guard seconds >= activityRollSeconds else { return false }
+        return rms(chunk) < quietFrameRMS
+    }
+
+    static func rms(_ pcm: Data) -> Double {
+        let count = pcm.count / 2
+        guard count > 0 else { return 0 }
+        let sum = pcm.withUnsafeBytes { raw -> Double in
+            var acc = 0.0
+            for i in 0..<count {
+                let v = Double(raw.loadUnaligned(fromByteOffset: i * 2, as: Int16.self))
+                acc += v * v
+            }
+            return acc
+        }
+        return (sum / Double(count)).squareRoot()
+    }
+
+    /// Audio the server accepted after its last word. A stream whose transcript
+    /// stopped this far before the recording did is missing speech, whatever
+    /// the byte reconciliation says, so the upload path takes over.
+    static let stallSeconds = 120
+
+    private var transcriptStalledSeconds: Int? {
+        let lag = Int(ring.acceptedBytes - acceptedAtLastTranscript) / PCMRing.bytesPerSecond
+        return lag >= Self.stallSeconds ? lag : nil
     }
 
     private func noteUsage(_ usage: TokenUsage) {
@@ -260,7 +373,7 @@ public actor LiveTranscriptionSession {
 
         // A final may already have arrived. Otherwise wait, briefly.
         let finalDeadline = Date().addingTimeInterval(deadline)
-        while finals.isEmpty, failure == nil, Date() < finalDeadline {
+        while finals.count < turnsEnded, failure == nil, Date() < finalDeadline {
             try? await Task.sleep(nanoseconds: 30_000_000)
         }
         close()
@@ -269,9 +382,13 @@ public actor LiveTranscriptionSession {
         if let failure { return .unusable(failure) }
         guard !finals.isEmpty else { return .unusable("no final transcript before deadline") }
         if ring.didDrop { return .unusable("dropped \(ring.droppedChunks) chunks — stream is truncated") }
+        if let lag = transcriptStalledSeconds {
+            return .unusable("transcript stalled \(lag)s before the recording ended — stream is truncated")
+        }
 
         let joined = finals.joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        Log.transcription.info("live finish: \(self.finals.count) finals for \(self.turnsEnded) turns, \(joined.count) chars over \(Int(self.ring.acceptedBytes) / PCMRing.bytesPerSecond)s")
         guard !joined.isEmpty else { return .silent }
         return .completed(joined)
     }

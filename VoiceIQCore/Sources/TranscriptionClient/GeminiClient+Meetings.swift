@@ -23,6 +23,14 @@ public struct DiarizedWord: Equatable, Sendable {
 public extension GeminiClient {
     func transcribeDiarized(audio: Data, mimeType: String = "audio/flac", model: String,
                             endpoint: URL, deadline: TimeInterval) async throws -> [DiarizedWord] {
+        let via = provider()
+        if via != .gemini {
+            // No diarization on the gateways' transcription endpoints: one
+            // unlabelled speaker, which the summary prompt already tolerates.
+            let text = try await gatewayTranscribe(audio: audio, mimeType: mimeType, model: model,
+                                                   deadline: deadline, stage: .meetingTranscribe, via: via)
+            return text.isEmpty ? [] : [DiarizedWord(text: text, speaker: nil)]
+        }
         // `timestamp_granularities` is required in practice: with `diarization_mode`
         // alone the API returned no word_info annotations and a single text block
         // whose speaker turns were concatenated without spaces (verified 2026-09-26).
@@ -46,7 +54,7 @@ public extension GeminiClient {
         Return ONLY JSON matching this shape exactly:
         {"title":"","summary":"","decisions":[],"actions":[{"text":"","owner":null,"deadline":null}],"notes":[]}
 
-        Create faithful meeting notes from the transcript. Speaker labels such as "spk:0" and "Speaker 1" identify turns, not names. Never invent participants, facts, decisions, owners, deadlines, or context. Keep the language used in the transcript and do not translate. Ignore greetings, small talk, and verbal filler unless they affect the meeting.
+        Create faithful meeting notes from the transcript. Speaker labels such as "spk:0" and "Speaker 1" identify turns, not names. Never invent participants, facts, decisions, owners, deadlines, or context. Write the title, summary, decisions, actions, and notes in the language the participants spoke most; when the meeting mixes languages, use the one that carries most of the discussion, and never translate into English unless English was that language. Ignore greetings, small talk, and verbal filler unless they affect the meeting.
 
         - title: A short, specific title of at most 8 words based on the main subject. Do not use a generic title when a specific topic is available.
         - summary: A few short prose paragraphs describing what was discussed in the order it was discussed. Preserve important nuance and disagreement. Combine repeated statements so each point appears once; do not turn repetition into extra significance.
@@ -59,6 +67,12 @@ public extension GeminiClient {
         Transcript:
         \(transcript)
         """
+        let via = provider()
+        if via != .gemini {
+            let text = try await gatewayChat(prompt: prompt, model: model, deadline: deadline,
+                                             stage: .meetingSummary, jsonObject: true, via: via)
+            return try Self.parseMeetingNotes(text)
+        }
         let body: [String: Any] = [
             "contents": [["role": "user", "parts": [["text": prompt]]]],
             "generationConfig": [

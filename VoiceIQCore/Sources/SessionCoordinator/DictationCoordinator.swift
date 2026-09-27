@@ -655,7 +655,8 @@ public final class DictationCoordinator: ObservableObject {
                         // are the cleanup pass, same as the batch path.
                         let polished = await self.transcription.polish(
                             liveResult, context: session.context,
-                            audioURL: FileLayout.audioCAF(in: session.folder)
+                            audioURL: FileLayout.audioCAF(in: session.folder),
+                            durationSeconds: result.durationSeconds
                         )
                         guard !Task.isCancelled else { return }
                         await self.completeTranscription(

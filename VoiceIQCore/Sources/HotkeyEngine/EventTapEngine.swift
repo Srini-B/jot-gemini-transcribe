@@ -42,10 +42,13 @@ public final class EventTapEngine {
     /// Called when the tap had to be revived (telemetry for the #1 field failure).
     public var onTapRevived: (() -> Void)?
 
-    private var key: HotkeyKey
+    private var trigger: DictationTrigger
     private let lock = NSLock()
     private var processor = HotkeyProcessor()
     private var keyIsDown = false
+    /// Key code of a combo whose keyDown we consumed, so its keyUp is
+    /// swallowed too instead of reaching the frontmost app as a stray release.
+    private var comboKeyHeld: UInt16?
     /// Set by the app while a session is in flight beyond the grammar's view
     /// (transcribing/inserting, or UI-started hands-free) so Esc still cancels
     /// (audit L8/L13 — the machine supported cancel, the tap never delivered it).
@@ -57,23 +60,24 @@ public final class EventTapEngine {
     private let timerQueue = DispatchQueue(label: "io.blue.voiceiq.hotkey.timer")
     private var healthTimer: DispatchSourceTimer?
 
-    public init(key: HotkeyKey = .fn) {
-        self.key = key
+    public init(trigger: DictationTrigger = .default) {
+        self.trigger = trigger
     }
 
     deinit {
         stop()
     }
 
-    public func setKey(_ newKey: HotkeyKey) {
+    public func setTrigger(_ newTrigger: DictationTrigger) {
         lock.lock()
         // Same key ⇒ keep keyIsDown: resetting the edge detector while the user
         // is physically holding the key would swallow the coming key-up and
         // strand the session (reachable via any settings write re-applying
         // hotkey config mid-hold).
-        if key != newKey {
-            key = newKey
+        if trigger != newTrigger {
+            trigger = newTrigger
             keyIsDown = false
+            comboKeyHeld = nil
         }
         lock.unlock()
     }
@@ -134,7 +138,9 @@ public final class EventTapEngine {
 
     private func threadMain() {
         let mask: CGEventMask =
-            (1 << CGEventType.flagsChanged.rawValue) | (1 << CGEventType.keyDown.rawValue)
+            (1 << CGEventType.flagsChanged.rawValue)
+            | (1 << CGEventType.keyDown.rawValue)
+            | (1 << CGEventType.keyUp.rawValue)
 
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
         guard let tap = CGEvent.tapCreate(
@@ -160,7 +166,7 @@ public final class EventTapEngine {
         CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
         state = .running
-        Log.hotkey.info("EventTapEngine: tap running (key=\(self.key.rawValue, privacy: .public))")
+        Log.hotkey.info("EventTapEngine: tap running (trigger=\(self.trigger.displayName, privacy: .public))")
         CFRunLoopRun()
         Log.hotkey.info("EventTapEngine: run loop exited")
     }
@@ -184,11 +190,11 @@ public final class EventTapEngine {
         switch type {
         case .flagsChanged:
             lock.lock()
-            let configured = key
             // While Settings records a shortcut the press belongs to that row,
             // not to dictation. A key already held keeps its release so the
             // edge detector is not stranded.
-            guard keyCode == configured.keyCode, !(ShortcutCapture.isActive && !keyIsDown) else {
+            guard case .modifier(let configured) = trigger,
+                  keyCode == configured.keyCode, !(ShortcutCapture.isActive && !keyIsDown) else {
                 lock.unlock()
                 return Unmanaged.passUnretained(event)
             }
@@ -218,6 +224,16 @@ public final class EventTapEngine {
             // A shortcut being recorded is the row's to consume, Esc included.
             guard !ShortcutCapture.isActive else { return Unmanaged.passUnretained(event) }
             lock.lock()
+            // A combo trigger is a tap: down and up reach the grammar together.
+            if case .combo(let shortcut) = trigger,
+               shortcut.matches(eventFlags: event.flags, keyCode: UInt16(keyCode)) {
+                comboKeyHeld = UInt16(keyCode)
+                var fx = processor.handle(.hotkeyDown, at: now)
+                fx.intents += processor.handle(.hotkeyUp, at: now).intents
+                lock.unlock()
+                apply(fx)
+                return nil
+            }
             // Esc cancels grammar sessions AND externally-tracked ones
             // (in-flight transcription, UI-started hands-free).
             if keyCode == 53, externalSessionActive, !processor.isSessionActive {
@@ -235,10 +251,27 @@ public final class EventTapEngine {
                 apply(fx)
                 return nil // consume Esc only while dictating
             }
+            // The accidental-chord abort exists for bare modifiers, where a
+            // letter right after the press means the user meant ⌥-something.
+            // A combo already carries its key, so typing after it is deliberate.
+            guard trigger.isModifier else {
+                lock.unlock()
+                return Unmanaged.passUnretained(event)
+            }
             let fx = processor.handle(.otherKeyDown, at: now)
             lock.unlock()
             apply(fx)
             return Unmanaged.passUnretained(event) // typing passes through
+
+        case .keyUp:
+            lock.lock()
+            guard let held = comboKeyHeld, held == UInt16(keyCode) else {
+                lock.unlock()
+                return Unmanaged.passUnretained(event)
+            }
+            comboKeyHeld = nil
+            lock.unlock()
+            return nil
 
         default:
             return Unmanaged.passUnretained(event)

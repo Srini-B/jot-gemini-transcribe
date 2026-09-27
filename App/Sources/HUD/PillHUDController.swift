@@ -27,6 +27,9 @@ final class PillHUDController {
     private var stateObservation: AnyCancellable?
     private var eventMonitors: [Any] = []
     private var mouseMonitor: Any?
+    private let settings = SettingsStore()
+    private var dragObservers: [NSObjectProtocol] = []
+    private var grabOffset: CGFloat?
 
     init() {
         panel = NSPanel(
@@ -50,7 +53,38 @@ final class PillHUDController {
         stateObservation = model.$state.sink { [weak self] state in
             self?.updatePanel(for: state)
         }
+        dragObservers = [
+            NotificationCenter.default.addObserver(forName: .pillDragMoved, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.followGrip() }
+            },
+            NotificationCenter.default.addObserver(forName: .pillDragEnded, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.snapToNearestAnchor() }
+            },
+        ]
         reposition()
+    }
+
+    /// Slides the panel with the pointer while the grip is held. The offset
+    /// between pointer and panel origin is fixed on the first move so the pill
+    /// does not jump under the cursor.
+    private func followGrip() {
+        let mouseX = NSEvent.mouseLocation.x
+        if grabOffset == nil { grabOffset = mouseX - panel.frame.origin.x }
+        var origin = panel.frame.origin
+        origin.x = mouseX - (grabOffset ?? 0)
+        panel.setFrameOrigin(origin)
+    }
+
+    /// Lands the panel on the nearest anchor after a drag and keeps it there.
+    private func snapToNearestAnchor() {
+        grabOffset = nil
+        guard let screen = panel.screen ?? targetScreen() else { return }
+        let visible = screen.visibleFrame
+        let fraction = (panel.frame.midX - visible.minX) / max(1, visible.width)
+        settings.setPillAnchor(fraction)
+        model.anchor = settings.pillAnchor
+        let target = NSRect(origin: origin(on: screen), size: panel.frame.size)
+        panel.setFrame(target, display: true, animate: true)
     }
 
     func show() {
@@ -139,13 +173,20 @@ final class PillHUDController {
         place(on: screen)
     }
 
-    /// Bottom-center of `screen`.
+    /// The bottom of `screen`, at the anchor the user chose.
     private func place(on screen: NSScreen) {
+        panel.setFrameOrigin(origin(on: screen))
+    }
+
+    /// The panel is wider than the pill, and the pill hugs the panel edge the
+    /// anchor points at (`PillRootView`), so at 0 and 1 the pill itself
+    /// touches the screen edge rather than the panel's empty margin.
+    private func origin(on screen: NSScreen) -> NSPoint {
         let frame = screen.visibleFrame
-        panel.setFrameOrigin(NSPoint(
-            x: frame.midX - panel.frame.width / 2,
-            y: frame.minY + 16
-        ))
+        let width = panel.frame.width
+        let wanted = frame.minX + frame.width * settings.pillAnchor - width / 2
+        let x = min(max(wanted, frame.minX), frame.maxX - width)
+        return NSPoint(x: x, y: frame.minY + 16)
     }
 
     /// The display under the pointer, which is where the eyes are. The screen
@@ -194,7 +235,14 @@ private struct PillRootView: View {
             Spacer(minLength: 0)
             PillView(model: model)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
         .padding(.bottom, 8)
+        .padding(.horizontal, 8)
+    }
+
+    private var alignment: Alignment {
+        if model.anchor <= 0 { return .bottomLeading }
+        if model.anchor >= 1 { return .bottomTrailing }
+        return .bottom
     }
 }

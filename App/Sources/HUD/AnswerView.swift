@@ -11,6 +11,9 @@ struct AnswerView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
+                PillDragHandle()
+                    .fixedSize()
+                    .accessibilityLabel("Move answer")
                 Text("Answer")
                     .font(.headline)
                 Spacer()
@@ -30,35 +33,14 @@ struct AnswerView: View {
                 .accessibilityLabel("Close answer")
             }
 
-            ScrollView {
-                renderedAnswer
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+            RichTextView(text: MarkdownRenderer.render(answer, color: NSColor(VoiceIQUI.Colors.onSurface)))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .padding(18)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(VoiceIQUI.Colors.surface)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .shadow(color: .black.opacity(0.2), radius: 16, y: 4)
-    }
-
-    @ViewBuilder
-    private var renderedAnswer: some View {
-        if containsMarkdown,
-           let attributed = try? AttributedString(
-               markdown: answer,
-               options: .init(interpretedSyntax: .full)
-           ) {
-            Text(attributed)
-        } else {
-            Text(answer)
-        }
-    }
-
-    private var containsMarkdown: Bool {
-        answer.range(of: #"(?m)(^#{1,6}\s|^[-*+]\s|^\d+\.\s|```|\[[^\]]+\]\([^)]+\)|\*\*[^*]+\*\*)"#,
-                     options: .regularExpression) != nil
     }
 
     private func copy() {

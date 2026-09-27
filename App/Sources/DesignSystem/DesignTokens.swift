@@ -146,7 +146,20 @@ enum GTFont {
         variable(codePostScriptName, size: size, variations: [wght: weight])
     }
 
+    /// The same faces as NSFont, for AppKit text views.
+    static func nsFlex(_ size: CGFloat, weight: CGFloat) -> NSFont {
+        nsVariable(flexPostScriptName, size: size, variations: [wght: weight, opsz: min(max(size, 17), 144)])
+    }
+
+    static func nsSansCode(_ size: CGFloat, weight: CGFloat) -> NSFont {
+        nsVariable(codePostScriptName, size: size, variations: [wght: weight])
+    }
+
     private static func variable(_ postScriptName: String, size: CGFloat, variations: [UInt32: CGFloat]) -> Font {
+        Font(nsVariable(postScriptName, size: size, variations: variations))
+    }
+
+    private static func nsVariable(_ postScriptName: String, size: CGFloat, variations: [UInt32: CGFloat]) -> NSFont {
         let axes = variations.reduce(into: [NSNumber: NSNumber]()) { dict, entry in
             dict[NSNumber(value: entry.key)] = NSNumber(value: Double(entry.value))
         }
@@ -155,8 +168,7 @@ enum GTFont {
             kCTFontVariationAttribute: axes,
         ]
         let descriptor = CTFontDescriptorCreateWithAttributes(attributes as CFDictionary)
-        let ctFont = CTFontCreateWithFontDescriptor(descriptor, size, nil)
-        return Font(ctFont as NSFont)
+        return CTFontCreateWithFontDescriptor(descriptor, size, nil) as NSFont
     }
 }
 

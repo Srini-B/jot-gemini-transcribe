@@ -41,10 +41,10 @@ struct DictationPane: View {
             PermissionsSection()
 
             Section("Shortcuts") {
-                ShortcutRecorderRow(title: "Paste last transcript", action: .pasteLastTranscript)
-                ShortcutRecorderRow(title: "Ask Anything", action: .askAnything)
-                ShortcutRecorderRow(title: "Translate", action: .translate)
-                ShortcutRecorderRow(title: "Meeting recording", action: .meetingToggle)
+                ShortcutRecorderRow(action: .pasteLastTranscript)
+                ShortcutRecorderRow(action: .askAnything)
+                ShortcutRecorderRow(action: .translate)
+                ShortcutRecorderRow(action: .meetingToggle)
                 LabeledContent("Translation language") {
                     Button(translationTarget) { showingLanguages.toggle() }
                         .popover(isPresented: $showingLanguages, arrowEdge: .trailing) {
@@ -157,7 +157,7 @@ struct DictationPane: View {
                     Text("Live transcription is unavailable while the legacy transcription endpoint is on in Advanced.")
                 } else {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Live streams your voice over a WebSocket as you speak instead of uploading at the end (on by default) — if the connection stumbles it quietly falls back to the normal upload, so nothing is ever lost. Loud rooms judges your voice against the actual room noise instead of a fixed level.")
+                        Text("Live streams your voice as you speak instead of uploading at the end. It uses a separate model with a small daily request quota on free keys, and if the connection stumbles it falls back to the normal upload, so nothing is lost. Loud rooms judges your voice against the actual room noise instead of a fixed level.")
                         // Live failing is invisible by design — it just looks like
                         // a slower dictation — so without this the question "is it
                         // actually working?" has no answer.

@@ -22,9 +22,14 @@ public struct WebContext: Sendable, Equatable {
 
     /// Budget per page and overall, in characters. Ask Anything answers are
     /// short; three trimmed pages are plenty and keep the prompt small.
-    static let perPageLimit = 6_000
+    /// MEASURED 2026-09-27: "current price of Bitcoin" took ~15 s end to end,
+    /// most of it the page fetch and the answer model reading 18 k characters
+    /// of page text. Snippets already carry the fact for a lookup like that;
+    /// the fetch is capped so it adds little when pages are slow, and pages
+    /// are trimmed so the answer call stays short.
+    static let perPageLimit = 3_000
     static let maxSources = 3
-    static let fetchBudgetSeconds: TimeInterval = 8
+    static let fetchBudgetSeconds: TimeInterval = 4
     static let noSearchToken = "NONE"
     static let recentPrefix = "RECENT:"
     /// One week. Wide enough that a Monday question about the weekend still

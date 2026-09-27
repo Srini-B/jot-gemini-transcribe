@@ -41,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // pulled out of the old defaults domain before this reads it.
         FormattingSettingsMigration.runIfNeeded()
         FormattingSettingsMigration.enableWritingRulesIfNeeded()
+        FormattingSettingsMigration.disableLiveTranscriptionOnce()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {

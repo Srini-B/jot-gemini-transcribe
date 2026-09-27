@@ -8,6 +8,15 @@ public enum ShortcutAction: String, CaseIterable, Sendable {
     case askAnything
     case translate
     case meetingToggle
+
+    public var displayName: String {
+        switch self {
+        case .pasteLastTranscript: return "Paste last transcript"
+        case .askAnything: return "Ask Anything"
+        case .translate: return "Translate"
+        case .meetingToggle: return "Meeting recording"
+        }
+    }
 }
 
 public extension Notification.Name {

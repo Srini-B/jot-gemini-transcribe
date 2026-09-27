@@ -25,7 +25,7 @@ final class DictationController {
     let coordinator: DictationCoordinator
     /// Idle-time capture-graph prewarming — the key press pays only start().
     private let warmEngines = WarmEnginePool()
-    private let engine = EventTapEngine(key: .fn)
+    private let engine = EventTapEngine(trigger: .default)
     private let globalShortcutEngine = GlobalShortcutEngine()
     private let hud = PillHUDController()
     private let earcons = EarconPlayer()
@@ -74,7 +74,10 @@ final class DictationController {
             )
             return nil
         }
-        guard let key = KeychainStore.loadAPIKey(), !key.isEmpty else { return nil }
+        // Live is a Gemini WebSocket; the gateways have no equivalent, so the
+        // upload path carries the whole dictation on those providers.
+        guard settings.activeProvider == .gemini,
+              let key = KeychainStore.loadAPIKey(), !key.isEmpty else { return nil }
         let dictionary = DictionaryStore()
         let liveModel = settings.geminiConfig.liveModel
         let session = LiveTranscriptionSession(
@@ -94,25 +97,14 @@ final class DictationController {
         )
     }
 
-    /// Live socket for the meeting pill's preview. Verbatim: the text is a
-    /// scrolling tail for several speakers, and the saved transcript comes from
-    /// the recording afterwards. Nil when there is no key, so the preview is
-    /// simply absent and the recording is unaffected.
-    nonisolated private static func makeMeetingPreviewSession() -> LiveTranscriptionSession? {
-        guard let key = KeychainStore.loadAPIKey(), !key.isEmpty else { return nil }
-        return LiveTranscriptionSession(
-            transport: WebSocketTransport(apiKey: { key }),
-            setup: LiveSetup(
-                model: SettingsStore().geminiConfig.liveModel,
-                smart: false,
-                customVocabulary: DictionaryStore().vocabulary()
-            )
-        )
-    }
-
     init() {
         KeychainStore.migrateDevKeyFileIfPresent()
-        let client = GeminiClient(apiKey: { KeychainStore.loadAPIKey() })
+        let client = GeminiClient(
+            apiKey: { KeychainStore.loadAPIKey() },
+            openRouterKey: { KeychainStore.loadOpenRouterKey() },
+            vercelKey: { KeychainStore.loadVercelKey() },
+            provider: { SettingsStore().activeProvider }
+        )
         let service = GeminiTranscriptionService(client: client)
         transcriptionService = service
         historyStore = try? HistoryStore.standard()
@@ -150,7 +142,7 @@ final class DictationController {
         // grant) is reported through the menu bar, not by re-running the
         // wizard on every launch.
         guard !SettingsStore().hasCompletedOnboarding else { return false }
-        return KeychainStore.loadAPIKey() == nil
+        return !KeychainStore.hasModelKey
             || !AXIsProcessTrusted()
             || AVCaptureDevice.authorizationStatus(for: .audio) != .authorized
     }
@@ -236,7 +228,13 @@ final class DictationController {
         meetings.onNotice = { [weak self] message in
             self?.showBackgroundNotice(message, for: 4.0, sound: nil)
         }
-        meetings.makeLiveSession = { Self.makeMeetingPreviewSession() }
+        meetings.onNotesReady = { [weak self] in
+            guard let self else { return }
+            switch self.coordinator.state {
+            case .idle, .done, .cancelled, .failed: self.showSuccessBadge(words: nil)
+            default: break
+            }
+        }
         meetingHUD.setPill = { [weak self] state in self?.setPill(state) }
         meetingHUD.dictationIsActive = { [weak self] in
             guard let self else { return false }
@@ -318,12 +316,12 @@ final class DictationController {
         if engine.start() {
             _ = globalShortcutEngine.start()
             engineActive = true
-            if KeychainStore.loadAPIKey() == nil {
+            if !KeychainStore.hasModelKey {
                 // New-user path: dictation can't work yet — say exactly where to go.
-                onStatusChange?("Add your Gemini API key in Settings → Advanced")
+                onStatusChange?("Add your API key in Settings → Advanced")
                 onStatusItemState?(.attention)
             } else {
-                onStatusChange?("Ready — press \(SettingsStore().hotkeyKey.displayName) to dictate")
+                onStatusChange?("Ready — press \(SettingsStore().dictationTrigger.displayName) to dictate")
                 // Clear a lingering attention icon (auth failure, missing key).
                 onStatusItemState?(.idle)
                 warmEngines.prewarmNext()
@@ -384,14 +382,14 @@ final class DictationController {
         } else if AVCaptureDevice.authorizationStatus(for: .audio) != .authorized {
             onStatusChange?("Allow microphone access in System Settings to dictate")
         } else {
-            onStatusChange?("Add your Gemini API key in Settings → Advanced")
+            onStatusChange?("Add your API key in Settings → Advanced")
         }
         onStatusItemState?(.attention)
     }
 
     func applyHotkeySettings() {
         let settings = SettingsStore()
-        engine.setKey(settings.hotkeyKey)
+        engine.setTrigger(settings.dictationTrigger)
     }
 
     private func applySettingChange(key: String?) {
@@ -402,12 +400,12 @@ final class DictationController {
             if hud.model.state == .idleDot || hud.model.state == .hidden {
                 setPill(.idleDot)
             }
-        case "hotkeyKey":
+        case "dictationTrigger":
             applyHotkeySettings()
             // The menu-bar status line names the key — keep it truthful, but
             // never overwrite an attention message ("Grant Accessibility…").
-            if engineActive, KeychainStore.loadAPIKey() != nil {
-                onStatusChange?("Ready — press \(SettingsStore().hotkeyKey.displayName) to dictate")
+            if engineActive, KeychainStore.hasModelKey {
+                onStatusChange?("Ready — press \(SettingsStore().dictationTrigger.displayName) to dictate")
             }
         case "meetingDetection":
             meetings.autoDetect = SettingsStore().meetingDetectionEnabled
@@ -418,15 +416,15 @@ final class DictationController {
             if !engineActive {
                 activateEngine()
             }
-        case "apiKey":
-            if KeychainStore.loadAPIKey() != nil {
+        case "apiKey", "openRouterKey":
+            if KeychainStore.hasModelKey {
                 // Covers the "I'll add it later" onboarding path, where the
                 // engine was never started: a key arriving in Settings must
                 // bring the whole app to life, not just flip a badge.
                 // engine.start() is reentrant; hud.show() is idempotent.
                 activateEngine()
             } else {
-                onStatusChange?("Add your Gemini API key in Settings → Advanced")
+                onStatusChange?("Add your API key in Settings → Advanced")
                 onStatusItemState?(.attention)
             }
         default:
@@ -518,6 +516,8 @@ final class DictationController {
                         switch await queue.retrySingle(record) {
                         case .stillOffline:
                             self.showNotice("Still offline — will retry automatically when you're back", for: 4.0, sound: nil)
+                        case .rateLimited(let retryIn):
+                            self.showNotice("Gemini is rate limited — retrying in \(Int(retryIn.rounded()))s", for: 4.0, sound: nil)
                         case .busy:
                             self.showNotice("Already retrying your queued dictations…", for: 2.5, sound: nil)
                         case .failed:
@@ -818,6 +818,11 @@ final class DictationController {
             // Key/permission problems persist beyond the toast — the menu bar
             // icon carries the attention state until resolved (audit L12).
             onStatusItemState?(failure == .auth || failure == .modelAccess ? .attention : .idle)
+            if failure == .rateLimited {
+                // The copy promises a retry; the path monitor never fires for a
+                // throttle, so the queue needs a timed one.
+                retryQueue?.scheduleDrain(after: TimeoutPolicy.rateLimitWait)
+            }
             showError(coordinator.modeFailureMessage ?? Self.copy(for: failure))
         }
     }
@@ -835,10 +840,7 @@ final class DictationController {
                 setPill(.answer(answer))
                 return
             }
-            earcons.play(.success)
-            let words = coordinator.lastResult.map { $0.split(separator: " ").count }
-            setPill(.success(words: words))
-            dismissAfter(0.7)
+            showSuccessBadge(words: coordinator.lastResult.map { $0.split(separator: " ").count })
         case .copiedToClipboard:
             earcons.play(.success)
             showNotice("Copied — press ⌘V to paste", for: 4.0, sound: nil)
@@ -909,6 +911,13 @@ final class DictationController {
             "Smart transcription is back on — the model does the formatting itself now.",
             for: 5.0, sound: nil
         )
+    }
+
+    /// The green check, for a pasted dictation and for saved meeting notes alike.
+    private func showSuccessBadge(words: Int?) {
+        earcons.play(.success)
+        setPill(.success(words: words))
+        dismissAfter(0.7)
     }
 
     private func showBackgroundNotice(_ message: String, for seconds: TimeInterval, sound: EarconPlayer.Earcon?) {
@@ -1012,8 +1021,8 @@ final class DictationController {
         switch failure {
         case .network: return "Couldn't reach Gemini — saved to History"
         case .auth:
-            return KeychainStore.loadAPIKey() == nil
-                ? "Add your Gemini API key in Settings — recording saved to History"
+            return !KeychainStore.hasModelKey
+                ? "Add your API key in Settings — recording saved to History"
                 : "API key isn't working — saved to History"
         case .modelAccess:
             return SettingsStore().transcribeModelOverride != nil
