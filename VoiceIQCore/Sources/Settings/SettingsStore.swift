@@ -80,18 +80,75 @@ public struct SettingsStore: Sendable {
         return config
     }
 
-    /// The provider chosen in Settings. Only matters when both keys exist.
+    /// OpenAI's models, used only while OpenAI is the active provider.
+    public var openAIConfig: OpenAIConfig {
+        var config = OpenAIConfig()
+        if let model = Self.nonEmpty("openAITranscribeModelOverride") { config.transcribeModel = model }
+        if let model = Self.nonEmpty("openAILiveModelOverride") { config.liveModel = model }
+        if let model = Self.nonEmpty("openAIWritingModelOverride") { config.writingModel = model }
+        if let raw = Self.defaults.string(forKey: "openAILiveDelay"), let delay = OpenAIConfig.LiveDelay(rawValue: raw) {
+            config.liveDelay = delay
+        }
+        return config
+    }
+
+    public var openAITranscribeModelOverride: String? { Self.defaults.string(forKey: "openAITranscribeModelOverride") }
+    public var openAILiveModelOverride: String? { Self.defaults.string(forKey: "openAILiveModelOverride") }
+    public var openAIWritingModelOverride: String? { Self.defaults.string(forKey: "openAIWritingModelOverride") }
+
+    public func setOpenAITranscribeModelOverride(_ raw: String?) { Self.set(raw, forKey: "openAITranscribeModelOverride") }
+    public func setOpenAILiveModelOverride(_ raw: String?) { Self.set(raw, forKey: "openAILiveModelOverride") }
+    public func setOpenAIWritingModelOverride(_ raw: String?) { Self.set(raw, forKey: "openAIWritingModelOverride") }
+    public func setOpenAILiveDelay(_ delay: OpenAIConfig.LiveDelay) { Self.set(delay.rawValue, forKey: "openAILiveDelay") }
+
+    private static func nonEmpty(_ key: String) -> String? {
+        guard let value = defaults.string(forKey: key)?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
+        return value
+    }
+
+    /// Gemini or OpenAI, chosen in Settings → Advanced. Before 2026-09-28
+    /// `modelProvider` also held `openRouter` or `vercel`; those were Gemini
+    /// over a gateway, so they read as Gemini here and as the gateway below.
     public var preferredProvider: ModelProvider {
         ModelProvider(rawValue: Self.defaults.string(forKey: "modelProvider") ?? "") ?? .gemini
     }
 
+    /// The gateway chosen in Settings. Only matters when its key exists.
+    public var preferredGateway: ModelGateway {
+        if let raw = Self.defaults.string(forKey: "modelGateway"), let gateway = ModelGateway(rawValue: raw) { return gateway }
+        return ModelGateway(rawValue: Self.defaults.string(forKey: "modelProvider") ?? "") ?? .direct
+    }
+
     public func setPreferredProvider(_ provider: ModelProvider) {
+        // Pin the gateway first: a legacy `modelProvider` gateway value is
+        // about to be overwritten.
+        Self.defaults.set(preferredGateway.rawValue, forKey: "modelGateway")
         Self.set(provider.rawValue, forKey: "modelProvider")
     }
 
-    /// The provider that serves calls right now; see `ModelProvider.resolve`.
-    public var activeProvider: ModelProvider {
-        ModelProvider.resolve(preferred: preferredProvider, available: KeychainStore.providersWithKeys)
+    public func setPreferredGateway(_ gateway: ModelGateway) {
+        Self.set(gateway.rawValue, forKey: "modelGateway")
+    }
+
+    /// The route that serves calls right now; see `ModelRoute.resolve`.
+    public var activeRoute: ModelRoute {
+        let provider = preferredProvider
+        return ModelRoute.resolve(provider: provider, preferred: preferredGateway,
+                                  available: KeychainStore.gatewaysWithKeys(for: provider))
+    }
+
+    /// Routes for meeting transcription and notes; see `ModelRoute.meetingOrder`.
+    public var meetingRoutes: [ModelRoute] {
+        ModelRoute.meetingOrder(provider: preferredProvider, preferred: preferredGateway,
+                                available: KeychainStore.gatewaysWithKeys(for:))
+    }
+
+    /// The active route, then the selected provider over each other gateway
+    /// with a key. Never the other provider.
+    public var fallbackRoutes: [ModelRoute] {
+        let provider = preferredProvider
+        return ModelRoute.fallbackOrder(provider: provider, preferred: preferredGateway,
+                                        available: KeychainStore.gatewaysWithKeys(for: provider))
     }
 
     /// Show the resting dot at the bottom of the screen when idle. Off = the pill
@@ -329,11 +386,8 @@ public struct SettingsStore: Sendable {
         liveTranscription && !usesLegacyTranscribeEndpoint && liveTranscriptionSupported
     }
 
-    /// Only Google's own endpoint serves the live model to this app. OpenRouter
-    /// has no streaming transcription. Vercel lists
-    /// `google/gemini-3.5-transcribe-live` over its beta WebSocket protocol,
-    /// which the app does not speak yet.
-    public var liveTranscriptionSupported: Bool { activeProvider == .gemini }
+    /// Only over a provider's own API; see `ModelRoute.supportsLiveTranscription`.
+    public var liveTranscriptionSupported: Bool { activeRoute.supportsLiveTranscription }
 
     // Raw override values for the Settings UI — panes must not duplicate the
     // defaults keys (a rename would silently desync display from effect).

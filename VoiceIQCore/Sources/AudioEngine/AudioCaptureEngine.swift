@@ -18,6 +18,7 @@ import Accelerate
 import CoreAudio
 #endif
 import Foundation
+import VoiceIQObjC
 
 /// The crash-safe recorder.
 ///
@@ -248,7 +249,30 @@ public final class AudioCaptureEngine: AudioCapturing {
     // MARK: - Engine plumbing
 
     private func buildAndStartEngine(reason: String) throws {
-        try buildEngine(reason: reason, start: true)
+        do {
+            try buildEngine(reason: reason, start: true)
+        } catch CaptureError.deviceChanging(let detail) {
+            // The default input moved while the graph was being built. It
+            // settles within a few hundred milliseconds; one more try, on
+            // whatever the default is now.
+            Log.audio.warning("AudioCaptureEngine: input changed while building (\(detail, privacy: .public)) — retrying once")
+            Thread.sleep(forTimeInterval: 0.25)
+            try buildEngine(reason: reason + "-retry", start: true)
+        }
+    }
+
+    /// AVFAudio raises an Objective-C exception, which Swift cannot catch and
+    /// which aborts the app, when the input device changes between reading the
+    /// hardware format and installing the tap. MEASURED 2026-09-28: switching
+    /// the default input 40 times at 150 ms intervals crashed the app in
+    /// `installTap` during `prewarm` (four crash reports that day from AirPods
+    /// connecting, same stack). The exception becomes an error here.
+    private static func catchingException(_ step: String, _ body: () -> Void) throws {
+        do {
+            try VQObjCException.perform(body)
+        } catch {
+            throw CaptureError.deviceChanging("\(step): \(error.localizedDescription)")
+        }
     }
 
     private func buildEngine(reason: String, start shouldStart: Bool) throws {
@@ -276,20 +300,22 @@ public final class AudioCaptureEngine: AudioCapturing {
         // really arrive at ~10Hz, not the ~47Hz this comment used to claim
         // (docs/design/latency-audit-2026-08-19.md:53). Every threshold that
         // watches this stream has ~100ms of resolution, no more.
-        input.installTap(onBus: 0, bufferSize: 1024, format: hwFormat) { [weak self] buffer, _ in
-            self?.ingest(buffer, hwRate: hwFormat.sampleRate)
+        try Self.catchingException("installTap") {
+            input.installTap(onBus: 0, bufferSize: 1024, format: hwFormat) { [weak self] buffer, _ in
+                self?.ingest(buffer, hwRate: hwFormat.sampleRate)
+            }
         }
 
-        engine.prepare()
+        try Self.catchingException("prepare") { engine.prepare() }
         guard shouldStart else {
             Log.audio.info("AudioCaptureEngine: graph prepared in \(ms(t0), format: .fixed(precision: 1))ms (\(reason, privacy: .public), not started)")
             return
         }
-        do {
-            try engine.start()
-        } catch {
-            throw CaptureError.engineStart(String(describing: error))
+        var startError: Error?
+        try Self.catchingException("start") {
+            do { try engine.start() } catch { startError = error }
         }
+        if let startError { throw CaptureError.engineStart(String(describing: startError)) }
 
         observeConfigurationChanges(of: engine)
         Log.audio.info("AudioCaptureEngine: engine running (\(reason, privacy: .public); hw=\(Int(hwFormat.sampleRate))Hz/\(hwFormat.channelCount)ch, device=\(self.sessionDevice.map(String.init) ?? "default", privacy: .public))")
@@ -313,8 +339,12 @@ public final class AudioCaptureEngine: AudioCapturing {
         // A stop() parked on the tail must never outlive the engine.
         resumeTailWaiter()
         if let engine {
-            engine.inputNode.removeTap(onBus: 0)
-            engine.stop()
+            // Both can raise during a device change too; the engine is being
+            // discarded either way.
+            try? Self.catchingException("teardown") {
+                engine.inputNode.removeTap(onBus: 0)
+                engine.stop()
+            }
             // Never deallocate an AVAudioEngine on the same turn a device
             // change lands: AVFAudio's IO unit dispatches its property listener
             // asynchronously and dereferences the unit after we free it
@@ -547,6 +577,8 @@ public final class AudioCaptureEngine: AudioCapturing {
         case noInputDevice
         case converterUnavailable
         case engineStart(String)
+        /// AVFAudio raised while the input device was changing.
+        case deviceChanging(String)
     }
 }
 

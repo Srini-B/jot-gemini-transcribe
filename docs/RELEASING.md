@@ -26,7 +26,8 @@ preflight (tools, identity, credentials)
 1. Bump `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in `project.yml`.
    All four targets carry the same values.
 2. Confirm `./scripts/build.sh` and `./scripts/build-ios.sh` pass.
-3. Confirm the production Gemini models are available with a real dictation.
+3. Confirm the production models are available with a real dictation on both
+   providers (Gemini and OpenAI).
 
 ## macOS
 

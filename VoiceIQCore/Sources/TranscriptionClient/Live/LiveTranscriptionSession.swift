@@ -61,7 +61,7 @@ public actor LiveTranscriptionSession {
     }
 
     private let transport: LiveTransport
-    private let setup: LiveSetup
+    private let dialect: LiveDialect
     public let ring: PCMRing
 
     private let commands: AsyncStream<Command>
@@ -96,9 +96,14 @@ public actor LiveTranscriptionSession {
     public nonisolated let partials: AsyncStream<String>
     private let partialSink: AsyncStream<String>.Continuation
 
+    /// A Gemini Live session.
     public init(transport: LiveTransport, setup: LiveSetup, ring: PCMRing = PCMRing()) {
+        self.init(transport: transport, dialect: GeminiLiveDialect(setup: setup), ring: ring)
+    }
+
+    public init(transport: LiveTransport, dialect: LiveDialect, ring: PCMRing = PCMRing()) {
         self.transport = transport
-        self.setup = setup
+        self.dialect = dialect
         self.ring = ring
         // Control items must never be dropped, so this stream is unbounded — it
         // carries at most a handful of wakeups, not audio. The audio is in the
@@ -117,7 +122,7 @@ public actor LiveTranscriptionSession {
     /// credential is refused — the caller falls back to the batch path.
     public func start(setupTimeout: TimeInterval = 5.0) async throws {
         try await transport.connect()
-        try await transport.send(LiveProtocol.setupFrame(setup))
+        try await transport.send(dialect.setupFrame())
 
         // Wait for setupComplete before streaming. Audio arriving meanwhile is
         // already accumulating in the ring, so nothing is lost by waiting.
@@ -133,7 +138,7 @@ public actor LiveTranscriptionSession {
             let remaining = deadline.timeIntervalSinceNow
             guard remaining > 0 else { break }
             let frame = try await Self.receive(from: transport, within: remaining)
-            guard let event = LiveProtocol.decode(frame) else { continue }
+            guard let event = dialect.decode(frame).first else { continue }
             switch event {
             case .setupComplete:
                 didSetup = true
@@ -146,7 +151,7 @@ public actor LiveTranscriptionSession {
         }
         guard didSetup else { throw LiveError.setupTimedOut }
 
-        try await transport.send(LiveProtocol.activityStartFrame())
+        if let start = dialect.activityStartFrame() { try await transport.send(start) }
         startPumps()
     }
 
@@ -180,7 +185,7 @@ public actor LiveTranscriptionSession {
             // never overtakes the audio in front of it.
             for chunk in ring.drainCoalesced(flushAll: isEnding) {
                 do {
-                    try await transport.send(LiveProtocol.audioFrame(chunk))
+                    try await transport.send(dialect.audioFrame(chunk))
                     ring.markAccepted(chunk.count)
                     bytesSinceActivityStart += chunk.count
                     if !isEnding, Self.shouldRollActivity(bytesSinceStart: bytesSinceActivityStart, chunk: chunk) {
@@ -194,8 +199,15 @@ public actor LiveTranscriptionSession {
                 }
             }
             if isEnding {
+                // A turn with no audio yet (a roll just before the key came up)
+                // has nothing to end; OpenAI answers an empty commit with an
+                // error, and Gemini would never send its final.
+                guard bytesSinceActivityStart > 0 || turnsEnded == 0 else {
+                    activityEndFlushed = true
+                    return
+                }
                 do {
-                    try await transport.send(LiveProtocol.activityEndFrame())
+                    try await transport.send(dialect.activityEndFrame())
                     turnsEnded += 1
                 } catch {
                     recordFailure("activityEnd failed: \(error)")
@@ -215,7 +227,7 @@ public actor LiveTranscriptionSession {
     /// a new one opens. Audio keeps landing in the ring during the wait, so
     /// nothing is lost; it goes out as soon as the new turn is open.
     private func rollActivity() async throws {
-        try await transport.send(LiveProtocol.activityEndFrame())
+        try await transport.send(dialect.activityEndFrame())
         turnsEnded += 1
         let seconds = bytesSinceActivityStart / PCMRing.bytesPerSecond
         let deadline = Date().addingTimeInterval(Self.turnCloseWaitSeconds)
@@ -223,7 +235,7 @@ public actor LiveTranscriptionSession {
             try? await Task.sleep(nanoseconds: 20_000_000)
         }
         Log.transcription.debug("live: rolled activity \(self.turnsEnded) after \(seconds)s, completed=\(self.turnsCompleted >= self.turnsEnded)")
-        try await transport.send(LiveProtocol.activityStartFrame())
+        if let start = dialect.activityStartFrame() { try await transport.send(start) }
         bytesSinceActivityStart = 0
     }
 
@@ -231,9 +243,9 @@ public actor LiveTranscriptionSession {
         while !closed {
             do {
                 let frame = try await transport.receive()
-                if let usage = TokenUsage.fromLiveFrame(frame) { noteUsage(usage) }
-                if LiveProtocol.isGenerationComplete(frame) { turnsCompleted += 1 }
-                let events = LiveProtocol.decodeAll(frame)
+                if let usage = dialect.reportedUsage(in: frame) { noteUsage(usage) }
+                if dialect.isGenerationComplete(frame) { turnsCompleted += 1 }
+                let events = dialect.decode(frame)
                 Log.transcription.debug("live frame: \(Self.describe(events, frame: frame), privacy: .public)")
                 for event in events {
                     switch event {
@@ -241,6 +253,10 @@ public actor LiveTranscriptionSession {
                         latestPartial = text
                         acceptedAtLastTranscript = ring.acceptedBytes
                         partialSink.yield(text)
+                    case .partialDelta(let text):
+                        latestPartial += text
+                        acceptedAtLastTranscript = ring.acceptedBytes
+                        partialSink.yield(latestPartial.trimmingCharacters(in: .whitespaces))
                     case .final(let text):
                         finals.append(text)
                         latestPartial = ""
@@ -272,6 +288,7 @@ public actor LiveTranscriptionSession {
         return events.map {
             switch $0 {
             case .partial(let t): return "partial(\(t.count))"
+            case .partialDelta(let t): return "delta(\(t.count))"
             case .final(let t): return "final(\(t.count))"
             case .goAway: return "goAway"
             case .failed(let w): return "failed(\(w))"
@@ -342,12 +359,10 @@ public actor LiveTranscriptionSession {
     /// Books this session against the caller's `UsageMeter.scope`. Estimates
     /// from bytes sent and text received when the server sent no counts.
     private func recordUsage(outputText: String) {
-        let usage = reportedUsage ?? TokenUsage.estimated(
-            audioSeconds: Double(ring.acceptedBytes) / 32_000,
-            outputCharacters: outputText.count,
-            audioTokensPerSecond: PriceBook.audioTokensPerSecond(model: setup.model)
-        )
-        UsageMeter.record(stage: .liveTranscribe, model: setup.model, usage: usage)
+        let usage = dialect.usage(reported: reportedUsage,
+                                  audioSeconds: Double(ring.acceptedBytes) / 32_000,
+                                  outputCharacters: outputText.count)
+        UsageMeter.record(stage: .liveTranscribe, model: dialect.model, usage: usage)
     }
 
     /// Ends the turn and waits for the server's last word.
@@ -386,7 +401,7 @@ public actor LiveTranscriptionSession {
             return .unusable("transcript stalled \(lag)s before the recording ended — stream is truncated")
         }
 
-        let joined = finals.joined(separator: " ")
+        let joined = finals.filter { !$0.isEmpty }.joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         Log.transcription.info("live finish: \(self.finals.count) finals for \(self.turnsEnded) turns, \(joined.count) chars over \(Int(self.ring.acceptedBytes) / PCMRing.bytesPerSecond)s")
         guard !joined.isEmpty else { return .silent }

@@ -58,7 +58,9 @@ final class DictationController {
             apiKey: { KeychainStore.loadAPIKey() },
             openRouterKey: { KeychainStore.loadOpenRouterKey() },
             vercelKey: { KeychainStore.loadVercelKey() },
-            provider: { SettingsStore().activeProvider }
+            openAIKey: { KeychainStore.loadOpenAIKey() },
+            openAIConfig: { SettingsStore().openAIConfig },
+            route: { SettingsStore().activeRoute }
         )
         let service = GeminiTranscriptionService(client: client)
         transcriptionService = service
@@ -68,10 +70,7 @@ final class DictationController {
             client: client,
             config: { SettingsStore().geminiConfig },
             summaryModel: SettingsStore().geminiConfig.cleanupModel,
-            providers: {
-                let settings = SettingsStore()
-                return ModelProvider.fallbackOrder(preferred: settings.preferredProvider, available: KeychainStore.providersWithKeys)
-            }
+            providers: { SettingsStore().meetingRoutes }
         )
         coordinator = DictationCoordinator(
             audioFactory: { [warmEngines] in warmEngines.take() },
@@ -375,7 +374,7 @@ final class DictationController {
             if !engineActive {
                 activateEngine()
             }
-        case "apiKey", "openRouterKey":
+        case "apiKey", "openRouterKey", "vercelKey", "openAIKey", "modelProvider":
             if KeychainStore.hasModelKey {
                 // Covers the "I'll add it later" onboarding path, where the
                 // engine was never started: a key arriving in Settings must
@@ -476,7 +475,7 @@ final class DictationController {
                         case .stillOffline:
                             self.showNotice("Still offline — will retry automatically when you're back", for: 4.0, sound: nil)
                         case .rateLimited(let retryIn):
-                            self.showNotice("Gemini is rate limited — retrying in \(Int(retryIn.rounded()))s", for: 4.0, sound: nil)
+                            self.showNotice("\(SettingsStore().activeRoute.provider.displayName) is rate limited — retrying in \(Int(retryIn.rounded()))s", for: 4.0, sound: nil)
                         case .busy:
                             self.showNotice("Already retrying your queued dictations…", for: 2.5, sound: nil)
                         case .failed:
@@ -976,9 +975,15 @@ final class DictationController {
 
     // MARK: - Copy
 
+    /// The service the active route sends to: the provider, or the gateway.
+    private static var providerName: String {
+        let route = SettingsStore().activeRoute
+        return route.gateway == .direct ? route.provider.displayName : route.gateway.displayName(for: route.provider)
+    }
+
     private static func copy(for failure: DictationFailure) -> String {
         switch failure {
-        case .network: return "Couldn't reach Gemini — saved to History"
+        case .network: return "Couldn't reach \(providerName) — saved to History"
         case .auth:
             return !KeychainStore.hasModelKey
                 ? "Add your API key in Settings — recording saved to History"
@@ -987,10 +992,10 @@ final class DictationController {
             return SettingsStore().transcribeModelOverride != nil
                 ? "That model isn't available to your key — check Settings → Advanced. Saved to History"
                 : "Your key can't use the transcription model yet — recording saved to History"
-        case .badRequest: return "Gemini rejected the request — saved to History"
+        case .badRequest: return "\(providerName) rejected the request — saved to History"
         case .rateLimited: return "Rate limited — History will retry it shortly"
         case .noMicrophone: return "No microphone found — connect one to dictate"
-        case .quotaExhausted: return "Daily quota reached for your key — check Google AI Studio. Saved to History"
+        case .quotaExhausted: return "Daily quota reached for your \(providerName) key. Saved to History"
         case .timeout: return "Timed out — saved to History"
         case .validation: return "Couldn't transcribe — saved to History"
         case .safetyBlocked: return "The API declined this one — saved to History"

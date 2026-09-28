@@ -30,6 +30,7 @@ public enum KeychainStore {
         case tinyFish = "tinyfish-api-key"
         case openRouter = "openrouter-api-key"
         case vercel = "vercel-ai-gateway-key"
+        case openAI = "openai-api-key"
 
         var label: String {
             switch self {
@@ -37,6 +38,7 @@ public enum KeychainStore {
             case .tinyFish: return "VoiceiQ — TinyFish API key"
             case .openRouter: return "VoiceiQ — OpenRouter API key"
             case .vercel: return "VoiceiQ — Vercel AI Gateway key"
+            case .openAI: return "VoiceiQ — OpenAI API key"
             }
         }
 
@@ -47,6 +49,7 @@ public enum KeychainStore {
             case .tinyFish: return "tinyFishKey"
             case .openRouter: return "openRouterKey"
             case .vercel: return "vercelKey"
+            case .openAI: return "openAIKey"
             }
         }
     }
@@ -111,19 +114,38 @@ public enum KeychainStore {
     @discardableResult
     public static func deleteVercelKey(notify: Bool = false) -> Bool { delete(.vercel, notify: notify) }
 
-    /// The providers a key is stored for; `ModelProvider.resolve` picks among them.
-    public static var providersWithKeys: Set<ModelProvider> {
-        var set = Set<ModelProvider>()
-        if loadAPIKey() != nil { set.insert(.gemini) }
+    // MARK: - OpenAI
+
+    public static func loadOpenAIKey() -> String? { load(.openAI, service: service) }
+
+    @discardableResult
+    public static func saveOpenAIKey(_ key: String) -> Bool { save(key, for: .openAI) }
+
+    @discardableResult
+    public static func deleteOpenAIKey(notify: Bool = false) -> Bool { delete(.openAI, notify: notify) }
+
+    /// Whether the provider's own key is stored.
+    public static func hasDirectKey(for provider: ModelProvider) -> Bool {
+        switch provider {
+        case .gemini: return loadAPIKey() != nil
+        case .openAI: return loadOpenAIKey() != nil
+        }
+    }
+
+    /// The gateways that can reach `provider` right now. A gateway key serves
+    /// both providers; the direct route needs the provider's own key.
+    public static func gatewaysWithKeys(for provider: ModelProvider) -> Set<ModelGateway> {
+        var set = Set<ModelGateway>()
+        if hasDirectKey(for: provider) { set.insert(.direct) }
         if loadOpenRouterKey() != nil { set.insert(.openRouter) }
         if loadVercelKey() != nil { set.insert(.vercel) }
         return set
     }
 
-    /// Any provider key. This is what "the app can transcribe" means now;
-    /// `loadAPIKey() != nil` alone would tell a gateway-only user to add a
-    /// Gemini key they do not need.
-    public static var hasModelKey: Bool { !providersWithKeys.isEmpty }
+    /// Whether the selected provider can be reached at all. This is what "the
+    /// app can transcribe" means; a Gemini key alone does not let an OpenAI
+    /// selection transcribe.
+    public static var hasModelKey: Bool { !gatewaysWithKeys(for: SettingsStore().preferredProvider).isEmpty }
 
     // MARK: - Generic
 

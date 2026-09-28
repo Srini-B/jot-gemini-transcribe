@@ -29,13 +29,38 @@ public final class WebSocketTransport: LiveTransport, @unchecked Sendable {
     public static let endpoint =
         "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
 
-    private let apiKey: @Sendable () -> String
+    /// OpenAI's realtime transcription session. `intent=transcription` opens a
+    /// transcription-only session (probed 2026-09-28).
+    public static let openAIEndpoint = "wss://api.openai.com/v1/realtime?intent=transcription"
+
+    private let makeRequest: @Sendable () -> URLRequest
+    /// Text frames for APIs that read JSON only from text messages.
+    private let sendsText: Bool
     private let session: URLSession
     private var task: URLSessionWebSocketTask?
     private let lock = NSLock()
 
-    public init(apiKey: @escaping @Sendable () -> String) {
-        self.apiKey = apiKey
+    /// Gemini's Live API.
+    public convenience init(apiKey: @escaping @Sendable () -> String) {
+        self.init(sendsText: false) {
+            var request = URLRequest(url: URL(string: Self.endpoint)!)
+            request.setValue(apiKey(), forHTTPHeaderField: "x-goog-api-key")
+            return request
+        }
+    }
+
+    /// OpenAI's realtime transcription session.
+    public static func openAI(apiKey: @escaping @Sendable () -> String) -> WebSocketTransport {
+        WebSocketTransport(sendsText: true) {
+            var request = URLRequest(url: URL(string: openAIEndpoint)!)
+            request.setValue("Bearer \(apiKey())", forHTTPHeaderField: "Authorization")
+            return request
+        }
+    }
+
+    public init(sendsText: Bool, request: @escaping @Sendable () -> URLRequest) {
+        self.makeRequest = request
+        self.sendsText = sendsText
         let config = URLSessionConfiguration.ephemeral
         // Fail fast rather than parking. `waitsForConnectivity` would leave an
         // offline dictation holding an unresolved connection for its whole
@@ -47,9 +72,7 @@ public final class WebSocketTransport: LiveTransport, @unchecked Sendable {
     }
 
     public func connect() async throws {
-        var request = URLRequest(url: URL(string: Self.endpoint)!)
-        request.setValue(apiKey(), forHTTPHeaderField: "x-goog-api-key")
-        let task = session.webSocketTask(with: request)
+        let task = session.webSocketTask(with: makeRequest())
         lock.lock(); self.task = task; lock.unlock()
         task.resume()
     }
@@ -57,7 +80,11 @@ public final class WebSocketTransport: LiveTransport, @unchecked Sendable {
     public func send(_ data: Data) async throws {
         lock.lock(); let task = self.task; lock.unlock()
         guard let task else { throw LiveError.setupTimedOut }
-        try await task.send(.data(data))
+        if sendsText, let text = String(data: data, encoding: .utf8) {
+            try await task.send(.string(text))
+        } else {
+            try await task.send(.data(data))
+        }
     }
 
     public func receive() async throws -> Data {

@@ -56,7 +56,7 @@ public extension GeminiClient {
     /// those ids. MEASURED 2026-09-27: its timestamps drift too far for the
     /// overlap vote the native path uses, which split one person into two ids.
     func transcribeSpeakers(audio: Data, references: [(id: String, audio: Data)], model: String,
-                            deadline: TimeInterval, via: ModelProvider) async throws -> [DiarizedWord] {
+                            deadline: TimeInterval, via: ModelEndpoint) async throws -> [DiarizedWord] {
         var parts: [ChatPart] = []
         if references.isEmpty {
             parts.append(.text("Reference clips: none yet."))
@@ -73,10 +73,14 @@ public extension GeminiClient {
 
     /// Notes JSON for a prompt built by `MeetingNotesPrompt`.
     func meetingNotesJSON(prompt: String, model: String, endpoint: URL, deadline: TimeInterval,
-                          via: ModelProvider) async throws -> String {
-        if via != .gemini {
-            return try await gatewayChat(prompt: prompt, model: model, deadline: deadline,
-                                         stage: .meetingSummary, jsonObject: true, via: via)
+                          via route: ModelRoute) async throws -> String {
+        switch (route.provider, route.gateway) {
+        case (.gemini, .direct): break
+        case (.openAI, .direct):
+            return try await openAIChat(prompt: prompt, deadline: deadline, stage: .meetingSummary, jsonObject: true)
+        default:
+            return try await gatewayChat(prompt: prompt, model: writingModelID(model, route: route), provider: route.provider,
+                                         deadline: deadline, stage: .meetingSummary, jsonObject: true, via: route.endpoint)
         }
         let body: [String: Any] = [
             "contents": [["role": "user", "parts": [["text": prompt]]]],

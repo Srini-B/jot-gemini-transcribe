@@ -89,6 +89,22 @@ public struct TokenUsage: Equatable, Sendable, Codable {
         return usage
     }
 
+    /// OpenAI's transcription models bill per minute and report
+    /// `usage: {type: "duration", seconds}` (the realtime session's completion
+    /// event carries the same block). There are no tokens to count, so the
+    /// charge is the list price for those seconds.
+    public static func fromOpenAIDuration(_ data: Data, model: String) -> TokenUsage? {
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let meta = root["usage"] as? [String: Any], meta["type"] as? String == "duration",
+              let seconds = (meta["seconds"] as? NSNumber)?.doubleValue else { return nil }
+        return fromAudioMinutes(seconds: seconds, model: model)
+    }
+
+    public static func fromAudioMinutes(seconds: Double, model: String) -> TokenUsage? {
+        guard let perMinute = PriceBook.perMinutePrice(for: model) else { return nil }
+        return TokenUsage(reportedCostUSD: seconds / 60 * perMinute)
+    }
+
     /// Vercel's `/v4/ai/transcription-model` response has no `usage` block;
     /// the counts sit in `providerMetadata.google.usage` and the USD charge
     /// in `providerMetadata.gateway.cost` (probed 2026-09-27).

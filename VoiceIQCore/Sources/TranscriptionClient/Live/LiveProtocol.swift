@@ -24,6 +24,9 @@ public enum LiveEvent: Equatable, Sendable {
     /// A speculative hypothesis, replaced by later ones. **Display only.**
     /// This must never reach the cursor, History, or `rawTranscript`.
     case partial(String)
+    /// More text for the open turn's hypothesis (OpenAI sends deltas, not the
+    /// whole hypothesis). Display only, like `partial`.
+    case partialDelta(String)
     /// Authoritative text for a finished speech segment. In SMART mode this is
     /// already cleaned and formatted.
     case final(String)
@@ -45,6 +48,49 @@ public struct LiveSetup: Equatable, Sendable {
         self.model = model
         self.smart = smart
         self.customVocabulary = customVocabulary
+    }
+}
+
+/// The wire format of one streaming transcription API. `LiveTranscriptionSession`
+/// owns the ring, the send order, turn rollover and the finish rules; a dialect
+/// only builds and reads frames, so every one of them is testable without a
+/// socket.
+public protocol LiveDialect: Sendable {
+    /// For usage records.
+    var model: String { get }
+    func setupFrame() -> Data
+    /// `pcm` is the app's 16 kHz mono Int16; a dialect resamples if its API
+    /// needs another rate.
+    func audioFrame(_ pcm: Data) -> Data
+    /// Nil when the API opens the next turn by itself.
+    func activityStartFrame() -> Data?
+    func activityEndFrame() -> Data
+    func decode(_ frame: Data) -> [LiveEvent]
+    /// True for the frame that closes a turn the client ended.
+    func isGenerationComplete(_ frame: Data) -> Bool
+    /// Usage the server reported in this frame, if any.
+    func reportedUsage(in frame: Data) -> TokenUsage?
+    /// What the session cost, from the largest reported usage or, without
+    /// one, the audio sent and text received.
+    func usage(reported: TokenUsage?, audioSeconds: Double, outputCharacters: Int) -> TokenUsage
+}
+
+/// Gemini's Live API, through the `LiveProtocol` frames below.
+public struct GeminiLiveDialect: LiveDialect {
+    public let setup: LiveSetup
+    public init(setup: LiveSetup) { self.setup = setup }
+
+    public var model: String { setup.model }
+    public func setupFrame() -> Data { LiveProtocol.setupFrame(setup) }
+    public func audioFrame(_ pcm: Data) -> Data { LiveProtocol.audioFrame(pcm) }
+    public func activityStartFrame() -> Data? { LiveProtocol.activityStartFrame() }
+    public func activityEndFrame() -> Data { LiveProtocol.activityEndFrame() }
+    public func decode(_ frame: Data) -> [LiveEvent] { LiveProtocol.decodeAll(frame) }
+    public func isGenerationComplete(_ frame: Data) -> Bool { LiveProtocol.isGenerationComplete(frame) }
+    public func reportedUsage(in frame: Data) -> TokenUsage? { TokenUsage.fromLiveFrame(frame) }
+    public func usage(reported: TokenUsage?, audioSeconds: Double, outputCharacters: Int) -> TokenUsage {
+        reported ?? TokenUsage.estimated(audioSeconds: audioSeconds, outputCharacters: outputCharacters,
+                                         audioTokensPerSecond: PriceBook.audioTokensPerSecond(model: model))
     }
 }
 

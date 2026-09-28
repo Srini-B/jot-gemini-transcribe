@@ -404,7 +404,7 @@ struct UsageView: View {
                 }
             } header: { SettingsSectionHeader("By activity") }
             Section {
-                Text(SettingsStore().activeProvider.pricingNote)
+                Text(SettingsStore().activeRoute.pricingNote)
                     .font(Theme.Fonts.footnote()).foregroundStyle(Theme.Colors.muted)
             }
         }

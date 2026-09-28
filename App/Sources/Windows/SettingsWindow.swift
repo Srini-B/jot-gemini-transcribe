@@ -258,6 +258,21 @@ private struct SidebarRow: View {
 struct PrivacyPane: View {
     let onDeleteAllHistory: () -> Void
     private let settings = SettingsStore()
+    @State private var route = SettingsStore().activeRoute
+
+    private var owner: String { route.provider == .gemini ? "Google" : "OpenAI" }
+
+    /// Where each request goes on the active route: the provider itself, or
+    /// a gateway (with the gateway's key) that forwards it to the provider.
+    private var audioDestination: String {
+        route.gateway == .direct
+            ? "Sent to \(owner) with your key"
+            : "Sent to \(route.endpoint.hostName) with your key, then to \(owner)"
+    }
+
+    private var recipients: String {
+        route.gateway == .direct ? owner : "\(route.endpoint.hostName) and \(owner)"
+    }
     @State private var retentionDays = SettingsStore().audioRetentionDays
     @State private var confirmingDelete = false
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -306,9 +321,9 @@ struct PrivacyPane: View {
             }
 
             Section {
-                LabeledContent("Audio") { Text("Sent to the Gemini API with your key") }
+                LabeledContent("Audio") { Text(audioDestination) }
                 LabeledContent("Transcript text") { Text("Only if writing rules are on — otherwise it never leaves") }
-                LabeledContent("Meeting audio") { Text("Only if call recording is on; notes are made by the Gemini API") }
+                LabeledContent("Meeting audio") { Text("Only if call recording is on; notes are made by \(route.provider.displayName)") }
                 LabeledContent("Dictionary terms") { Text("Sent with the audio, so names are spelled right as you speak") }
                 LabeledContent("Screen snapshots") { Text("Only if screen context is on; sent with the audio, never stored") }
                 LabeledContent("Ask Anything search") { Text("Only if a TinyFish key is saved; the search query goes to TinyFish") }
@@ -316,7 +331,7 @@ struct PrivacyPane: View {
             } header: {
                 Text("What leaves your Mac")
             } footer: {
-                Text("No middleman server, no account, no analytics, no keystroke logging. Google, plus TinyFish only when you add its key.")
+                Text("No middleman server, no account, no analytics, no keystroke logging. Only \(recipients), plus TinyFish when you add its key.")
             }
 
             Section {
@@ -334,7 +349,10 @@ struct PrivacyPane: View {
         // Login-item state lives in macOS, not in our defaults, so it can change
         // with the app running — System Settings › General › Login Items turns it
         // off without telling us. Re-reading on appear covers reopening the window.
-        .onAppear { launchAtLogin = SMAppService.mainApp.status == .enabled }
+        .onAppear {
+            launchAtLogin = SMAppService.mainApp.status == .enabled
+            route = settings.activeRoute
+        }
     }
 }
 
@@ -363,11 +381,37 @@ struct AdvancedPane: View {
         return !trimmed.isEmpty && SettingsStore.usableEndpointURL(trimmed) == nil
     }
     @State private var legacyEndpoint = SettingsStore().usesLegacyTranscribeEndpoint
+    @State private var provider = SettingsStore().preferredProvider
 
     var body: some View {
         Form {
-            ProviderSection()
+            ProviderSection(provider: $provider)
 
+            if provider == .gemini {
+                geminiKeySection
+            } else {
+                GatewayKeySection(.openAI)
+                OpenAIModelsSection()
+            }
+
+            TinyFishKeySection()
+
+            if provider == .gemini {
+                geminiModelSections
+            }
+
+            ExperimentalGatewaysSection(provider: provider)
+        }
+        // Key saved elsewhere (onboarding, dev-file migration) while this pane is
+        // open: refresh the badge — but never clobber in-flight feedback.
+        .onReceive(NotificationCenter.default.publisher(for: .gtSettingDidChange).receive(on: RunLoop.main)) { note in
+            if note.object as? String == "apiKey", keyStatus == .missing || keyStatus == .stored {
+                keyStatus = KeychainStore.loadAPIKey() == nil ? .missing : .stored
+            }
+        }
+    }
+
+    private var geminiKeySection: some View {
             Section {
                 HStack {
                     LabeledContent("API key") {
@@ -408,13 +452,10 @@ struct AdvancedPane: View {
             } footer: {
                 Text("Stored in your Mac's Keychain and only ever sent to Google.")
             }
+    }
 
-            GatewayKeySection(.openRouter)
-
-            GatewayKeySection(.vercel)
-
-            TinyFishKeySection()
-
+    @ViewBuilder
+    private var geminiModelSections: some View {
             Section {
                 LabeledContent("Endpoint") {
                     TextField("", text: $endpoint, prompt: Text(Self.defaultConfig.endpoint.absoluteString))
@@ -462,7 +503,7 @@ struct AdvancedPane: View {
                     settings.setCleanupModelOverride(trimmed.isEmpty ? nil : trimmed)
                 }
             } header: {
-                Text("Model overrides")
+                Text("Gemini models")
             } footer: {
                 Text("Preview models get renamed — override here if a model 404s. Leave blank for defaults — every edit saves as you type.")
             }
@@ -475,14 +516,6 @@ struct AdvancedPane: View {
             } footer: {
                 Text("VoiceiQ transcribes through Gemini's newer interactions endpoint, which is what makes Smart transcription possible. If it starts misbehaving, this switches back to the older one — transcription still works, but it will be word-for-word and Smart transcription will have no effect.")
             }
-        }
-        // Key saved elsewhere (onboarding, dev-file migration) while this pane is
-        // open: refresh the badge — but never clobber in-flight feedback.
-        .onReceive(NotificationCenter.default.publisher(for: .gtSettingDidChange).receive(on: RunLoop.main)) { note in
-            if note.object as? String == "apiKey", keyStatus == .missing || keyStatus == .stored {
-                keyStatus = KeychainStore.loadAPIKey() == nil ? .missing : .stored
-            }
-        }
     }
 
     @ViewBuilder

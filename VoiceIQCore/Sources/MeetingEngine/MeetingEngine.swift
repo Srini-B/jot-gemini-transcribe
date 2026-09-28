@@ -32,8 +32,8 @@ import Foundation
     private let config: () -> GeminiConfig
     private let transcribeModel: String?
     private let summaryModel: String
-    /// Providers to try in order; see `ModelProvider.fallbackOrder`.
-    private let providers: @Sendable () -> [ModelProvider]
+    /// Routes to try in order; see `ModelRoute.meetingOrder`.
+    private let providers: @Sendable () -> [ModelRoute]
     private lazy var detector = CallDetector()
     private var mic: MicTap?, system: SystemAudioTap?
     private var currentFolder: URL?, currentMeta: MeetingMeta?
@@ -42,7 +42,7 @@ import Foundation
 
     public init(client: GeminiClient, store: MeetingStore = MeetingStore(), config: @escaping () -> GeminiConfig,
                 transcribeModel: String? = nil, summaryModel: String = "gemini-3.8-flash",
-                providers: @escaping @Sendable () -> [ModelProvider] = { [.gemini] }) {
+                providers: @escaping @Sendable () -> [ModelRoute] = { [ModelRoute(provider: .gemini, gateway: .direct)] }) {
         self.client = client; self.store = store; self.config = config
         self.transcribeModel = transcribeModel; self.summaryModel = summaryModel; self.providers = providers
         detector.onChange = { [weak self] source in self?.detected(source) }
@@ -134,9 +134,10 @@ import Foundation
         Task { await UsageMeter.$scope.withValue(UsageScope(activity: .meeting, sessionID: id.uuid.uuidString)) {
             do {
                 meta.status = .summarizing; try store.save(meta: meta)
+                guard !providers().isEmpty else { throw MeetingFailure.noRoute }
                 let notes = try await writeNotes(transcript: transcript, meta: meta)
                 try finish(id: id, meta: &meta, transcript: transcript, notes: notes)
-            } catch { meta.status = .failed(String(describing: error)); try? store.save(meta: meta); fail(id, error) }
+            } catch { saveFailure(id: id, meta: &meta, error: error) }
         } }
     }
 
@@ -151,6 +152,7 @@ import Foundation
                 try finish(id: id, meta: &meta, transcript: [], notes: Self.emptyNotes(reason: "No speech was recorded."))
                 return
             }
+            guard !providers().isEmpty else { throw MeetingFailure.noRoute }
             meta.status = .transcribing; try store.save(meta: meta)
             let transcriber = MeetingTranscriber(client: client,
                                                  models: .init(transcribe: transcribeModel ?? cfg.transcribeModel, flash: summaryModel),
@@ -166,7 +168,18 @@ import Foundation
             meta.status = .summarizing; try store.save(meta: meta)
             let notes = try await writeNotes(transcript: transcript, meta: meta)
             try finish(id: id, meta: &meta, transcript: transcript, notes: notes)
-        } catch { meta.status = .failed(String(describing: error)); try? store.save(meta: meta); fail(id, error) }
+        } catch { saveFailure(id: id, meta: &meta, error: error) }
+    }
+
+    /// The recording stays; the meeting is marked failed with a reason the
+    /// Meetings list shows, and Retry runs it again with the keys stored then.
+    private func saveFailure(id: MeetingID, meta: inout MeetingMeta, error: Error) {
+        let reason = MeetingFailure.reason(for: error, routes: providers())
+        Log.meeting.error("meeting \(id.uuid.uuidString, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+        meta.status = .failed(reason); try? store.save(meta: meta)
+        phase = .failed(id, reason); currentFolder = nil; currentMeta = nil
+        onNotice?(error as? MeetingFailure == .noRoute ? "Meeting saved without a transcript — add a key, then Retry in Meetings"
+                                                       : "Meeting transcript failed — see Meetings")
     }
 
     private func writeNotes(transcript: [TranscriptSegment], meta: MeetingMeta) async throws -> MeetingNotes {
@@ -181,7 +194,7 @@ import Foundation
                                                              deadline: 300, via: via)
                 return try MeetingNotesPrompt.parse(text)
             } catch {
-                Log.meeting.error("notes via \(via.rawValue, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+                Log.meeting.error("notes via \(via.label, privacy: .public) failed: \(String(describing: error), privacy: .public)")
                 lastError = error
             }
         }
@@ -219,4 +232,44 @@ import Foundation
     }
     private func fail(_ id: MeetingID, _ error: Error) { phase = .failed(id, String(describing: error)); onNotice?("Meeting recording failed") }
     public static func name(_ source: CallSource) -> String { switch source { case let .app(_, name): return name; case let .browser(_, host): return host } }
+}
+
+/// Why a meeting has no transcript or notes, in words the Meetings list can
+/// show. The raw error goes to the log.
+public enum MeetingFailure: Error, Equatable {
+    /// No stored key reaches a model that can transcribe a meeting.
+    case noRoute
+
+    static let fixHint = "The recording is saved. Press Retry after fixing this."
+
+    static func reason(for error: Error, routes: [ModelRoute]) -> String {
+        let tried = routes.map(\.displayName).joined(separator: ", ")
+        switch error {
+        case MeetingFailure.noRoute:
+            return "No key can transcribe meetings. Add a Gemini, OpenAI, OpenRouter or Vercel AI Gateway key in Settings → Advanced. The recording is saved; press Retry once a key is added."
+        case let error as TranscriptionError:
+            switch error {
+            case .auth:
+                return "The API key was rejected (\(tried)). Check it in Settings → Advanced. \(fixHint)"
+            case .rateLimitedDaily:
+                return "The daily quota is used up (\(tried)). \(fixHint)"
+            case .rateLimitedTransient:
+                return "Rate limited for too long (\(tried)). Try again in a few minutes. \(fixHint)"
+            case .network("gateway_insufficient_credits"):
+                return "The gateway account is out of credit (\(tried)). \(fixHint)"
+            case .modelUnavailable(let model, _):
+                return "Your key can't use \(model) (\(tried)). \(fixHint)"
+            case .offline:
+                return "You were offline when the meeting was transcribed. \(fixHint)"
+            case .timeout, .network:
+                return "Couldn't reach \(tried.isEmpty ? "the provider" : tried). \(fixHint)"
+            case .safetyBlocked:
+                return "The provider declined to transcribe this meeting (\(tried)). \(fixHint)"
+            case .badRequest, .emptyTranscript:
+                return "Transcription failed (\(tried)). \(fixHint)"
+            }
+        default:
+            return "Transcription failed: \(error.localizedDescription). \(fixHint)"
+        }
+    }
 }

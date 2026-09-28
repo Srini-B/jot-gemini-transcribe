@@ -15,10 +15,10 @@
 import SwiftUI
 import VoiceIQCore
 
-/// Cost Analysis: what the Gemini calls behind each action cost, at the
-/// paid-tier prices on the pricing page. Period totals up top, then a
-/// breakdown by action and by model for the chosen period, then the most
-/// recent calls.
+/// Cost Analysis: what the model calls behind each action cost, for one
+/// provider at a time. It opens on the provider selected in Settings; the
+/// toggle shows the other one's calls. Period totals up top, then a breakdown
+/// by action and by model for the chosen period, then the most recent calls.
 struct CostPane: View {
     let store: UsageStore
 
@@ -46,6 +46,7 @@ struct CostPane: View {
     }
 
     @State private var period: Period = .month
+    @State private var provider = SettingsStore().preferredProvider
     /// Simple view: period totals and cost per action. Detailed adds tokens,
     /// the per-model table, and the recent-call list.
     @AppStorage("costPaneDetailed") private var detailed = false
@@ -59,7 +60,16 @@ struct CostPane: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: VoiceIQUI.Spacing.l) {
-                summary
+                HStack(alignment: .top) {
+                    summary
+                    Picker("Provider", selection: $provider) {
+                        ForEach(ModelProvider.allCases) { Text($0.displayName).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
+                    .onChange(of: provider) { _, _ in reload() }
+                }
                 HStack(spacing: VoiceIQUI.Spacing.m) {
                     Picker("Period", selection: $period) {
                         ForEach(Period.allCases) { Text($0.title).tag($0) }
@@ -92,10 +102,11 @@ struct CostPane: View {
 
     // MARK: - Sections
 
-    /// Names the active provider's price source. Records from the other
-    /// provider still count; the footer says where the numbers now come from.
+    /// Names the shown provider's price source: the active gateway's for the
+    /// selected provider, the provider's own pricing page for the other.
     private var footer: String {
-        let note = SettingsStore().activeProvider.pricingNote
+        let active = SettingsStore().activeRoute
+        let note = ModelRoute(provider: provider, gateway: provider == active.provider ? active.gateway : .direct).pricingNote
         return detailed ? note + " ≈ marks estimated tokens or an unpriced model." : note
     }
 
@@ -190,15 +201,15 @@ struct CostPane: View {
 
     private func reload() {
         var next: [Period: UsageStore.Total] = [:]
-        for p in Period.allCases { next[p] = store.total(since: p.start) }
+        for p in Period.allCases { next[p] = store.total(since: p.start, provider: provider) }
         totals = next
-        recent = store.recent(limit: 30)
+        recent = store.recent(limit: 30, provider: provider)
         reloadBreakdown()
     }
 
     private func reloadBreakdown() {
-        byActivity = store.totalsByActivity(since: period.start)
-        byModel = store.totalsByModel(since: period.start)
+        byActivity = store.totalsByActivity(since: period.start, provider: provider)
+        byModel = store.totalsByModel(since: period.start, provider: provider)
     }
 
     // MARK: - Formatting

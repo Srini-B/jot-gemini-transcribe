@@ -6,7 +6,7 @@
 
 **Press a key. Speak. It types.**
 
-Smart dictation, Ask Anything, Translate, and meeting notes for macOS and iPhone, all on Gemini.
+Smart dictation, Ask Anything, Translate, and meeting notes for macOS and iPhone, on Gemini or OpenAI with your own key.
 
 </div>
 
@@ -50,9 +50,9 @@ Every failure is retryable from History. Release the key mid-word and it keeps
 listening until you actually stop.
 
 **It is private by architecture.** Your voice goes from your Mac straight to the
-Gemini API with *your* key. No middleman server, no account, no analytics, no
-keystroke logging — one network host, and you can read every line of the code
-that talks to it. Screen context (a few downscaled screenshots sent with each
+provider you choose, Gemini or OpenAI, with *your* key. No middleman server, no
+account, no analytics, no keystroke logging — one network host per dictation,
+and you can read every line of the code that talks to it. Screen context (a few downscaled screenshots sent with each
 dictation so on-screen names and paths are spelled right) can be switched off
 in Settings → Dictation. See [PRIVACY.md](docs/PRIVACY.md).
 
@@ -75,8 +75,8 @@ API key in Settings → Advanced and questions that need current information
 (news, prices, releases) are answered from a live web search, with sources
 linked. Press ⌃⌥T to dictate in any language and have it typed in
 the target language you pick from the searchable list in Settings → Dictation
-(the 99 languages Gemini Live supports); if Gemini cannot translate it, the pill
-says so and nothing is inserted. ⌘⇧V pastes the last transcript or answer
+(99 languages); if the model cannot translate it, the pill says so and nothing
+is inserted. ⌘⇧V pastes the last transcript or answer
 again. All three shortcuts are editable and can require either, left, or right
 modifier keys. Plain dictation is language-agnostic: speak in any language, or
 mix them mid-sentence, and the text stays in the language you used.
@@ -87,15 +87,19 @@ leave it on system default and get a one-time notice when a new one appears.
 
 **Meeting notes.** When Zoom, Teams, FaceTime, WhatsApp, Slack, Discord,
 Webex, or a Meet/Teams/Zoom tab in any browser starts a call, the pill offers to
-record it. Accept, or press ⌥M at any time, and VoiceiQ records both sides with
-a live transcript in the pill. Press ⌥M again (or the pill's stop button) to
-finish: you get a speaker-labelled transcript plus a summary, decisions, and
-owned action items under Settings → Meetings. Recording never stops on its own.
+record it. Accept, or press ⌥M at any time, and VoiceiQ records both sides.
+Press ⌥M again (or the pill's stop button) to finish: you get a
+speaker-labelled transcript plus a summary, decisions, and owned action items
+under Settings → Meetings. Recording never stops on its own. Meetings need a
+model that labels speakers, so with OpenAI selected through a gateway they use
+your OpenAI key, or Gemini when there is none. With no usable key the recording
+is kept and marked failed with the reason, ready to Retry once a key is added.
 
-**Cost Analysis.** Every Gemini call is metered from the token counts the API
-returns and priced at the paid-tier rates on the pricing page. Settings → Cost
-Analysis shows today, this week, this month, and all time, broken down by action
-and by model; each dictation in History shows what it cost. Details in
+**Cost Analysis.** Every model call is metered: tokens or audio seconds from the
+API response, priced at the provider's list prices, or the charge a gateway
+reports. Settings → Cost Analysis shows today, this week, this month, and all
+time, broken down by action and by model, for Gemini or OpenAI (a toggle
+switches between them); each dictation in History shows what it cost. Details in
 [docs/COST_TRACKING.md](docs/COST_TRACKING.md).
 
 ## Setup
@@ -104,13 +108,15 @@ Build the app (see Development below), move `VoiceiQ.app` into
 **Applications**, and launch it. Setup takes about two minutes and the app walks
 you through it:
 
-1. **Paste a Gemini API key** — get one at
-   [Google AI Studio](https://aistudio.google.com/apikey). It is stored in your
-   macOS Keychain and only ever sent to Google. If your AI Studio key keeps
-   hitting rate limits, add an [OpenRouter](https://openrouter.ai/settings/keys)
-   or [Vercel AI Gateway](https://vercel.com/ai-gateway) key in Settings →
-   Advanced instead; both run the same Gemini models, and with more than one
-   key stored you pick the provider there.
+1. **Pick a provider and paste its key** — Gemini (get a key at
+   [Google AI Studio](https://aistudio.google.com/apikey)) or OpenAI (get one at
+   [platform.openai.com](https://platform.openai.com/api-keys)). The key is
+   stored in your macOS Keychain and only ever sent to that provider. You can
+   switch provider later in Settings → Advanced. If a key keeps hitting rate
+   limits, the Experimental section there takes an
+   [OpenRouter](https://openrouter.ai/settings/keys) or
+   [Vercel AI Gateway](https://vercel.com/ai-gateway) key, which runs either
+   provider's models; a gateway key entered once serves both.
 2. **Allow the microphone** — say hello and it advances by itself.
 3. **Allow Accessibility** — macOS requires this for any app that types into
    another app.
@@ -118,25 +124,34 @@ you through it:
    ride along with each dictation so on-screen names and paths are spelled right.
 5. **Press the dictation key and talk.**
 
-**Cost:** you pay Google for what you dictate at
-[Gemini API pricing](https://ai.google.dev/pricing); a free tier exists and a
-typical dictation is a few seconds of audio. VoiceiQ itself is free and has no
-account.
+**Cost:** you pay the provider for what you dictate, at
+[Gemini API pricing](https://ai.google.dev/pricing) (a free tier exists) or
+[OpenAI API pricing](https://developers.openai.com/api/docs/pricing); a typical
+dictation is a few seconds of audio. VoiceiQ itself is free and has no account.
 
-**Models:** VoiceiQ transcribes with `gemini-3.5-transcribe-live` while you speak
-(the live socket) and `gemini-3.5-transcribe` for the batch path, then applies
-writing rules and writes meeting notes with `gemini-3.8-flash`. Your key needs
-access to them; setup tells you up front if it does not, instead of failing on
-your first dictation. Advanced settings can pin other model names.
+**Models:**
+
+| | Gemini | OpenAI |
+| --- | --- | --- |
+| Transcription | `gemini-3.5-transcribe` | `gpt-transcribe` |
+| Live transcription (opt-in) | `gemini-3.5-transcribe-live` | `gpt-live-transcribe` |
+| Writing rules, Ask Anything, Translate, meeting notes | `gemini-3.8-flash` | `gpt-6-luna` |
+| Meeting speakers | `gemini-3.5-transcribe` | `gpt-4o-transcribe-diarize` |
+
+With Gemini, a dictation under ten minutes is one call to `gemini-3.8-flash`
+with the audio attached; OpenAI's writing model takes no audio, so every
+dictation there is a transcription followed by a writing-rules pass. Live
+transcription needs the provider's own key; it does not run through a gateway.
+Settings → Advanced can pin other model names for either provider.
 
 ## How it works
 
 ```
-key ─▶ capture (CAF on disk from t=0) ─▶ key ─▶ FLAC ─▶ Gemini transcribe
+key ─▶ capture (CAF on disk from t=0) ─▶ key ─▶ FLAC ─▶ transcribe (Gemini or OpenAI)
                     │  (live socket streams text meanwhile)     │  (chunked past 10 min)
                     ▼                                           ▼
    cursor ◀─ insert (AX → paste → clipboard) ◀─ validate ◀─ writing-rules pass
-      │                                                  (gemini-3.8-flash, with screenshots)
+      │                                           (gemini-3.8-flash or gpt-6-luna, with screenshots)
       ▼                                                         │
    learn from edits ─▶ Dictionary                  History (SQLite) + usage ledger
 ```
@@ -173,7 +188,8 @@ lands where you were typing.
   and the session shows in the Dynamic Island until you end it.
 - **Same settings as the Mac.** Your own Gemini, OpenRouter or Vercel key
   (stored in the iOS Keychain), dictionary, writing rules, Ask Anything,
-  Translate, History and Cost.
+  Translate, History and Cost. The iPhone app runs Gemini models only for
+  now; OpenAI is on the Mac.
 - **Meetings are a recorder.** Record in the app, stop, and the notes are
   written with the same pipeline as on the Mac. The iPhone records the room
   mic only, because iOS does not let an app capture call audio.
@@ -215,7 +231,7 @@ iOS/            iPhone app, voice keyboard extension, Live Activity
 VoiceIQCore/        all engine logic, headless and testable
   HotkeyEngine/     CGEventTap + the pure hold/lock/cancel grammar
   AudioEngine/      crash-safe CAF capture, device changes, prewarming
-  TranscriptionClient/  Gemini calls, timeouts, retries, FLAC
+  TranscriptionClient/  Gemini, OpenAI and gateway calls, live sockets, retries, FLAC
   FormattingPipeline/   cleanup prompt, validation gate, dictionary rules
   InsertionEngine/      the AX → paste → clipboard ladder
   HistoryStore/         GRDB index, recovery, retry queue, retention

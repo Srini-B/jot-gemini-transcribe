@@ -69,7 +69,25 @@ public enum PriceBook {
             ("gemini-3-flash", ModelPrice(textIn: 0.50, audioIn: 1.00, cachedIn: 0.05, textOut: 3.00)),
             ("gemini-2.5-flash-lite", ModelPrice(textIn: 0.10, audioIn: 0.30, textOut: 0.40)),
             ("gemini-2.5-flash", ModelPrice(textIn: 0.30, audioIn: 1.00, cachedIn: 0.03, textOut: 2.50)),
+            // developers.openai.com/api/docs/pricing, Standard, copied 2026-09-28.
+            ("gpt-6-luna", ModelPrice(textIn: 0.10, cachedIn: 0.01, textOut: 0.50)),
+            ("gpt-6-sol", ModelPrice(textIn: 2.00, cachedIn: 0.20, textOut: 10.00)),
+            ("gpt-4o-transcribe-diarize", ModelPrice(textIn: 2.50, audioIn: 2.50, textOut: 10.00)),
         ]
+    }
+
+    /// OpenAI transcription models billed per audio minute, USD, same source.
+    static let perMinute: [(prefix: String, price: Double)] = [
+        ("gpt-live-transcribe", 0.017),
+        ("gpt-transcribe", 0.0045),
+        ("gpt-4o-mini-transcribe", 0.003),
+        ("gpt-4o-transcribe", 0.006),
+        ("gpt-realtime-translate", 0.034),
+    ]
+
+    public static func perMinutePrice(for model: String) -> Double? {
+        let id = model.lowercased().split(separator: "/").last.map(String.init) ?? model.lowercased()
+        return perMinute.filter { id.hasPrefix($0.prefix) }.max { $0.prefix.count < $1.prefix.count }?.price
     }
 
     /// Price for a model ID, or nil when the pricing page has no entry.

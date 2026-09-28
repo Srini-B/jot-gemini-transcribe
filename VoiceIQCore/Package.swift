@@ -35,9 +35,16 @@ let package = Package(
             name: "CVoiceIQAEC",
             path: "Vendor/WebRTCAEC/CVoiceIQAEC.xcframework"
         ),
+        // Catches Objective-C exceptions that Swift cannot (AVFAudio raises
+        // them while the input device is changing).
+        .target(
+            name: "VoiceIQObjC",
+            path: "ObjCSupport"
+        ),
         .target(
             name: "VoiceIQCore",
             dependencies: [
+                "VoiceIQObjC",
                 .product(name: "GRDB", package: "GRDB.swift"),
                 .product(name: "Sauce", package: "Sauce", condition: .when(platforms: [.macOS])),
                 // The vendored xcframework carries a macOS slice only. iOS

@@ -34,10 +34,10 @@ struct KeysView: View {
 /// optional TinyFish key, with the provider picker once two or more are saved.
 struct ModelKeysForm: View {
     @State private var saved = KeySlot.savedSlots()
-    @State private var preferred = SettingsStore().preferredProvider
+    @State private var preferred = SettingsStore().activeRoute.gateway
 
-    private var savedModelProviders: [ModelProvider] {
-        ModelProvider.allCases.filter { saved.contains(KeySlot(provider: $0)) }
+    private var savedGateways: [ModelGateway] {
+        ModelGateway.allCases.filter { saved.contains(KeySlot(gateway: $0)) }
     }
 
     var body: some View {
@@ -58,16 +58,16 @@ struct ModelKeysForm: View {
 
             VStack(alignment: .leading, spacing: Theme.Spacing.m) {
                 GroupLabel(text: "Model provider · one is enough")
-                if savedModelProviders.count > 1 {
+                if savedGateways.count > 1 {
                     Card {
-                        Text("Provider").font(Theme.Fonts.headline()).foregroundStyle(Theme.Colors.ink)
-                        Picker("Provider", selection: $preferred) {
-                            ForEach(savedModelProviders) { provider in
-                                Text(provider.shortName).tag(provider)
+                        Text("Gateway").font(Theme.Fonts.headline()).foregroundStyle(Theme.Colors.ink)
+                        Picker("Gateway", selection: $preferred) {
+                            ForEach(savedGateways) { gateway in
+                                Text(gateway.shortName).tag(gateway)
                             }
                         }
                         .pickerStyle(.segmented)
-                        .onChange(of: preferred) { _, value in SettingsStore().setPreferredProvider(value) }
+                        .onChange(of: preferred) { _, value in SettingsStore().setPreferredGateway(value) }
                     }
                 }
                 ForEach([KeySlot.gemini, .openRouter, .vercel], id: \.self) { slot in
@@ -84,14 +84,15 @@ struct ModelKeysForm: View {
 
     private func reload() {
         saved = KeySlot.savedSlots()
-        preferred = SettingsStore().activeProvider
+        preferred = SettingsStore().activeRoute.gateway
     }
 }
 
-private extension ModelProvider {
+private extension ModelGateway {
+    /// The iPhone app runs Gemini only, so the direct route is Gemini's key.
     var shortName: String {
         switch self {
-        case .gemini: return "Gemini"
+        case .direct: return "Gemini"
         case .openRouter: return "OpenRouter"
         case .vercel: return "Vercel"
         }
@@ -228,11 +229,12 @@ private struct TrailingIconLabelStyle: LabelStyle {
 
 /// A place a key can be stored, with what it is for.
 enum KeySlot: Hashable, CaseIterable {
-    case gemini, openRouter, vercel, tinyFish
+    // `openAI` is not offered on iOS yet; the macOS app ships it first.
+    case gemini, openRouter, vercel, openAI, tinyFish
 
-    init(provider: ModelProvider) {
-        switch provider {
-        case .gemini: self = .gemini
+    init(gateway: ModelGateway) {
+        switch gateway {
+        case .direct: self = .gemini
         case .openRouter: self = .openRouter
         case .vercel: self = .vercel
         }
@@ -247,6 +249,7 @@ enum KeySlot: Hashable, CaseIterable {
         case .gemini: return "Gemini"
         case .openRouter: return "OpenRouter"
         case .vercel: return "Vercel AI Gateway"
+        case .openAI: return "OpenAI"
         case .tinyFish: return "TinyFish"
         }
     }
@@ -256,6 +259,7 @@ enum KeySlot: Hashable, CaseIterable {
         case .gemini: return "sparkles"
         case .openRouter: return "arrow.triangle.branch"
         case .vercel: return "triangle.fill"
+        case .openAI: return "circle.hexagongrid"
         case .tinyFish: return "globe"
         }
     }
@@ -268,6 +272,8 @@ enum KeySlot: Hashable, CaseIterable {
             return "Runs the same Gemini models through OpenRouter, which has no per-minute tier limits. Stored in your iPhone's Keychain and only ever sent to OpenRouter."
         case .vercel:
             return "Runs the same Gemini models through Vercel AI Gateway, billed per call. Stored in your iPhone's Keychain and only ever sent to Vercel."
+        case .openAI:
+            return "Uses OpenAI's own models instead of Gemini. Stored in your iPhone's Keychain and only ever sent to OpenAI."
         case .tinyFish:
             return "Lets Ask Anything look up current information on the web. Stored in your iPhone's Keychain and only ever sent to TinyFish."
         }
@@ -278,6 +284,7 @@ enum KeySlot: Hashable, CaseIterable {
         case .gemini: return URL(string: "https://aistudio.google.com/apikey")!
         case .openRouter: return URL(string: "https://openrouter.ai/settings/keys")!
         case .vercel: return URL(string: "https://vercel.com/ai-gateway")!
+        case .openAI: return URL(string: "https://platform.openai.com/api-keys")!
         case .tinyFish: return URL(string: "https://agent.tinyfish.ai/api-keys")!
         }
     }
@@ -287,6 +294,7 @@ enum KeySlot: Hashable, CaseIterable {
         case .gemini: return KeychainStore.loadAPIKey()
         case .openRouter: return KeychainStore.loadOpenRouterKey()
         case .vercel: return KeychainStore.loadVercelKey()
+        case .openAI: return KeychainStore.loadOpenAIKey()
         case .tinyFish: return KeychainStore.loadTinyFishKey()
         }
     }
@@ -296,6 +304,7 @@ enum KeySlot: Hashable, CaseIterable {
         case .gemini: return KeychainStore.saveAPIKey(key)
         case .openRouter: return KeychainStore.saveOpenRouterKey(key)
         case .vercel: return KeychainStore.saveVercelKey(key)
+        case .openAI: return KeychainStore.saveOpenAIKey(key)
         case .tinyFish: return KeychainStore.saveTinyFishKey(key)
         }
     }
@@ -305,6 +314,7 @@ enum KeySlot: Hashable, CaseIterable {
         case .gemini: _ = KeychainStore.deleteAPIKey(notify: true)
         case .openRouter: _ = KeychainStore.deleteOpenRouterKey(notify: true)
         case .vercel: _ = KeychainStore.deleteVercelKey(notify: true)
+        case .openAI: _ = KeychainStore.deleteOpenAIKey(notify: true)
         case .tinyFish: _ = KeychainStore.deleteTinyFishKey(notify: true)
         }
     }
@@ -320,6 +330,8 @@ enum KeySlot: Hashable, CaseIterable {
             check = await GeminiClient(apiKey: { nil }, openRouterKey: { key }).validateOpenRouterKey()
         case .vercel:
             check = await GeminiClient(apiKey: { nil }, vercelKey: { key }).validateVercelKey()
+        case .openAI:
+            check = await GeminiClient(apiKey: { nil }, openAIKey: { key }).validateOpenAIKey()
         case .tinyFish:
             switch await TinyFishClient(apiKey: { key }).validateKey() {
             case .valid: return .accepted(offline: false)

@@ -60,6 +60,7 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
         // Read once per dictation: a toggle flipped mid-flight must not change
         // the rules this transcript is being produced under.
         let vocabulary = Self.vocabularyIfEnabled()
+        let names = modelNames
 
         // One request per chunk. A short dictation is one chunk, so this is the
         // old single-request path for everything under ten minutes.
@@ -70,7 +71,8 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
         // that stops it (an error, a timeout, "no speech") falls through to
         // transcription then cleanup below, so it can only cost time.
         if context.mode == .dictate, policy.cleanupPass, ranges.count == 1, context.speechHeard,
-           !Self.oneCallRefused.contains(settings.activeProvider),
+           settings.activeRoute.provider.writingModelHearsAudio,
+           !Self.oneCallRefused.contains(settings.activeRoute),
            let text = await transcribeInOneCall(audioURL: audioURL, range: ranges[0],
                                                 durationSeconds: durationSeconds, context: context, config: config) {
             return TranscriptionResult(rawTranscript: text, cleanedTranscript: text,
@@ -132,7 +134,7 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
             return TranscriptionResult(
                 rawTranscript: trimmedRaw,
                 cleanedTranscript: cleaned,
-                modelID: "\(config.transcribeModel)/\(policy.mode.rawValue)+\(config.cleanupModel)"
+                modelID: "\(names.transcribe)+\(names.writing)"
             )
         }
 
@@ -146,7 +148,7 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
             return TranscriptionResult(
                 rawTranscript: trimmedRaw,
                 cleanedTranscript: text,
-                modelID: "\(config.transcribeModel)/\(policy.mode.rawValue)"
+                modelID: names.transcribe
             )
         }
 
@@ -154,7 +156,7 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
         return TranscriptionResult(
             rawTranscript: trimmedRaw,
             cleanedTranscript: cleaned,
-            modelID: "\(config.transcribeModel)/\(policy.mode.rawValue)+\(config.cleanupModel)"
+            modelID: "\(names.transcribe)+\(names.writing)"
         )
     }
 
@@ -198,23 +200,34 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
             if case .modelUnavailable = error as? TranscriptionError {
                 // A Vercel free-tier key is refused the flash model on every
                 // call; stop paying for the refusal until the app restarts.
-                Self.oneCallRefused.insert(settings.activeProvider)
+                Self.oneCallRefused.insert(settings.activeRoute)
             }
             Log.transcription.info("one call failed (\(String(describing: error), privacy: .public)) — transcribing, then cleaning up")
             return nil
         }
     }
 
-    /// Providers whose key was refused the flash model this run.
+    /// The models that run on the active provider, for History's model column.
+    /// OpenAI's transcription model has no smart mode, so no mode is named.
+    private var modelNames: (transcribe: String, writing: String) {
+        if settings.activeRoute.provider == .openAI {
+            let openAI = settings.openAIConfig
+            return (openAI.transcribeModel, openAI.writingModel)
+        }
+        let config = settings.geminiConfig
+        return ("\(config.transcribeModel)/\(settings.formattingPolicy.mode.rawValue)", config.cleanupModel)
+    }
+
+    /// Routes whose key was refused the flash model this run.
     private static let oneCallRefused = ProviderSet()
     final class ProviderSet: @unchecked Sendable {
         private let lock = NSLock()
-        private var providers: Set<ModelProvider> = []
-        func contains(_ provider: ModelProvider) -> Bool {
+        private var providers: Set<ModelRoute> = []
+        func contains(_ provider: ModelRoute) -> Bool {
             lock.lock(); defer { lock.unlock() }
             return providers.contains(provider)
         }
-        func insert(_ provider: ModelProvider) {
+        func insert(_ provider: ModelRoute) {
             lock.lock(); defer { lock.unlock() }
             providers.insert(provider)
         }
@@ -237,6 +250,7 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
         // stream misheard ("have a look at it" vs "I will look at it") instead of
         // polishing the error. MEASURED 2026-09-26: +1.4 s on a 99 s dictation.
         let audio = audioURL.flatMap { url -> Data? in
+            guard settings.activeRoute.provider.writingModelHearsAudio else { return nil }
             let flacURL = url.deletingLastPathComponent().appendingPathComponent("audio-polish.flac")
             guard let encoded = try? FLACEncoder.encode(cafURL: url, flacURL: flacURL) else { return nil }
             defer { try? FileManager.default.removeItem(at: encoded.url) }
@@ -260,7 +274,7 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
         return TranscriptionResult(
             rawTranscript: result.rawTranscript,
             cleanedTranscript: cleaned,
-            modelID: "\(result.modelID)+\(config.cleanupModel)"
+            modelID: "\(result.modelID)+\(modelNames.writing)"
         )
     }
 

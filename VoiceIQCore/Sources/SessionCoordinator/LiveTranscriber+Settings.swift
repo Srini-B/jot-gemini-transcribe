@@ -36,22 +36,37 @@ extension LiveTranscriber {
             )
             return nil
         }
-        // Live is a Gemini WebSocket; the gateways have no equivalent, so the
-        // upload path carries the whole dictation on those providers.
-        guard settings.activeProvider == .gemini,
-              let key = KeychainStore.loadAPIKey(), !key.isEmpty else { return nil }
+        // The gateways have no live socket, so the upload path carries the
+        // whole dictation on those providers.
         let dictionary = DictionaryStore()
-        let liveModel = settings.geminiConfig.liveModel
-        let session = LiveTranscriptionSession(
-            transport: WebSocketTransport(apiKey: { key }),
-            setup: LiveSetup(
-                model: liveModel,
-                smart: settings.smartTranscriptionEnabled,
-                // The same terms the batch path biases with, so switching modes
-                // does not quietly change how someone's name gets spelled.
-                customVocabulary: dictionary.vocabulary()
+        let session: LiveTranscriptionSession
+        let liveModel: String
+        let route = settings.activeRoute
+        guard route.supportsLiveTranscription else { return nil }
+        switch route.provider {
+        case .gemini:
+            guard let key = KeychainStore.loadAPIKey(), !key.isEmpty else { return nil }
+            liveModel = settings.geminiConfig.liveModel
+            session = LiveTranscriptionSession(
+                transport: WebSocketTransport(apiKey: { key }),
+                setup: LiveSetup(
+                    model: liveModel,
+                    smart: settings.smartTranscriptionEnabled,
+                    // The same terms the batch path biases with, so switching modes
+                    // does not quietly change how someone's name gets spelled.
+                    customVocabulary: dictionary.vocabulary()
+                )
             )
-        )
+        case .openAI:
+            guard let key = KeychainStore.loadOpenAIKey(), !key.isEmpty else { return nil }
+            let config = settings.openAIConfig
+            liveModel = config.liveModel
+            session = LiveTranscriptionSession(
+                transport: WebSocketTransport.openAI(apiKey: { key }),
+                dialect: OpenAILiveDialect(model: liveModel, delay: config.liveDelay,
+                                           keywords: dictionary.sanitizedVocabulary())
+            )
+        }
         return LiveTranscriber(
             session: session,
             modelID: liveModel,

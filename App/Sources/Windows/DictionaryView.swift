@@ -71,7 +71,7 @@ struct DictionaryView: View {
                 .textFieldStyle(.plain)
                 .font(VoiceIQUI.TypeScale.body(grad: grad))
                 .onSubmit(add)
-            TextField("Gemini hears it as… (optional)", text: $newMisspelling)
+            TextField("Heard as… (optional)", text: $newMisspelling)
                 .textFieldStyle(.plain)
                 .font(VoiceIQUI.TypeScale.body(grad: grad))
                 .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)

@@ -3,6 +3,8 @@
 A voice-only keyboard backed by the same dictation pipeline as the Mac app.
 The keyboard never records or calls a model. It sends commands to the VoiceiQ
 app, which records, transcribes with your own API key, and hands the text back.
+The iPhone app runs Gemini models, with a Gemini key or through OpenRouter or
+Vercel AI Gateway; the OpenAI provider is macOS-only for now.
 
 ## Targets
 

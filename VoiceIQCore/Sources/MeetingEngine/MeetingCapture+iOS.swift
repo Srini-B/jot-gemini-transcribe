@@ -15,6 +15,7 @@
 #if os(iOS)
 import AVFoundation
 import Foundation
+import VoiceIQObjC
 
 /// Records the phone's microphone to a 16 kHz mono CAF for meeting notes.
 ///
@@ -59,10 +60,14 @@ public final class MicTap: @unchecked Sendable {
         guard format.sampleRate > 0, format.channelCount > 0 else { throw MicError.noDevice }
         guard let converter = AVAudioConverter(from: format, to: target) else { throw MicError.format }
         self.converter = converter
-        input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
-            self?.queue.async { self?.write(buffer, rate: format.sampleRate) }
+        // AVFAudio raises (and would abort the app) when the route changes
+        // while the tap goes in; see AudioCaptureEngine.catchingException.
+        try VQObjCException.perform {
+            input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
+                self?.queue.async { self?.write(buffer, rate: format.sampleRate) }
+            }
+            engine.prepare()
         }
-        engine.prepare()
         try engine.start()
         self.engine = engine
         // A route change (AirPods in or out) stops the engine. Rebuild on the new

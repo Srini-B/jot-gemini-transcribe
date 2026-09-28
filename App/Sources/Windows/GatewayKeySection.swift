@@ -4,11 +4,14 @@
 import VoiceIQCore
 import SwiftUI
 
-/// Settings → Advanced: a gateway key (OpenRouter or Vercel AI Gateway) with
-/// the same save-and-validate flow as the Gemini key.
+/// Settings → Advanced: a key other than Gemini's (OpenAI, or a gateway key
+/// shared by both providers) with the same save-and-validate flow.
 struct GatewayKeySection: View {
     struct Gateway {
-        let provider: ModelProvider
+        let name: String
+        let secret: KeychainStore.Secret
+        /// Gateways have no live socket; the provider's own API does.
+        let isGateway: Bool
         let load: () -> String?
         let save: (String) -> Bool
         let delete: () -> Void
@@ -18,25 +21,42 @@ struct GatewayKeySection: View {
         let footer: String
 
         static let openRouter = Gateway(
-            provider: .openRouter,
+            name: "OpenRouter",
+            secret: .openRouter,
+            isGateway: true,
             load: KeychainStore.loadOpenRouterKey,
             save: KeychainStore.saveOpenRouterKey,
             delete: { KeychainStore.deleteOpenRouterKey(notify: true) },
             validate: { await $0.validateOpenRouterKey() },
             client: { key in GeminiClient(apiKey: { nil }, openRouterKey: { key }) },
             keyURL: URL(string: "https://openrouter.ai/settings/keys")!,
-            footer: "Optional. Runs the same Gemini models through OpenRouter, which has no per-minute tier limits. Stored in your Mac's Keychain and only ever sent to OpenRouter."
+            footer: "Optional. Runs Gemini or OpenAI models through OpenRouter, which has no per-minute tier limits. Stored in your Mac's Keychain and only ever sent to OpenRouter."
         )
 
         static let vercel = Gateway(
-            provider: .vercel,
+            name: "Vercel AI Gateway",
+            secret: .vercel,
+            isGateway: true,
             load: KeychainStore.loadVercelKey,
             save: KeychainStore.saveVercelKey,
             delete: { KeychainStore.deleteVercelKey(notify: true) },
             validate: { await $0.validateVercelKey() },
             client: { key in GeminiClient(apiKey: { nil }, vercelKey: { key }) },
             keyURL: URL(string: "https://vercel.com/ai-gateway")!,
-            footer: "Optional. Runs the same Gemini models through Vercel AI Gateway, billed per call. Stored in your Mac's Keychain and only ever sent to Vercel."
+            footer: "Optional. Runs Gemini or OpenAI models through Vercel AI Gateway, billed per call. Stored in your Mac's Keychain and only ever sent to Vercel."
+        )
+
+        static let openAI = Gateway(
+            name: "OpenAI",
+            secret: .openAI,
+            isGateway: false,
+            load: KeychainStore.loadOpenAIKey,
+            save: KeychainStore.saveOpenAIKey,
+            delete: { KeychainStore.deleteOpenAIKey(notify: true) },
+            validate: { await $0.validateOpenAIKey() },
+            client: { key in GeminiClient(apiKey: { nil }, openAIKey: { key }) },
+            keyURL: URL(string: "https://platform.openai.com/api-keys")!,
+            footer: "Stored in your Mac's Keychain and only ever sent to OpenAI."
         )
     }
 
@@ -65,7 +85,7 @@ struct GatewayKeySection: View {
             if keyStatus == .invalid {
                 Text(gateway.load() != nil
                      ? "That key didn't work — your saved key is unchanged."
-                     : "\(gateway.provider.displayName) rejected that key.")
+                     : "\(gateway.name) rejected that key.")
                     .font(VoiceIQUI.TypeScale.labelSmall())
                     .foregroundStyle(VoiceIQUI.Colors.error)
             }
@@ -86,11 +106,11 @@ struct GatewayKeySection: View {
                     Button("Remove Key…", role: .destructive) { gateway.delete(); apiKey = ""; keyStatus = .missing }
                 }
                 Spacer()
-                Link("Get a key at \(gateway.provider.displayName)", destination: gateway.keyURL)
+                Link("Get a key at \(gateway.name)", destination: gateway.keyURL)
                     .font(VoiceIQUI.TypeScale.labelSmall())
             }
         } header: {
-            Text("\(gateway.provider.displayName) API key")
+            Text("\(gateway.name) API key")
         } footer: {
             Text(footer)
         }
@@ -102,13 +122,11 @@ struct GatewayKeySection: View {
         }
     }
 
-    private var secret: KeychainStore.Secret {
-        gateway.provider == .vercel ? .vercel : .openRouter
-    }
+    private var secret: KeychainStore.Secret { gateway.secret }
 
     private var footer: String {
-        guard hasStoredKey else { return gateway.footer }
-        return gateway.footer + " Live transcription is unavailable while \(gateway.provider.displayName) is the active provider."
+        guard hasStoredKey, gateway.isGateway else { return gateway.footer }
+        return gateway.footer + " Live transcription is unavailable while \(gateway.name) is the active gateway."
     }
 
     @ViewBuilder
@@ -148,30 +166,119 @@ struct GatewayKeySection: View {
     }
 }
 
-/// Settings → Advanced: which provider serves the calls. Only providers with a
-/// stored key are offered; with one key there is nothing to choose, so the
-/// section stays out of the way.
-struct ProviderSection: View {
+/// Settings → Advanced: the OpenAI model for each role. Blank fields use the
+/// defaults shown as placeholders; every edit saves as you type.
+struct OpenAIModelsSection: View {
+    private static let defaults = OpenAIConfig()
     private let settings = SettingsStore()
-    @State private var preferred = SettingsStore().preferredProvider
-    @State private var available = KeychainStore.providersWithKeys
+    @State private var transcribeModel = SettingsStore().openAITranscribeModelOverride ?? ""
+    @State private var liveModel = SettingsStore().openAILiveModelOverride ?? ""
+    @State private var writingModel = SettingsStore().openAIWritingModelOverride ?? ""
+    @State private var liveDelay = SettingsStore().openAIConfig.liveDelay
 
     var body: some View {
-        if available.count > 1 {
-            Section {
-                Picker("Provider", selection: $preferred) {
-                    ForEach(ModelProvider.allCases.filter(available.contains)) { provider in
-                        Text(provider.displayName).tag(provider)
+        Section {
+            modelField("Transcription model", text: $transcribeModel, placeholder: Self.defaults.transcribeModel,
+                       save: settings.setOpenAITranscribeModelOverride)
+            modelField("Live transcription model", text: $liveModel, placeholder: Self.defaults.liveModel,
+                       save: settings.setOpenAILiveModelOverride)
+            Picker("Live transcription delay", selection: $liveDelay) {
+                ForEach(OpenAIConfig.LiveDelay.allCases, id: \.self) { delay in
+                    Text(delay.rawValue.capitalized).tag(delay)
+                }
+            }
+            .onChange(of: liveDelay) { _, value in settings.setOpenAILiveDelay(value) }
+            modelField("Formatting model", text: $writingModel, placeholder: Self.defaults.writingModel,
+                       save: settings.setOpenAIWritingModelOverride)
+        } header: {
+            Text("OpenAI models")
+        }
+    }
+
+    private func modelField(_ label: String, text: Binding<String>, placeholder: String,
+                            save: @escaping (String?) -> Void) -> some View {
+        LabeledContent(label) {
+            TextField("", text: text, prompt: Text(placeholder))
+                .labelsHidden()
+                .font(VoiceIQUI.TypeScale.code)
+                .multilineTextAlignment(.trailing)
+        }
+        .onChange(of: text.wrappedValue) { _, value in
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            save(trimmed.isEmpty ? nil : trimmed)
+        }
+    }
+}
+
+/// Settings → Advanced: whose models run, Gemini or OpenAI.
+struct ProviderSection: View {
+    @Binding var provider: ModelProvider
+    private let settings = SettingsStore()
+
+    var body: some View {
+        Section {
+            Picker("Provider", selection: $provider) {
+                ForEach(ModelProvider.allCases) { Text($0.displayName).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: provider) { _, value in settings.setPreferredProvider(value) }
+        }
+    }
+}
+
+/// Settings → Advanced → Experimental: the gateways. Collapsed on every
+/// visit. Holds the gateway picker (only when more than one route has a key)
+/// and the OpenRouter and Vercel keys, which serve both providers.
+struct ExperimentalGatewaysSection: View {
+    let provider: ModelProvider
+    private let settings = SettingsStore()
+    @State private var expanded = false
+    @State private var gateway = SettingsStore().activeRoute.gateway
+    @State private var available = KeychainStore.gatewaysWithKeys(for: SettingsStore().preferredProvider)
+
+    var body: some View {
+        Group {
+        Section {
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() }
+            } label: {
+                HStack(spacing: VoiceIQUI.Spacing.s) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .rotationEffect(.degrees(expanded ? 90 : 0))
+                        .foregroundStyle(.secondary)
+                    Text("Experimental")
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Experimental")
+            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+        }
+        if expanded {
+            if available.count > 1 {
+                Section {
+                    Picker("Gateway", selection: $gateway) {
+                        ForEach(ModelGateway.allCases.filter(available.contains)) { gateway in
+                            Text(gateway.displayName(for: provider)).tag(gateway)
+                        }
+                    }
+                    .onChange(of: gateway) { _, value in
+                        if value != settings.activeRoute.gateway { settings.setPreferredGateway(value) }
                     }
                 }
-                .onChange(of: preferred) { _, value in settings.setPreferredProvider(value) }
-            } header: {
-                Text("Provider")
             }
-            .onReceive(NotificationCenter.default.publisher(for: .gtSettingDidChange).receive(on: RunLoop.main)) { _ in
-                available = KeychainStore.providersWithKeys
-                preferred = settings.activeProvider
-            }
+            GatewayKeySection(.openRouter)
+            GatewayKeySection(.vercel)
         }
+        }
+        .onChange(of: provider) { _, _ in refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: .gtSettingDidChange).receive(on: RunLoop.main)) { _ in refresh() }
+    }
+
+    private func refresh() {
+        available = KeychainStore.gatewaysWithKeys(for: provider)
+        gateway = settings.activeRoute.gateway
     }
 }

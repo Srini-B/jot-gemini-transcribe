@@ -61,7 +61,7 @@ final class AppModel: ObservableObject {
             apiKey: { KeychainStore.loadAPIKey() },
             openRouterKey: { KeychainStore.loadOpenRouterKey() },
             vercelKey: { KeychainStore.loadVercelKey() },
-            provider: { SettingsStore().activeProvider }
+            route: { SettingsStore().activeRoute }
         )
         transcription = GeminiTranscriptionService(client: client)
         historyStore = try? HistoryStore.standard()
@@ -70,10 +70,7 @@ final class AppModel: ObservableObject {
             client: client,
             config: { SettingsStore().geminiConfig },
             summaryModel: SettingsStore().geminiConfig.cleanupModel,
-            providers: {
-                let settings = SettingsStore()
-                return ModelProvider.fallbackOrder(preferred: settings.preferredProvider, available: KeychainStore.providersWithKeys)
-            }
+            providers: { SettingsStore().meetingRoutes }
         )
         let inserter = self.inserter
         coordinator = DictationCoordinator(

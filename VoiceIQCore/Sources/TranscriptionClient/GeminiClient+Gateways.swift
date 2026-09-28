@@ -14,8 +14,8 @@
 
 import Foundation
 
-/// The same Gemini models through the OpenAI-shaped gateways: OpenRouter and
-/// Vercel AI Gateway.
+/// Either provider's models through the OpenAI-shaped gateways: OpenRouter and
+/// Vercel AI Gateway. Gemini models are `google/<id>`, OpenAI's `openai/<id>`.
 ///
 /// Two calls carry everything the app does:
 ///  - a transcription endpoint for the transcribe model. No smart mode, custom
@@ -55,12 +55,26 @@ extension GeminiClient {
     /// OpenRouter slugs of Google's priority-tier endpoints.
     static let openRouterPriorityEndpoints = ["google-ai-studio/priority", "google-vertex/global/priority"]
 
-    static func gatewayEndpoint(_ via: ModelProvider) -> URL {
+    /// The gateway ID of the transcription model for the route's provider.
+    /// `geminiModel` is what the caller passed; OpenAI's comes from `OpenAIConfig`.
+    func transcriptionModelID(_ geminiModel: String, route: ModelRoute) -> String {
+        route.provider == .gemini ? Self.gatewayModelID(geminiModel) : Self.openAIGatewayID(openAIConfig().transcribeModel)
+    }
+
+    func writingModelID(_ geminiModel: String, route: ModelRoute) -> String {
+        route.provider == .gemini ? Self.gatewayModelID(geminiModel) : Self.openAIGatewayID(openAIConfig().writingModel)
+    }
+
+    static func openAIGatewayID(_ model: String) -> String {
+        model.contains("/") ? model : "openai/\(model)"
+    }
+
+    static func gatewayEndpoint(_ via: ModelEndpoint) -> URL {
         via == .vercel ? vercelEndpoint : openRouterEndpoint
     }
 
     func gatewayTranscribe(audio: Data, mimeType: String = "audio/flac", model: String,
-                           deadline: TimeInterval, stage: UsageStage, via: ModelProvider) async throws -> String {
+                           deadline: TimeInterval, stage: UsageStage, via: ModelEndpoint) async throws -> String {
         let modelID = Self.gatewayModelID(model)
         if via == .vercel {
             let body: [String: Any] = ["audio": audio.base64EncodedString(), "mediaType": mimeType]
@@ -87,8 +101,9 @@ extension GeminiClient {
     }
 
     func gatewayChat(prompt: String, images: [Data] = [], audioFLAC: Data? = nil, model: String,
+                     provider: ModelProvider = .gemini,
                      deadline: TimeInterval, stage: UsageStage, jsonObject: Bool = false,
-                     jsonSchema: [String: Any]? = nil, parts: [ChatPart] = [], via: ModelProvider) async throws -> String {
+                     jsonSchema: [String: Any]? = nil, parts: [ChatPart] = [], via: ModelEndpoint) async throws -> String {
         let modelID = Self.gatewayModelID(model)
         var content: [[String: Any]] = [["type": "text", "text": prompt]]
         for part in parts {
@@ -103,13 +118,19 @@ extension GeminiClient {
         if let audioFLAC {
             content.append(Self.audioPart(flac: audioFLAC, via: via))
         }
+        // OpenAI models get the same message layout as on OpenAI's own API.
+        let messages: [[String: Any]] = provider == .openAI && parts.isEmpty && audioFLAC == nil
+            ? Self.openAIMessages(prompt: prompt, images: images, instructionRole: "system")
+            : [["role": "user", "content": content]]
         var body: [String: Any] = [
             "model": modelID,
-            "messages": [["role": "user", "content": content]],
-            "temperature": 0,
-            // Same knob as thinkingLevel "low" on the native API.
-            "reasoning": ["effort": "low"],
+            "messages": messages,
+            // Same knob as thinkingLevel "low" on the native API; OpenAI's
+            // writing model runs without reasoning (see openAIReasoningEffort).
+            "reasoning": ["effort": provider == .gemini ? "low" : Self.openAIReasoningEffort],
         ]
+        // GPT-6 Luna accepts only the default temperature (probed 2026-09-28).
+        if provider == .gemini { body["temperature"] = 0 }
         if via == .openRouter {
             // OpenRouter load-balances by price by default. A dictation waits on
             // this call, so ask for the fastest endpoint of the same model.
@@ -137,7 +158,7 @@ extension GeminiClient {
 
     /// OpenRouter takes OpenAI's `input_audio` part; Vercel rejects it and
     /// wants the generic `file` part with a data URL (docs, 2026-09).
-    static func audioPart(flac: Data, via: ModelProvider) -> [String: Any] {
+    static func audioPart(flac: Data, via: ModelEndpoint) -> [String: Any] {
         let base64 = flac.base64EncodedString()
         if via == .vercel {
             return ["type": "file", "file": ["filename": "audio.flac", "file_data": "data:audio/flac;base64,\(base64)"]]
@@ -147,7 +168,7 @@ extension GeminiClient {
 
     /// Vercel documents `json` (legacy) and `json_schema`; `json_object` also
     /// worked when probed (2026-09-27), but the documented one is safer.
-    static func jsonResponseFormat(via: ModelProvider) -> [String: Any] {
+    static func jsonResponseFormat(via: ModelEndpoint) -> [String: Any] {
         ["type": via == .vercel ? "json" : "json_object"]
     }
 
@@ -196,7 +217,11 @@ extension GeminiClient {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw TranscriptionError.network("unparseable_response")
         }
-        return json["text"] as? String ?? ""
+        let text = json["text"] as? String ?? ""
+        if text.isEmpty {
+            Log.transcription.info("gateway transcript empty; response keys: \(json.keys.sorted().joined(separator: ","), privacy: .public)")
+        }
+        return text
     }
 
     /// `choices[0].message.content`, which may be a string or an array of text
@@ -212,8 +237,13 @@ extension GeminiClient {
             throw TranscriptionError.safetyBlocked
         }
         let message = first["message"] as? [String: Any] ?? [:]
-        if let text = message["content"] as? String { return text }
         let parts = message["content"] as? [[String: Any]] ?? []
-        return parts.compactMap { $0["text"] as? String }.joined()
+        let text = message["content"] as? String ?? parts.compactMap { $0["text"] as? String }.joined()
+        if text.isEmpty {
+            // Shape only, never content: which keys came back and why it stopped.
+            let details = (json["usage"] as? [String: Any])?["completion_tokens_details"] as? [String: Any] ?? [:]
+            Log.transcription.error("gateway message empty: finish=\(first["finish_reason"] as? String ?? "nil", privacy: .public) message keys=\(message.keys.sorted().joined(separator: ","), privacy: .public) content type=\(String(describing: type(of: message["content"] as Any)), privacy: .public) reasoning tokens=\((details["reasoning_tokens"] as? NSNumber)?.intValue ?? -1, privacy: .public)")
+        }
+        return text
     }
 }

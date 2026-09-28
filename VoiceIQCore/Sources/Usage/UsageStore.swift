@@ -178,19 +178,27 @@ public final class UsageStore: @unchecked Sendable {
         public static let zero = Total(costUSD: 0, calls: 0, tokensIn: 0, tokensOut: 0, isApproximate: false)
     }
 
-    public func total(since start: Date? = nil) -> Total {
-        totals(groupedBy: nil, since: start).first?.total ?? .zero
+    /// `provider` limits every read to that provider's models (see
+    /// `ModelProvider.modelPrefixes`); nil reads everything.
+    public func total(since start: Date? = nil, provider: ModelProvider? = nil) -> Total {
+        totals(groupedBy: nil, since: start, provider: provider).first?.total ?? .zero
     }
 
-    public func totalsByActivity(since start: Date? = nil) -> [(key: String, total: Total)] {
-        totals(groupedBy: "activity", since: start)
+    public func totalsByActivity(since start: Date? = nil, provider: ModelProvider? = nil) -> [(key: String, total: Total)] {
+        totals(groupedBy: "activity", since: start, provider: provider)
     }
 
-    public func totalsByModel(since start: Date? = nil) -> [(key: String, total: Total)] {
-        totals(groupedBy: "model", since: start)
+    public func totalsByModel(since start: Date? = nil, provider: ModelProvider? = nil) -> [(key: String, total: Total)] {
+        totals(groupedBy: "model", since: start, provider: provider)
     }
 
-    private func totals(groupedBy column: String?, since start: Date?) -> [(key: String, total: Total)] {
+    private static func providerFilter(_ provider: ModelProvider) -> (sql: String, arguments: [String]) {
+        let prefixes = provider.modelPrefixes
+        return ("(" + prefixes.map { _ in "LOWER(model) LIKE ?" }.joined(separator: " OR ") + ")",
+                prefixes.map { $0 + "%" })
+    }
+
+    private func totals(groupedBy column: String?, since start: Date?, provider: ModelProvider?) -> [(key: String, total: Total)] {
         let keyExpression = column ?? "''"
         var sql = """
             SELECT \(keyExpression) AS key,
@@ -201,11 +209,18 @@ public final class UsageStore: @unchecked Sendable {
                    MAX(CASE WHEN costUSD IS NULL OR isEstimated THEN 1 ELSE 0 END) AS approx
             FROM usage
             """
+        var conditions: [String] = []
         var arguments: StatementArguments = []
         if let start {
-            sql += " WHERE at >= ?"
-            arguments = [start]
+            conditions.append("at >= ?")
+            arguments += [start]
         }
+        if let provider {
+            let filter = Self.providerFilter(provider)
+            conditions.append(filter.sql)
+            arguments += StatementArguments(filter.arguments)
+        }
+        if !conditions.isEmpty { sql += " WHERE " + conditions.joined(separator: " AND ") }
         if let column { sql += " GROUP BY \(column) ORDER BY cost DESC" }
         do {
             return try queue.read { db in
@@ -249,9 +264,14 @@ public final class UsageStore: @unchecked Sendable {
         }) ?? []
     }
 
-    public func recent(limit: Int = 50) -> [UsageRecord] {
+    public func recent(limit: Int = 50, provider: ModelProvider? = nil) -> [UsageRecord] {
         (try? queue.read { db in
-            try UsageRecord.order(Column("at").desc).limit(limit).fetchAll(db)
+            var request = UsageRecord.order(Column("at").desc)
+            if let provider {
+                let filter = Self.providerFilter(provider)
+                request = request.filter(sql: filter.sql, arguments: StatementArguments(filter.arguments))
+            }
+            return try request.limit(limit).fetchAll(db)
         }) ?? []
     }
 }

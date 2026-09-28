@@ -45,7 +45,8 @@ public enum UsageMeter {
     nonisolated(unsafe) public static var store: UsageStore?
 
     public static func record(stage: UsageStage, model: String, usage: TokenUsage) {
-        guard !usage.isEmpty else { return }
+        // Per-minute models report a charge and no tokens.
+        guard !usage.isEmpty || usage.reportedCostUSD != nil else { return }
         let scope = self.scope ?? UsageScope(activity: .other, sessionID: nil)
         let record = UsageRecord(activity: scope.activity, stage: stage, model: model,
                                  sessionID: scope.sessionID, usage: usage)

@@ -38,11 +38,11 @@ public struct MeetingTranscriber: Sendable {
     private let client: GeminiClient
     private let models: Models
     private let endpoint: URL
-    private let providers: @Sendable () -> [ModelProvider]
+    private let providers: @Sendable () -> [ModelRoute]
     private let sleep: @Sendable (TimeInterval) async throws -> Void
 
     public init(client: GeminiClient, models: Models, endpoint: URL,
-                providers: @escaping @Sendable () -> [ModelProvider],
+                providers: @escaping @Sendable () -> [ModelRoute],
                 sleep: @escaping @Sendable (TimeInterval) async throws -> Void = { try await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) }) {
         self.client = client; self.models = models; self.endpoint = endpoint; self.providers = providers; self.sleep = sleep
     }
@@ -54,7 +54,9 @@ public struct MeetingTranscriber: Sendable {
     /// gets shorter windows. MEASURED 2026-09-27 on a 30-minute call: native
     /// at 600 s gave 907 words, the gateway at 150 s gave 807, and the gateway
     /// at 600 s on one track gave 29 segments for ten minutes of speech.
-    static func windowSpeech(_ via: ModelProvider?) -> Double { via == .gemini ? 600 : 150 }
+    /// OpenAI's diarizing model is a transcription model, not the flash model,
+    /// so it gets the native window. Not yet measured on a long call.
+    static func windowSpeech(_ via: ModelRoute?) -> Double { via?.gateway == .direct ? 600 : 150 }
     /// A Tier 1 key needs about one minute of waiting per window; a two-hour
     /// call has twenty windows.
     static let rateLimitBudget: TimeInterval = 45 * 60
@@ -109,9 +111,7 @@ public struct MeetingTranscriber: Sendable {
         try request.appendBody(regions, source: audio.mic.samples)
         let flac = try FLACEncoder.encode(samples: request.samples)
         let raw = try await withProviders(label: "overlap", budget: &budget) { via in
-            via == .gemini
-                ? try await client.transcribeSpeakers(audio: flac, model: models.transcribe, endpoint: endpoint, deadline: 600)
-                : try await client.transcribeSpeakers(audio: flac, references: [], model: models.flash, deadline: 600, via: via)
+            try await transcribeSpeakers(flac, references: [], via: via)
         }
         return raw.compactMap { word in
             guard let start = word.start, let span = request.trackSpan(start, word.end ?? start) else { return nil }
@@ -265,7 +265,7 @@ public struct MeetingTranscriber: Sendable {
     /// Runs `body` with each provider in turn. A throttled provider is waited
     /// out only when no other provider has a key.
     private func withProviders<T>(label: String, budget: inout TimeInterval,
-                                  _ body: (ModelProvider) async throws -> T) async throws -> T {
+                                  _ body: (ModelRoute) async throws -> T) async throws -> T {
         var lastError: Error = TranscriptionError.network("no_provider")
         while true {
             var waits: [TimeInterval] = []
@@ -275,17 +275,17 @@ public struct MeetingTranscriber: Sendable {
                         // MEASURED 2026-09-27: the flash model blocked one window of a
                         // call as `content_filter` and passed the same window on the
                         // next run. One more try before moving on.
-                        Log.meeting.info("\(label, privacy: .public): \(via.rawValue, privacy: .public) safety block, retrying")
+                        Log.meeting.info("\(label, privacy: .public): \(via.label, privacy: .public) safety block, retrying")
                         return try await body(via)
                     }
                 } catch TranscriptionError.rateLimitedTransient(let retryAfter) {
-                    Log.meeting.info("\(label, privacy: .public): \(via.rawValue, privacy: .public) rate limited")
+                    Log.meeting.info("\(label, privacy: .public): \(via.label, privacy: .public) rate limited")
                     waits.append(retryAfter ?? 60); lastError = TranscriptionError.rateLimitedTransient(retryAfter: retryAfter)
                 } catch let error as TranscriptionError where Self.tryNextProvider(error) {
-                    Log.meeting.error("\(label, privacy: .public): \(via.rawValue, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+                    Log.meeting.error("\(label, privacy: .public): \(via.label, privacy: .public) failed: \(String(describing: error), privacy: .public)")
                     lastError = error
                 } catch is DecodingError {
-                    Log.meeting.error("\(label, privacy: .public): \(via.rawValue, privacy: .public) returned unreadable segments")
+                    Log.meeting.error("\(label, privacy: .public): \(via.label, privacy: .public) returned unreadable segments")
                     lastError = TranscriptionError.network("unreadable_segments")
                 }
             }
@@ -296,13 +296,31 @@ public struct MeetingTranscriber: Sendable {
         }
     }
 
-    /// Native: reference clips go inside the audio and the labels the API
-    /// gives them name the speakers. Gateway: reference clips go as separate
-    /// audio parts and the model answers with the ids.
+    /// Speaker-labelled words for audio with no reference clips inside it,
+    /// on whichever model the route has for it.
+    private func transcribeSpeakers(_ flac: Data, references: [(id: String, audio: Data)],
+                                    via: ModelRoute) async throws -> [DiarizedWord] {
+        switch (via.provider, via.gateway) {
+        case (.gemini, .direct):
+            return try await client.transcribeSpeakers(audio: flac, model: models.transcribe, endpoint: endpoint, deadline: 600)
+        case (.openAI, .direct):
+            return try await client.openAIDiarize(audio: flac, references: references, deadline: 600)
+        case (.gemini, _):
+            return try await client.transcribeSpeakers(audio: flac, references: references, model: models.flash,
+                                                      deadline: 600, via: via.endpoint)
+        case (.openAI, _):
+            // `ModelRoute.meetingOrder` never picks this route.
+            throw TranscriptionError.modelUnavailable(model: "gpt-4o-transcribe-diarize", detail: "not served by \(via.gateway.rawValue)")
+        }
+    }
+
+    /// Native Gemini: reference clips go inside the audio and the labels the
+    /// API gives them name the speakers. Elsewhere: reference clips go as
+    /// separate parts and the model answers with the ids.
     private func transcribe(window regions: [ClosedRange<Double>], audio: CallAudio, clips: [(key: String, value: [ClosedRange<Double>])],
-                            known: [TimedWord], via: ModelProvider) async throws -> [TimedWord] {
+                            known: [TimedWord], via: ModelRoute) async throws -> [TimedWord] {
         var request = AssembledAudio()
-        if via == .gemini {
+        if via == ModelRoute(provider: .gemini, gateway: .direct) {
             for (id, ranges) in clips { try request.appendAnchor(id: id, clips: ranges, from: audio) }
             try request.appendBody(regions, from: audio)
             let raw = try await client.transcribeSpeakers(audio: try FLACEncoder.encode(samples: request.samples),
@@ -310,17 +328,43 @@ public struct MeetingTranscriber: Sendable {
             return Self.place(raw, audio: request, call: audio, known: known, mapping: SpeakerLinker.link(words: raw, anchors: request.anchors))
         }
         try request.appendBody(regions, from: audio)
+        if via.provider == .openAI {
+            // The diarizing model takes up to four named voice references and
+            // labels their segments with those names, so the ids carry over.
+            var references: [(id: String, audio: Data)] = []
+            for (id, ranges) in Self.openAIReferenceClips(clips) {
+                var clip = AssembledAudio()
+                try clip.appendBody(ranges, from: audio)
+                let limit = Int(GeminiClient.openAIReferenceSeconds.upperBound * TrackAudio.sampleRate)
+                guard clip.duration >= GeminiClient.openAIReferenceSeconds.lowerBound else { continue }
+                references.append((id, try FLACEncoder.encode(samples: Array(clip.samples.prefix(limit)))))
+            }
+            let raw = try await transcribeSpeakers(try FLACEncoder.encode(samples: request.samples),
+                                                   references: references, via: via)
+            let mapping = Dictionary(uniqueKeysWithValues: references.map { ($0.id, $0.id) })
+            return Self.place(raw, audio: request, call: audio, known: known, mapping: mapping)
+        }
         var references: [(id: String, audio: Data)] = []
         for (id, ranges) in clips {
             var clip = AssembledAudio()
             try clip.appendBody(ranges, from: audio)
             references.append((id, try FLACEncoder.encode(samples: clip.samples)))
         }
-        let raw = try await client.transcribeSpeakers(audio: try FLACEncoder.encode(samples: request.samples), references: references,
-                                                      model: models.flash, deadline: 600, via: via)
+        let raw = try await transcribeSpeakers(try FLACEncoder.encode(samples: request.samples), references: references, via: via)
         let ids = Set(clips.map(\.key))
         let mapping = Dictionary(uniqueKeysWithValues: ids.map { ($0, $0) })
         return Self.place(raw, audio: request, call: audio, known: known, mapping: mapping)
+    }
+
+    /// The owner first, then the speakers with the most reference audio, up
+    /// to OpenAI's limit of four.
+    static func openAIReferenceClips(_ clips: [(key: String, value: [ClosedRange<Double>])]) -> [(key: String, value: [ClosedRange<Double>])] {
+        func seconds(_ ranges: [ClosedRange<Double>]) -> Double { ranges.reduce(0) { $0 + $1.upperBound - $1.lowerBound } }
+        let ranked = clips.sorted { lhs, rhs in
+            if (lhs.key == MeetingSpeaker.you) != (rhs.key == MeetingSpeaker.you) { return lhs.key == MeetingSpeaker.you }
+            return seconds(lhs.value) > seconds(rhs.value)
+        }
+        return Array(ranked.prefix(GeminiClient.openAIMaxReferences))
     }
 
     static func tryNextProvider(_ error: TranscriptionError) -> Bool {

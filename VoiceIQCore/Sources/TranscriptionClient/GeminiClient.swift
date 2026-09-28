@@ -64,15 +64,20 @@ public actor GeminiClient {
     private let apiKey: @Sendable () -> String?
     let openRouterKey: @Sendable () -> String?
     let vercelKey: @Sendable () -> String?
-    /// Read per call, so flipping the provider in Settings takes effect on the
-    /// next request without rebuilding the client.
-    let provider: @Sendable () -> ModelProvider
+    let openAIKey: @Sendable () -> String?
+    /// Read per call, like `provider`, so a model override applies at once.
+    let openAIConfig: @Sendable () -> OpenAIConfig
+    /// Read per call, so flipping the provider or gateway in Settings takes
+    /// effect on the next request without rebuilding the client.
+    let route: @Sendable () -> ModelRoute
 
     public init(
         apiKey: @escaping @Sendable () -> String?,
         openRouterKey: @escaping @Sendable () -> String? = { nil },
         vercelKey: @escaping @Sendable () -> String? = { nil },
-        provider: @escaping @Sendable () -> ModelProvider = { .gemini }
+        openAIKey: @escaping @Sendable () -> String? = { nil },
+        openAIConfig: @escaping @Sendable () -> OpenAIConfig = { OpenAIConfig() },
+        route: @escaping @Sendable () -> ModelRoute = { ModelRoute(provider: .gemini, gateway: .direct) }
     ) {
         let config = URLSessionConfiguration.ephemeral
         config.waitsForConnectivity = false // fail fast into the retry/queue path
@@ -83,7 +88,9 @@ public actor GeminiClient {
         self.apiKey = apiKey
         self.openRouterKey = openRouterKey
         self.vercelKey = vercelKey
-        self.provider = provider
+        self.openAIKey = openAIKey
+        self.openAIConfig = openAIConfig
+        self.route = route
     }
 
     // MARK: - Calls
@@ -95,9 +102,14 @@ public actor GeminiClient {
         flacData: Data, model: String, endpoint: URL, deadline: TimeInterval,
         customVocabulary: [String] = []
     ) async throws -> String {
-        let via = provider()
-        if via != .gemini {
-            return try await gatewayTranscribe(audio: flacData, model: model, deadline: deadline, stage: .transcribe, via: via)
+        let route = route()
+        switch (route.provider, route.gateway) {
+        case (.gemini, .direct): break
+        case (.openAI, .direct):
+            return try await openAITranscribe(audio: flacData, keywords: customVocabulary, deadline: deadline)
+        default:
+            return try await gatewayTranscribe(audio: flacData, model: transcriptionModelID(model, route: route),
+                                               deadline: deadline, stage: .transcribe, via: route.endpoint)
         }
         let parts: [[String: Any]] = [
             ["inline_data": ["mime_type": "audio/flac", "data": flacData.base64EncodedString()]],
@@ -134,11 +146,20 @@ public actor GeminiClient {
         stage: UsageStage = .cleanup,
         jsonSchema: [String: Any]? = nil
     ) async throws -> String {
-        let via = provider()
-        if via != .gemini {
+        let route = route()
+        // Callers check `writingModelHearsAudio`; a recording reaching an
+        // OpenAI writing model would be dropped and the prompt would lie.
+        if audioFLAC != nil, !route.provider.writingModelHearsAudio {
+            throw TranscriptionError.badRequest("writing model takes no audio")
+        }
+        switch (route.provider, route.gateway) {
+        case (.gemini, .direct): break
+        case (.openAI, .direct):
+            return try await openAIChat(prompt: prompt, images: images, deadline: deadline, stage: stage, jsonSchema: jsonSchema)
+        default:
             return try await gatewayChat(prompt: prompt, images: images, audioFLAC: audioFLAC,
-                                         model: model, deadline: deadline, stage: stage,
-                                         jsonSchema: jsonSchema, via: via)
+                                         model: writingModelID(model, route: route), provider: route.provider,
+                                         deadline: deadline, stage: stage, jsonSchema: jsonSchema, via: route.endpoint)
         }
         let thinkingConfig: [String: Any] = model.hasPrefix("gemini-2")
             ? ["thinkingBudget": 0]
@@ -258,7 +279,7 @@ public actor GeminiClient {
         isRetryAfter429: Bool = false,
         /// Gateway calls share this transport: same deadline, same status →
         /// error mapping, different base URL, auth header and usage envelope.
-        via: ModelProvider = .gemini,
+        via: ModelEndpoint = .gemini,
         extraHeaders: [String: String] = [:]
     ) async throws -> Data {
         let url = endpoint.appendingPathComponent(path)
@@ -306,9 +327,11 @@ public actor GeminiClient {
             // Every billed call passes through here, so this is the one place
             // usage is read. Both envelopes are tried; a body with neither is
             // simply not metered.
-            let usage = via == .gemini
-                ? TokenUsage.fromGenerateContent(data) ?? TokenUsage.fromInteraction(data)
-                : TokenUsage.fromOpenAI(data) ?? TokenUsage.fromVercelTranscription(data)
+            let usage: TokenUsage? = switch via {
+            case .gemini: TokenUsage.fromGenerateContent(data) ?? TokenUsage.fromInteraction(data)
+            case .openAI: TokenUsage.fromOpenAIDuration(data, model: modelLabel) ?? TokenUsage.fromOpenAI(data)
+            case .openRouter, .vercel: TokenUsage.fromOpenAI(data) ?? TokenUsage.fromVercelTranscription(data)
+            }
             if let usage {
                 UsageMeter.record(stage: stage, model: modelLabel, usage: usage)
             }
@@ -342,6 +365,11 @@ public actor GeminiClient {
                 return try await post(path: path, body: body, endpoint: endpoint, deadline: deadline,
                                       modelLabel: modelLabel, modelIsInPath: modelIsInPath, stage: stage,
                                       isRetryAfter429: true, via: via, extraHeaders: extraHeaders)
+            }
+            // OpenAI answers 429 `insufficient_quota` when the account has no
+            // credit left: the same situation as a gateway's 402.
+            if let body = String(data: data, encoding: .utf8), body.contains("insufficient_quota") {
+                throw TranscriptionError.network("gateway_insufficient_credits")
             }
             // Only a real daily/hard quota is terminal; a per-minute throttle
             // (or an unparseable body) clears on its own and stays retryable.
@@ -386,12 +414,18 @@ public actor GeminiClient {
         customVocabulary: [String],
         deadline: TimeInterval
     ) async throws -> String {
-        let via = provider()
-        if via != .gemini {
+        let route = route()
+        switch (route.provider, route.gateway) {
+        case (.gemini, .direct): break
+        case (.openAI, .direct):
+            // No smart mode; the dictionary rides along as keywords, and the
+            // cleanup pass does the formatting.
+            return try await openAITranscribe(audio: audio, mimeType: mimeType, keywords: customVocabulary, deadline: deadline)
+        default:
             // The gateways' transcription endpoints have no smart mode or custom
             // vocabulary; the cleanup pass carries the dictionary instead.
-            return try await gatewayTranscribe(audio: audio, mimeType: mimeType, model: model,
-                                               deadline: deadline, stage: .transcribe, via: via)
+            return try await gatewayTranscribe(audio: audio, mimeType: mimeType, model: transcriptionModelID(model, route: route),
+                                               deadline: deadline, stage: .transcribe, via: route.endpoint)
         }
         var body: [String: Any] = [
             "model": model,
@@ -505,7 +539,7 @@ public actor GeminiClient {
         session.invalidateAndCancel() // transient clients (key validation) must not leak (audit L33)
     }
 
-    func applyAuth(_ request: inout URLRequest, via: ModelProvider = .gemini) {
+    func applyAuth(_ request: inout URLRequest, via: ModelEndpoint = .gemini) {
         // Header, never ?key= — query strings leak into logs and proxies.
         switch via {
         case .gemini:
@@ -518,6 +552,10 @@ public actor GeminiClient {
             }
         case .vercel:
             if let key = vercelKey() {
+                request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+            }
+        case .openAI:
+            if let key = openAIKey() {
                 request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
             }
         }

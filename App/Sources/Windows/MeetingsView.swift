@@ -79,6 +79,17 @@ struct MeetingsPane: View {
 
     private func detail(_ meeting: MeetingMeta) -> some View {
         VStack(spacing: 0) {
+            if case .failed(let reason) = meeting.status {
+                Label(reason, systemImage: "exclamationmark.triangle.fill")
+                    .font(VoiceIQUI.TypeScale.body())
+                    .foregroundStyle(VoiceIQUI.Colors.error)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(VoiceIQUI.Spacing.m)
+                    .background(RoundedRectangle(cornerRadius: VoiceIQUI.Radius.medium).fill(VoiceIQUI.Colors.error.opacity(0.1)))
+                    .padding(.horizontal, VoiceIQUI.Spacing.l)
+                    .padding(.bottom, VoiceIQUI.Spacing.s)
+            }
             Picker("", selection: $tab) { Text("Notes").tag(0); Text("Transcript").tag(1) }
                 .pickerStyle(.segmented).labelsHidden().padding(.horizontal, VoiceIQUI.Spacing.l)
             if tab == 0 {
