@@ -241,6 +241,6 @@ private struct RecentList: View {
 
     private func meta(_ record: DictationRecord) -> String {
         let when = record.startedAt.formatted(.relative(presentation: .named))
-        return [when, record.targetAppName].compactMap { $0 }.joined(separator: " · ")
+        return [when, AppNames.name(for: record)].compactMap { $0 }.joined(separator: " · ")
     }
 }

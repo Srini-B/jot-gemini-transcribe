@@ -293,7 +293,7 @@ final class AppModel: ObservableObject {
     /// app. Start the session while in the foreground, start the dictation,
     /// then send the user back.
     private func startFromKeyboard(commandID: UUID, host: String?) {
-        SessionDiagnostics.note("keyboard start through the app (session active: \(session.isActive))")
+        SessionDiagnostics.note("keyboard start through the app (session active: \(session.isActive), host: \(host ?? "unknown"))")
         needsForeground = false
         if !session.isActive {
             do {
@@ -444,8 +444,35 @@ final class AppModel: ObservableObject {
     }
 
     private func deliver(_ text: String, mode: KeyboardMode) {
-        session.deliver(Delivery(mode: mode, text: text, hostBundleID: target.host))
+        let delivery = Delivery(mode: mode, text: text, hostBundleID: target.host)
+        session.deliver(delivery)
+        if mode != .ask { copyIfNotTyped(delivery) }
     }
+
+    /// The keyboard on screen types the result wherever the user is. When no
+    /// keyboard has typed it shortly after (the user closed it, or is on a
+    /// screen with no text field), the result goes on the clipboard.
+    private func copyIfNotTyped(_ delivery: Delivery) {
+        var task = UIBackgroundTaskIdentifier.invalid
+        task = UIApplication.shared.beginBackgroundTask(withName: "Copy result") {
+            guard task != .invalid else { return }
+            UIApplication.shared.endBackgroundTask(task)
+            task = .invalid
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.typedCheckDelay) { [store] in
+            defer {
+                if task != .invalid { UIApplication.shared.endBackgroundTask(task) }
+                task = .invalid
+            }
+            guard store.insertedDeliveryID != delivery.id else { return }
+            // Handled: a keyboard opened later must not type it as well.
+            store.insertedDeliveryID = delivery.id
+            UIPasteboard.general.string = delivery.text
+            SessionDiagnostics.note("result not typed by a keyboard; copied to the clipboard")
+        }
+    }
+
+    static let typedCheckDelay: TimeInterval = 2
 
     static func isMicrophoneFailure(_ failure: DictationFailure) -> Bool {
         switch failure {

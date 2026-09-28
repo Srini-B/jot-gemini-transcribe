@@ -53,6 +53,27 @@ public final class SharedStore: @unchecked Sendable {
         static let insertedDeliveryID = "bridge.insertedDeliveryID"
         static let keyboardSeenAt = "bridge.keyboardSeenAt"
         static let activityRequest = "bridge.activityRequest"
+        static let keyboardLog = "bridge.keyboardLog"
+    }
+
+    // MARK: - Keyboard diagnostics
+
+    /// The keyboard's recent decisions (results typed or not, and why), for
+    /// the Session log in the app. No text or keys. Writer: keyboard.
+    public var keyboardLog: [String] {
+        defaults.stringArray(forKey: Key.keyboardLog) ?? []
+    }
+
+    public func appendKeyboardLog(_ line: String) {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        var lines = keyboardLog
+        lines.append("\(formatter.string(from: Date())) \(line)")
+        defaults.set(Array(lines.suffix(100)), forKey: Key.keyboardLog)
+    }
+
+    public func clearKeyboardLog() {
+        defaults.removeObject(forKey: Key.keyboardLog)
     }
 
     // MARK: - Keyboard writes
@@ -69,8 +90,9 @@ public final class SharedStore: @unchecked Sendable {
         DarwinNotifier.post(.command)
     }
 
-    /// The last delivery the keyboard inserted, so a result is inserted once
-    /// even when state pings repeat. Writer: keyboard.
+    /// The last delivery handled, so a result is inserted once even when
+    /// state pings repeat. Writers: the keyboard when it types a result, the
+    /// app when no keyboard did and it put the result on the clipboard.
     public var insertedDeliveryID: UUID? {
         get { defaults.string(forKey: Key.insertedDeliveryID).flatMap(UUID.init(uuidString:)) }
         set { defaults.set(newValue?.uuidString, forKey: Key.insertedDeliveryID) }

@@ -145,7 +145,7 @@ private struct HistoryRow: View {
 
     private var meta: String {
         let time = record.startedAt.formatted(date: .omitted, time: .shortened)
-        return [time, record.targetAppName].compactMap { $0 }.joined(separator: " · ")
+        return [time, AppNames.name(for: record)].compactMap { $0 }.joined(separator: " · ")
     }
 
     private var statusLabel: String {
@@ -230,7 +230,7 @@ private struct HistoryDetail: View {
     private var details: some View {
         VStack(spacing: 0) {
             DetailRow(label: "When", value: record.startedAt.formatted(date: .abbreviated, time: .shortened))
-            if let app = record.targetAppName { divider; DetailRow(label: "App", value: app) }
+            if let app = AppNames.name(for: record) { divider; DetailRow(label: "App", value: app) }
             if let seconds = record.durationSeconds {
                 divider
                 DetailRow(label: "Length", value: Duration.seconds(seconds).formatted(.time(pattern: .minuteSecond)))

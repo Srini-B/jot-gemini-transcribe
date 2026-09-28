@@ -167,3 +167,51 @@ warm-state Live Activity because Typeless shows none.
   device can confirm the same.
 - Settings › Dictation gains "Open Action Button settings".
 - Version 0.5.0, build 17 (macOS and iOS targets share the version).
+
+## Unreliable automatic insertion (after 0.5.0 build 18)
+
+- Owner: some dictations were not typed into the field and needed Paste last,
+  intermittently, in two apps. The app's session log showed every session
+  completing normally, so the text reached the keyboard.
+- The keyboard marked a result delivered before deciding whether to type it,
+  and every keyboard instance in the process polled for results. In the
+  simulator the log once said "result typed" while the field stayed empty:
+  an instance without a live text field had claimed it.
+- Fix: only the on-screen instance (tracked in `appeared`/`disappeared`, and
+  with a window) may type, and a result is marked handled only when typed.
+  Keyboard decisions are logged to the App Group and shown in the Session log.
+- Simulator after the fix: three dictations into Reminders, three different
+  keyboard instances, all typed. Device confirmation pending.
+
+## Return to any app, and results follow the user
+
+- Owner asked for automatic return to apps outside the known-scheme table,
+  for results to land where a dictation is stopped (even in another app), and
+  for the clipboard when there is no text field. History showed "Ios" for
+  unknown apps.
+- The keyboard already had the host's bundle ID; "Ios" came from
+  capitalising the last bundle ID segment. iOS has no installed-apps list.
+- Return: `AppLauncher` (private `LSApplicationWorkspace
+  openApplicationWithBundleID:`, approved by the owner earlier for hidden
+  APIs) is tried first for every app, then the return URL, then swipe-back.
+  It resumes the app as the app switcher does, so Safari no longer needs
+  swipe-back. The app checks a second later that it really left the
+  foreground before counting it.
+- Host resolution was the other half. The pid table dropped its entries on
+  every keyboard appearance, and after a bounce the arbiter reports VoiceiQ
+  or nothing, so the second app in a row went unresolved (seen in the
+  simulator: Safari, then Reminders → swipe-back). The table now keeps pairs
+  for the life of the keyboard process.
+- Results: the keyboard on screen types the result wherever it is (the
+  earlier "only in the app it started in" rule is gone). Two seconds after
+  delivery the app copies an untyped result to the clipboard and marks it
+  handled.
+- Names: generic last segments (ios, app, mobile, …) are skipped, and unknown
+  apps are looked up once on the App Store and cached. History and Home read
+  the name from the bundle ID, so old rows improve too.
+- Simulator: four alternating bounces (Reminders, Safari, Reminders, Safari)
+  all resolved and returned by launch; the New Reminder sheet kept its
+  state. A dictation stopped with no keyboard on screen went to the
+  clipboard; one started in Reminders and stopped in Safari was typed in
+  Safari. `./scripts/test.sh` 193 tests, 0 failures; macOS and iOS builds
+  pass. Not yet on a device: `AppLauncher` there is unverified.

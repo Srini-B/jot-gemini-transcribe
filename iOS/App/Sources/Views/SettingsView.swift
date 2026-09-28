@@ -487,7 +487,15 @@ private struct SettingsKeyboardModifier: ViewModifier {
 
 /// The keeper and background-start events from `SessionDiagnostics`.
 private struct SessionLogView: View {
-    @State private var text = SessionDiagnostics.read()
+    @State private var text = SessionLogView.combined()
+
+    /// The app's events, then the keyboard's.
+    static func combined() -> String {
+        let app = SessionDiagnostics.read()
+        let keyboard = SharedStore.shared.keyboardLog.joined(separator: "\n")
+        guard !keyboard.isEmpty else { return app }
+        return app + (app.isEmpty ? "" : "\n\n") + "Keyboard\n" + keyboard
+    }
 
     var body: some View {
         ScrollView {
@@ -506,9 +514,13 @@ private struct SessionLogView: View {
                 Button("Copy") { UIPasteboard.general.string = text }
             }
             ToolbarItem(placement: .topBarLeading) {
-                Button("Clear") { SessionDiagnostics.clear(); text = "" }
+                Button("Clear") {
+                    SessionDiagnostics.clear()
+                    SharedStore.shared.clearKeyboardLog()
+                    text = ""
+                }
             }
         }
-        .onAppear { text = SessionDiagnostics.read() }
+        .onAppear { text = SessionLogView.combined() }
     }
 }

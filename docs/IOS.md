@@ -51,7 +51,8 @@ because pings are dropped while a process is suspended.
 
 ### Mic tap
 
-1. The keyboard resolves the host app (below), writes a `start` command and pings.
+1. The keyboard resolves the host app ([Returning to the app](#returning-to-the-app)),
+   writes a `start` command and pings.
 2. If the heartbeat is fresh (under 3 s), the app is running. The keyboard waits
    up to 0.7 s for the app to acknowledge the command. The app starts recording
    from the background. No app switch. The app acknowledges only when it can
@@ -62,15 +63,60 @@ because pings are dropped while a process is suspended.
    `voiceiq://keyboard/start?cmd=<id>&host=<bundle id>`. The app starts the
    background session in the foreground (iOS refuses to activate audio from the
    background), starts the dictation, waits until the mic is live (0.6 s at
-   most), and opens the host's return URL. With no return URL it shows
+   most), and sends the user back to the host app. When it can't, it shows
    "Swipe right along the bottom edge to go back".
-4. Stop sends `stop`. The app transcribes, writes a `Delivery`, and pings. The
-   keyboard inserts the text with `textDocumentProxy.insertText`, adding a space
-   when it would run into the previous word. A result finished for a different
-   app, or more than two minutes ago, is not typed; Paste last still has it.
+4. Stop sends `stop`. The app transcribes, writes a `Delivery`, and pings.
+   Whichever app the keyboard is in when the result arrives gets it, even when
+   the dictation started in another app: the user stopped it there. The
+   keyboard inserts the text with `textDocumentProxy.insertText`, adding a
+   space when it would run into the previous word. Only the keyboard instance
+   on screen may type: iOS can keep an earlier instance alive in the same
+   process, still polling, with a text connection that reaches no field. The
+   keyboard that types a result marks it handled (`insertedDeliveryID`).
+5. Two seconds after delivering, the app checks `insertedDeliveryID`. If no
+   keyboard typed the result (the keyboard was closed, or the user is on a
+   screen with no text field), the app puts it on the clipboard and marks it
+   handled, so a keyboard opened later doesn't type it too. Paste last always
+   has it. The keyboard's decisions go to `SharedStore.keyboardLog`, shown
+   under "Keyboard" in Settings › Advanced › Session log.
 
 Ask shows the answer in a panel with Insert and Copy. Translate inserts the
 translation into the target language from Settings › Dictation.
+
+### Returning to the app
+
+The keyboard learns the host's bundle ID from two private UIKit surfaces
+(`HostAppResolver`, the approach Dictus uses): `_hostProcessIdentifier` on its
+input view controller gives the host's pid, and
+`_UIKeyboardArbiterClient.currentClientState` reports (bundle ID, pid) pairs.
+The pairs go into a pid table that lives as long as the keyboard process. The
+arbiter often still names the previous host when the keyboard appears, and
+after a bounce it names VoiceiQ or nothing, so the table keeps every pair it
+has seen: a host seen once in this keyboard process resolves from then on.
+Pids are handed out in sequence, so a stale entry would need a pid wrap to
+point at the wrong app. iOS offers no list of installed apps.
+
+`HostReturn.returnToHost` tries, in order:
+
+1. `AppLauncher.open(bundleID:)`: private `LSApplicationWorkspace
+   openApplicationWithBundleID:`, the same as picking the app in the app
+   switcher. It works for any app and resumes it where it was, including
+   Safari. The app confirms it left the foreground a second later; if not,
+   it falls through.
+2. The app's return URL: a user override from Settings, or the
+   `KnownAppSchemes` table.
+3. The swipe-back screen.
+
+System UI hosts (SpringBoard, Spotlight, SafariViewService, Shortcuts UI and
+compose extensions) skip step 1. Each bounce is recorded per bundle ID and
+shown in Settings › Return to Apps; the session log has a
+`return to <bundle id>: launched | url opened | launch refused` line.
+
+History and Home show the target app's name from its bundle ID
+(`AppNames`): the built-in table first, then a name looked up once on the App
+Store (`https://itunes.apple.com/lookup?bundleId=`, only the bundle ID is
+sent; Apple apps are skipped) and cached, then a guess from the last
+meaningful bundle ID segment (`com.acme.notes.ios` → "Notes", not "Ios").
 
 ### The background session
 
@@ -206,9 +252,11 @@ is `false`, so builds skip the export-compliance question.
 
 ## Known limits
 
-- The host-app resolver and the arbiter swizzle are private API. App Review may
-  reject them; if it does, delete `HostArbiterActivation.m` and the resolver
-  returns nil, which falls back to the swipe-back screen.
+- The host-app resolver, the arbiter swizzle and `AppLauncher` are private
+  API. App Review may reject them; if it does, delete `HostArbiterActivation.m`
+  (the resolver returns nil) and make `AppLauncher.open` return false. Both
+  fall back to return URLs and the swipe-back screen. `AppLauncher` is
+  verified in the simulator only so far.
 - iOS ends a Live Activity after eight hours. The session stays up, and the
   next mic tap bounces once to start a new activity.
 - The orange mic dot shows for the whole warm window.

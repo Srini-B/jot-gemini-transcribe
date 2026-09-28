@@ -35,9 +35,8 @@ enum HostAppResolver {
     private static var table = HostPidTable()
     private static let log = Logger(subsystem: "io.blue.voiceiq.ios.keyboard", category: "host")
 
-    /// Call when the keyboard appears. Retires evidence from the last host.
+    /// Call when the keyboard appears.
     static func keyboardWillAppear() {
-        table.noteAppearance()
         let activation = VIQHostArbiterActivation.activate()
         let connection = ensureArbiterConnection()
         log.info("arbiter \(activation, privacy: .public) (load \(VIQHostArbiterActivation.loadTimeOutcome(), privacy: .public)), connection \(connection, privacy: .public)")
@@ -58,10 +57,12 @@ enum HostAppResolver {
         harvest()
         guard let pid = (read("_hostProcessIdentifier", from: controller) as? NSNumber)?.intValue, pid > 0 else {
             log.info("host unresolved: no host pid")
+            KeyboardLog.note("host unresolved: no host pid")
             return nil
         }
         guard let bundleID = table.bundleId(forPid: pid) else {
             log.info("host unresolved: pid \(pid) not in table (\(table.count) known)")
+            KeyboardLog.note("host unresolved: pid \(pid) not in table (\(table.count) known)")
             return nil
         }
         return bundleID
@@ -96,28 +97,20 @@ enum HostAppResolver {
     }
 }
 
-/// Maps pids to bundle IDs and refuses to answer when the answer could be wrong.
+/// Bundle IDs by pid, as the arbiter reported them.
 ///
-/// iOS recycles pids and a keyboard process can live for hours, so an entry is
-/// only trusted during the keyboard appearance that recorded it. A miss costs
-/// the automatic return (the user swipes back instead); a wrong answer would
-/// open an app the user was not in, which is worse.
+/// The arbiter is often stale: on appearance it can still name the previous
+/// host. But every pair it reports was true, and stays true while that
+/// process lives, so entries are kept across appearances and a host seen
+/// once in this keyboard process resolves from then on. iOS hands out pids in
+/// sequence and wraps only at 99,999, so an entry naming a different, newer
+/// process on the same pid would need a wrap within this keyboard's life.
 struct HostPidTable {
-    private struct Entry {
-        let bundleId: String
-        var generation: Int
-    }
-
     static let maxEntries = 64
-    private var entries: [Int: Entry] = [:]
+    private var entries: [Int: String] = [:]
     private var insertionOrder: [Int] = []
-    private var generation = 0
 
     var count: Int { entries.count }
-
-    mutating func noteAppearance() {
-        generation &+= 1
-    }
 
     mutating func record(bundleId: String, forPid pid: Int) {
         guard !bundleId.isEmpty, pid > 0 else { return }
@@ -127,11 +120,10 @@ struct HostPidTable {
                 entries[insertionOrder.removeFirst()] = nil
             }
         }
-        entries[pid] = Entry(bundleId: bundleId, generation: generation)
+        entries[pid] = bundleId
     }
 
     func bundleId(forPid pid: Int) -> String? {
-        guard let entry = entries[pid], entry.generation == generation else { return nil }
-        return entry.bundleId
+        entries[pid]
     }
 }

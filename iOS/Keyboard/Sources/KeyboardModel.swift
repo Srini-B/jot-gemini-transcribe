@@ -60,7 +60,14 @@ final class KeyboardModel: ObservableObject {
 
     // MARK: - Lifecycle
 
+    /// The keyboard on screen. iOS can keep an earlier instance alive in the
+    /// same process, still polling, with a text connection that no longer
+    /// reaches any field; only this one may type.
+    private static weak var onScreen: KeyboardModel?
+    private let instanceTag = String(UUID().uuidString.prefix(4))
+
     func appeared() {
+        Self.onScreen = self
         hasFullAccess = controller?.hasFullAccess ?? false
         if hasFullAccess { store.noteKeyboardSeen() }
         observer = DarwinNotifier.observe(.state) { [weak self] in
@@ -78,6 +85,7 @@ final class KeyboardModel: ObservableObject {
     }
 
     func disappeared() {
+        if Self.onScreen === self { Self.onScreen = nil }
         if let observer { DarwinNotifier.removeObserver(observer) }
         observer = nil
         timer?.invalidate()
@@ -157,6 +165,7 @@ final class KeyboardModel: ObservableObject {
 
     private func start() {
         let host = controller.flatMap(HostAppResolver.currentHost(for:))
+        KeyboardLog.note("[\(instanceTag)] start in \(host ?? "an unresolved host")")
         let context = mode == .ask ? controller?.textDocumentProxy.selectedText : nil
         let command = KeyboardCommand(action: .start, mode: mode, context: context, hostBundleID: host)
         let alive = appAlive
@@ -185,21 +194,25 @@ final class KeyboardModel: ObservableObject {
 
     // MARK: - Results
 
+    /// Types a finished dictation into this field, once.
+    ///
+    /// Whichever app the keyboard is in when the result arrives gets it, even
+    /// if the dictation started in another app: the user stopped it here.
+    /// Only the keyboard on screen may type (iOS can keep an earlier instance
+    /// alive, still polling, with a text connection that reaches no field),
+    /// and a result is marked delivered only by the keyboard that types it.
+    /// When no keyboard types it, the app puts it on the clipboard.
     private func deliverIfNeeded() {
         guard let delivery = snapshot.delivery, delivery.id != store.insertedDeliveryID else { return }
+        guard Date().timeIntervalSince(delivery.createdAt) < Self.autoInsertWindow else { return }
+        guard Self.onScreen === self, controller?.viewIfLoaded?.window != nil else { return }
         if delivery.mode == .ask {
             if answer?.id != delivery.id { answer = delivery }
             return
         }
         store.insertedDeliveryID = delivery.id
-        guard Date().timeIntervalSince(delivery.createdAt) < Self.autoInsertWindow else { return }
-        // Finished for another app (the user moved on mid-dictation): never
-        // type it into this one. Paste last still has it.
-        if let origin = delivery.hostBundleID,
-           let here = controller.flatMap(HostAppResolver.currentHost(for:)), origin != here {
-            return
-        }
-        insert(delivery.text)
+        let typed = insert(delivery.text)
+        KeyboardLog.note(typed ? "[\(instanceTag)] result typed" : "[\(instanceTag)] result not typed: no text field")
     }
 
     private func showNoticeIfNeeded() {
@@ -213,14 +226,16 @@ final class KeyboardModel: ObservableObject {
     }
 
     /// Adds a space when the new text would otherwise run into the previous word.
-    private func insert(_ text: String) {
-        guard let proxy = controller?.textDocumentProxy, !text.isEmpty else { return }
+    @discardableResult
+    private func insert(_ text: String) -> Bool {
+        guard let proxy = controller?.textDocumentProxy, !text.isEmpty else { return false }
         var output = text
         if let previous = proxy.documentContextBeforeInput?.last, !previous.isWhitespace,
            let first = text.first, !first.isWhitespace, !first.isPunctuation {
             output = " " + output
         }
         proxy.insertText(output)
+        return true
     }
 
     // MARK: - Keys
@@ -235,5 +250,12 @@ final class KeyboardModel: ObservableObject {
 
     func insertReturn() {
         controller?.textDocumentProxy.insertText("\n")
+    }
+}
+
+/// Keyboard events for the app's Session log.
+enum KeyboardLog {
+    static func note(_ line: String) {
+        SharedStore.shared.appendKeyboardLog(line)
     }
 }

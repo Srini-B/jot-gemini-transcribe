@@ -22,7 +22,7 @@ import VoiceIQCore
 @MainActor
 final class HostReturn: ObservableObject {
     enum Outcome: String, Codable {
-        /// Opened the app's return URL.
+        /// Brought the app back, by bundle ID or its return URL.
         case returned
         /// Had a URL, but iOS would not open it.
         case openFailed
@@ -77,15 +77,34 @@ final class HostReturn: ObservableObject {
         KnownAppSchemes.returnURL(forHostId: host, overrides: overrides)
     }
 
-    /// Opens the host's return URL once `isRecording` says the mic is live (or
-    /// the ceiling passes). Calls `completion(false)` when the user has to
-    /// swipe back themselves.
+    /// Hosts that are not apps the user can be sent back to: system UI and
+    /// extensions. They keep the swipe-back screen.
+    static let notLaunchable: Set<String> = [
+        ownBundleID,
+        "com.apple.springboard",
+        "com.apple.Spotlight",
+        "com.apple.SafariViewService",
+        "com.apple.ShortcutsUI",
+        "com.apple.mobilesms.compose",
+        "com.apple.AppleMediaServicesUI.ComposeReviewExtension",
+    ]
+    /// How long to wait for iOS to switch apps after a launch before
+    /// treating it as failed and trying the URL.
+    static let launchCheckDelay: TimeInterval = 1.0
+
+    /// Sends the user back to `host` once `isRecording` says the mic is live
+    /// (or the ceiling passes). Tries, in order: bringing the app to the front
+    /// by bundle ID (resumes it where it was, works for any app), then its
+    /// return URL. Calls `completion(false)` when the user has to swipe back.
     func returnToHost(_ host: String?, isRecording: @escaping () -> Bool, completion: @escaping (Bool) -> Void) {
         guard let host, host != Self.ownBundleID else {
             completion(host == Self.ownBundleID)
             return
         }
-        guard let url = returnURL(for: host) else {
+        AppNames.lookUpIfNeeded(host)
+        let url = returnURL(for: host)
+        let launchable = !Self.notLaunchable.contains(host)
+        guard launchable || url != nil else {
             note(host: host, outcome: KnownAppSchemes.knownNoSchemeHosts.contains(host) ? .noWayBack : .noScheme)
             completion(false)
             return
@@ -96,13 +115,48 @@ final class HostReturn: ObservableObject {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { attempt() }
                 return
             }
-            UIApplication.shared.open(url, options: [:]) { [weak self] opened in
-                self?.note(host: host, outcome: opened ? .returned : .openFailed)
-                Log.session.info("return to \(host, privacy: .public): \(opened ? "opened" : "failed", privacy: .public)")
-                completion(opened)
+            guard launchable else {
+                openURL(url, host: host, completion: completion)
+                return
+            }
+            launch(host) { [weak self] launched in
+                if launched {
+                    self?.note(host: host, outcome: .returned)
+                    completion(true)
+                } else {
+                    self?.openURL(url, host: host, completion: completion)
+                }
             }
         }
         attempt()
+    }
+
+    /// Brings the host to the front and confirms that VoiceiQ actually left
+    /// the foreground; the private call can report success and do nothing.
+    private func launch(_ host: String, completion: @escaping (Bool) -> Void) {
+        guard AppLauncher.open(bundleID: host) else {
+            SessionDiagnostics.note("return to \(host): launch refused")
+            completion(false)
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.launchCheckDelay) {
+            let left = UIApplication.shared.applicationState != .active
+            SessionDiagnostics.note("return to \(host): \(left ? "launched" : "launch did not leave the app")")
+            completion(left)
+        }
+    }
+
+    private func openURL(_ url: URL?, host: String, completion: @escaping (Bool) -> Void) {
+        guard let url else {
+            note(host: host, outcome: KnownAppSchemes.knownNoSchemeHosts.contains(host) ? .noWayBack : .noScheme)
+            completion(false)
+            return
+        }
+        UIApplication.shared.open(url, options: [:]) { [weak self] opened in
+            self?.note(host: host, outcome: opened ? .returned : .openFailed)
+            SessionDiagnostics.note("return to \(host): url \(opened ? "opened" : "failed")")
+            completion(opened)
+        }
     }
 
     func note(host: String, outcome: Outcome) {
