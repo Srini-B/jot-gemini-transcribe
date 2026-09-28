@@ -455,6 +455,8 @@ final class DictationController {
                 onRetry: { [weak self] record in
                     Task { @MainActor [weak self] in
                         guard let self, let queue = self.retryQueue else { return }
+                        // Seconds pass before the new text arrives; say it started.
+                        self.showNotice("Transcribing again…", for: 30.0, sound: nil)
                         switch await queue.retrySingle(record) {
                         case .stillOffline:
                             self.showNotice("Still offline — will retry automatically when you're back", for: 4.0, sound: nil)
@@ -463,9 +465,15 @@ final class DictationController {
                         case .busy:
                             self.showNotice("Already retrying your queued dictations…", for: 2.5, sound: nil)
                         case .failed:
-                            self.showNotice("Retry didn't work — the row has the details", for: 3.0, sound: nil)
-                        case .recovered, .blocked, .alreadyDone:
-                            break // recovered → drain notice; blocked → onDrainBlocked notice
+                            self.showNotice(record.rawTranscript != nil
+                                            ? "Couldn't transcribe it again — the earlier text is kept"
+                                            : "Retry didn't work — the row has the details", for: 3.5, sound: nil)
+                        case .recovered:
+                            self.showNotice("Transcribed again — the new text is in History", for: 3.5, sound: .success)
+                        case .alreadyDone:
+                            self.showNotice("Couldn't find this recording", for: 3.0, sound: nil)
+                        case .blocked:
+                            break // onDrainBlocked shows the notice
                         }
                     }
                 },

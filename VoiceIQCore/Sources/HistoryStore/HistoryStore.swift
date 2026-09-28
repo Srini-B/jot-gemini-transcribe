@@ -222,6 +222,10 @@ public final class HistoryStore: @unchecked Sendable {
 
     // MARK: - Reads
 
+    public func record(id: String) -> DictationRecord? {
+        try? queue.read { db in try DictationRecord.fetchOne(db, key: id) }
+    }
+
     public func records(matching query: String? = nil, limit: Int = 500) -> [DictationRecord] {
         // History is a library of words + things needing attention — never an
         // event log. Visible: anything with a transcript; retryable failures and

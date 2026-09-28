@@ -46,7 +46,7 @@ onboarding makes you do it once so you believe it.
 **It never loses your words.** Audio goes to disk from the first millisecond, so
 a crash, a `kill -9`, or a flat battery costs you nothing — the recording is
 recovered on next launch. Offline, dictations queue and land when you reconnect.
-Every failure is retryable from History. Release the key mid-word and it keeps
+Every failure is retryable from History, and Retry transcribes any dictation again. Release the key mid-word and it keeps
 listening until you actually stop.
 
 **It is private by architecture.** Your voice goes from your Mac straight to the

@@ -387,6 +387,10 @@ struct HistoryPane: View {
 
     private func reload() {
         records = store.records(matching: query.isEmpty ? nil : query)
+        // An open detail sheet shows the new text after a Retry.
+        if let open = detailRecord, let fresh = store.record(id: open.id), fresh != open {
+            detailRecord = fresh
+        }
         stats = store.stats()
         costs = usage?.costBySession(ids: records.map(\.id)) ?? [:]
     }

@@ -110,13 +110,16 @@ public final class RetryQueue {
     /// Manual per-item retry (History context menu) — works on any record.
     /// Shares the draining guard so a manual retry can't double-process a record
     /// the drain is already sending (audit L20).
+    /// History's Retry: transcribes the recording again, including one that
+    /// already succeeded (the user retries because the text came out wrong).
+    /// A finished dictation keeps its text and status unless the new attempt
+    /// succeeds.
     public func retrySingle(_ record: DictationRecord) async -> RetryOutcome {
         guard !draining else { return .busy }
         draining = true
         defer { draining = false }
-        switch await process(record) {
+        switch await process(record, again: true) {
         case .recovered:
-            onDrained?(1)
             return .recovered
         case .stillOffline:
             return .stillOffline
@@ -140,6 +143,11 @@ public final class RetryQueue {
         case rateLimited(retryIn: TimeInterval)
     }
 
+    /// Delivered one way or another; the drain leaves these alone.
+    private static let finishedStatuses: Set<SessionMeta.Status> = [
+        .inserted, .copiedToClipboard, .awaitingChip, .heldSecure, .recovered,
+    ]
+
     private enum ProcessResult {
         case recovered, stillOffline, blocked(TranscriptionError), failed, skipped
         case rateLimited(TimeInterval)
@@ -150,23 +158,29 @@ public final class RetryQueue {
         (retryAfter ?? 60) + 2
     }
 
-    private func process(_ record: DictationRecord) async -> ProcessResult {
+    /// `again`: a manual Retry, which transcribes even a finished dictation.
+    /// The drain passes false and only picks up unfinished ones.
+    private func process(_ record: DictationRecord, again: Bool = false) async -> ProcessResult {
         let folder = record.folderURL
         guard var meta = SessionMeta.read(from: folder) else { return .skipped }
+        let finished = Self.finishedStatuses.contains(meta.status)
         // Re-read status from disk: a concurrent path may have finished it already.
-        if meta.status == .awaitingChip || meta.status == .inserted || meta.status == .recovered {
+        if finished, !again {
             return .skipped
         }
         // Transcript already exists (crash after transcription, audio since
         // purged): recover the WORDS instead of dead-ending on missing audio.
-        if meta.rawTranscript != nil {
+        let cafURL = FileLayout.audioCAF(in: folder)
+        if finished, !FileManager.default.fileExists(atPath: cafURL.path) {
+            return .failed // audio purged: nothing to transcribe again; keep the text
+        }
+        if meta.rawTranscript != nil, !finished {
             meta.status = .recovered
             meta.errorCode = nil
             meta.write(to: folder)
             store.upsert(meta: meta, folder: folder)
             return .recovered
         }
-        let cafURL = FileLayout.audioCAF(in: folder)
         guard FileManager.default.fileExists(atPath: cafURL.path) else {
             meta.status = .failed
             meta.errorCode = "audio_purged"
@@ -195,12 +209,22 @@ public final class RetryQueue {
             meta.errorCode = nil
             meta.errorMessage = nil
             // .recovered, NOT .awaitingChip: the text was never put on the
-            // clipboard, so no chip may promise "Ready to paste".
-            meta.status = .recovered
+            // clipboard, so no chip may promise "Ready to paste". A finished
+            // dictation keeps its status: it was delivered, just differently.
+            if !finished { meta.status = .recovered }
             meta.write(to: folder)
             store.upsert(meta: meta, folder: folder)
             return .recovered
         } catch let error as TranscriptionError {
+            // A finished dictation keeps its text; only report the failure.
+            if finished {
+                switch error {
+                case .offline, .network, .timeout: return .stillOffline
+                case .rateLimitedTransient(let retryAfter): return .rateLimited(Self.rateLimitWait(retryAfter))
+                case .auth, .rateLimitedDaily: return .blocked(error)
+                default: return .failed
+                }
+            }
             switch error {
             case .offline, .network, .timeout:
                 return .stillOffline
@@ -237,6 +261,7 @@ public final class RetryQueue {
             // Non-TranscriptionError (e.g. FLAC encode on a corrupt CAF): mark it
             // failed so the queue never spins on it (audit L3).
             Log.history.error("RetryQueue: unexpected error \(error)")
+            if finished { return .failed }
             meta.status = .failed
             meta.errorCode = "retry_unexpected"
             meta.write(to: folder)

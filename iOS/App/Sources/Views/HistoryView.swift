@@ -162,10 +162,22 @@ private struct HistoryRow: View {
 
 private struct HistoryDetail: View {
     @EnvironmentObject private var model: AppModel
-    let record: DictationRecord
+    @State private var record: DictationRecord
     let reload: () -> Void
     @State private var message: String?
     @State private var retrying = false
+
+    init(record: DictationRecord, reload: @escaping () -> Void) {
+        _record = State(initialValue: record)
+        self.reload = reload
+    }
+
+    /// As on the Mac: Retry needs something to retry, the recording or a
+    /// transcript. A finished dictation is transcribed again.
+    private var canRetry: Bool {
+        FileManager.default.fileExists(atPath: FileLayout.audioCAF(in: record.folderURL).path)
+            || record.rawTranscript != nil
+    }
 
     var body: some View {
         ScrollView {
@@ -179,7 +191,7 @@ private struct HistoryDetail: View {
                             .textSelection(.enabled)
                     }
                 }
-                if record.status == "failed" || record.status == "queuedForRetry" { retryCard }
+                if canRetry { retryCard }
                 cardGroup("Details") { details }
             }
             .padding(.horizontal, Theme.Spacing.page)
@@ -211,11 +223,13 @@ private struct HistoryDetail: View {
 
     private var retryCard: some View {
         Card {
-            Button(retrying ? "Retrying…" : "Retry") {
+            Button(retrying ? "Transcribing again…" : "Retry transcription") {
                 retrying = true
+                message = nil
                 Task {
                     message = await model.retry(record)
                     retrying = false
+                    if let fresh = model.historyStore?.record(id: record.id) { record = fresh }
                     reload()
                 }
             }

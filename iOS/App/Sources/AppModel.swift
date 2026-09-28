@@ -174,11 +174,12 @@ final class AppModel: ObservableObject {
     func retry(_ record: DictationRecord) async -> String? {
         guard let retryQueue else { return nil }
         switch await retryQueue.retrySingle(record) {
-        case .recovered, .alreadyDone: return nil
+        case .recovered: return "Transcribed again"
+        case .alreadyDone: return "Couldn't find this recording"
         case .stillOffline: return "Still offline. It will retry when you're back online."
         case .rateLimited(let wait): return "Rate limited. Retrying in \(Int(wait.rounded()))s."
         case .blocked: return "Check your API key in Settings"
-        case .failed: return "Retry failed"
+        case .failed: return record.rawTranscript != nil ? "Couldn't transcribe it again. The earlier text is kept." : "Retry failed"
         case .busy: return "Already retrying"
         }
     }
