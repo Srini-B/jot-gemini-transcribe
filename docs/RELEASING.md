@@ -6,8 +6,7 @@ package, and each has its own release script:
 | | macOS | iPhone |
 | --- | --- | --- |
 | Script | `scripts/release.sh` | `scripts/release-ios.sh` |
-| Channel | Notarized DMG and ZIP, shared directly | TestFlight, app "VoiceiQ Dictation" (6816685189) |
-| Bundle ID | `io.blue.voiceiq` | `io.blue.voiceiq.ios` (+ `.keyboard`, `.liveactivity`) |
+| Channel | Notarized DMG and ZIP, shared directly | TestFlight |
 
 Both scripts follow the same flow and stop at the first failure:
 
@@ -122,23 +121,18 @@ The script performs this sequence:
 4. Runs `scripts/archive-ios.sh`, which regenerates the project, archives
    Release to `build/ios/VoiceiQ.xcarchive` and exports
    `build/ios/export/VoiceiQ.ipa`.
-5. Verifies every bundle's signature, checks for the App Group
-   `group.io.blue.voiceiq`, and rejects `get-task-allow`.
+5. Verifies every bundle's signature, checks for the shared App Group, and
+   rejects `get-task-allow`.
 6. Uploads with `asc publish testflight --upload-only --wait` and lists the
    TestFlight groups. With `UPLOAD=xcode` it runs `xcodebuild -exportArchive`
    with the `upload` destination instead.
 
 ### One-time setup on a release Mac
 
-**Signing.** The identity `Apple Distribution: Blue Lobster Technology PTE. LTD
-(G8K3545FJ2)` must be in a keychain, and these profiles must be installed in
-`~/Library/Developer/Xcode/UserData/Provisioning Profiles`:
-
-| Profile | Bundle ID |
-| --- | --- |
-| VoiceiQ iOS App Store | `io.blue.voiceiq.ios` |
-| VoiceiQ Keyboard App Store | `io.blue.voiceiq.ios.keyboard` |
-| VoiceiQ Live Activity App Store | `io.blue.voiceiq.ios.liveactivity` |
+**Signing.** The team's Apple Distribution identity must be in a keychain,
+and the three App Store profiles named in `project.yml`
+(`PROVISIONING_PROFILE_SPECIFIER`) must be installed in
+`~/Library/Developer/Xcode/UserData/Provisioning Profiles`.
 
 On the Mac mini the key lives in `~/Library/Keychains/voiceiq-signing.keychain-db`,
 which the script unlocks with `~/.voiceiq-signing/keychain.pass`. With an asc
@@ -159,7 +153,8 @@ and TestFlight go through asc with the App Store Connect team API key
 | Private key | `~/.asc/keys/AuthKey_<KEY_ID>.p8` (0600) |
 | asc profile `voiceiq` | `~/.asc/config.json` (0600). The login keychain cannot be written from SSH or agent sessions, so asc keeps it in its config file. |
 
-Check it with `asc --profile voiceiq apps view --id 6816685189`. To set up
+Check it with `asc --profile voiceiq apps view --id APP_ID`, where `APP_ID` is
+the value in `scripts/release-ios.sh`. To set up
 another Mac, download a Team Key (App Store Connect → Users and Access →
 Integrations → App Store Connect API → Team Keys, App Manager role; the `.p8`
 downloads only once) and run:
@@ -193,12 +188,12 @@ create app records. For those, asc needs an Apple web session
 stay out of the release script:
 
 ```bash
-asc web app-groups create --name "VoiceiQ Shared" --identifier group.io.blue.voiceiq --confirm
-asc web apps create --name "VoiceiQ Dictation" --bundle-id io.blue.voiceiq.ios --sku voiceiq-ios
+asc web app-groups create --name "<name>" --identifier <app group> --confirm
+asc web apps create --name "<app name>" --bundle-id <app bundle id> --sku <sku>
 ```
 
-The first release was set up in the Developer portal by hand; the current
-state is listed in [IOS.md](IOS.md#apple-developer-setup-team-g8k3545fj2).
+The first release was set up in the Developer portal by hand; what the team
+needs is listed in [IOS.md](IOS.md#apple-developer-setup).
 
 ### Every iPhone release
 
@@ -206,4 +201,4 @@ state is listed in [IOS.md](IOS.md#apple-developer-setup-team-g8k3545fj2).
    Full Access, dictate in two apps (the second without a bounce), end the
    session from the Dynamic Island, and record a short meeting.
 2. External testers need Beta App Review: create an external group and run
-   `asc publish testflight --app 6816685189 --build-id BUILD_ID --group "<group>" --submit --confirm`.
+   `asc publish testflight --app APP_ID --build-id BUILD_ID --group "<group>" --submit --confirm`.

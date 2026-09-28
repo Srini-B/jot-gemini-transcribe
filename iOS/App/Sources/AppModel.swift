@@ -27,6 +27,7 @@ final class AppModel: ObservableObject {
     let meetings: MeetingEngine
     let session = VoiceSession()
     let hostReturn = HostReturn()
+    let setup = SetupMonitor()
     let historyStore: HistoryStore?
     let transcription: GeminiTranscriptionService
 
@@ -51,6 +52,9 @@ final class AppModel: ObservableObject {
     private var currentMode: KeyboardMode = .dictate
     private var lastLevelWrite = Date.distantPast
     private var previousState: DictationState = .idle
+    /// A background start failed to open the microphone. Until the app has
+    /// been in the foreground again, starts go through the app.
+    private var needsForeground = false
 
     init() {
         let client = GeminiClient(
@@ -98,6 +102,7 @@ final class AppModel: ObservableObject {
 
         bind()
         startHistoryServices()
+        ActionButtonBridge.toggle = { [weak self] in await self?.toggleFromActionButton() }
         commandObserver = DarwinNotifier.observe(.command) { [weak self] in
             Task { @MainActor in self?.drainCommands() }
         }
@@ -183,10 +188,18 @@ final class AppModel: ObservableObject {
         let commands = store.commands
         let start = commands.lastIndex { $0.id == store.handledCommandID }.map { $0 + 1 } ?? 0
         for command in commands[start...] where command.isFresh() && !processed.contains(command.id) {
-            // Without a live session the app cannot start the mic from the
-            // background. Leave the command for the launch URL the keyboard
-            // opens next.
-            if command.action == .start, !session.isActive { continue }
+            // Without a warm session the mic is closed and cannot be opened
+            // from the background. Leave the command for the launch URL the
+            // keyboard opens next.
+            if command.action == .start, !canStartInPlace {
+                if UIApplication.shared.applicationState != .active {
+                    SessionDiagnostics.note("keyboard start left for the app (keeper: \(session.keeperDescription), needsForeground: \(needsForeground))")
+                }
+                continue
+            }
+            if command.action == .start, UIApplication.shared.applicationState != .active {
+                SessionDiagnostics.note("keyboard start in place from the background (keeper: \(session.keeperDescription))")
+            }
             accept(command)
             handle(command)
             if command.action == .start, let host = command.hostBundleID {
@@ -198,6 +211,12 @@ final class AppModel: ObservableObject {
             lastActivityRequestID = request.id
             handle(request)
         }
+    }
+
+    private var canStartInPlace: Bool {
+        guard session.isActive else { return false }
+        if UIApplication.shared.applicationState == .active { return true }
+        return session.canRecordInBackground && !needsForeground
     }
 
     private func accept(_ command: KeyboardCommand) {
@@ -277,6 +296,8 @@ final class AppModel: ObservableObject {
     /// app. Start the session while in the foreground, start the dictation,
     /// then send the user back.
     private func startFromKeyboard(commandID: UUID, host: String?) {
+        SessionDiagnostics.note("keyboard start through the app (session active: \(session.isActive))")
+        needsForeground = false
         if !session.isActive {
             do {
                 try session.begin()
@@ -295,6 +316,50 @@ final class AppModel: ObservableObject {
             return false
         }) { [weak self] returned in
             if !returned { self?.showSwipeBack = true }
+        }
+    }
+
+    // MARK: - Action button
+
+    /// `ToggleDictationIntent`: stop the dictation in progress, or start one
+    /// for whatever app is in front. Runs in the background inside the
+    /// audio-recording intent, so the session and its Live Activity can start
+    /// here without opening VoiceiQ. The keyboard follows the shared snapshot.
+    func toggleFromActionButton() async {
+        switch coordinator.state {
+        case .recording, .warming:
+            SessionDiagnostics.note("action button: stop")
+            coordinator.handle(.finalize)
+            return
+        default:
+            break
+        }
+        if let problem = startBlocker() {
+            SessionDiagnostics.note("action button: blocked (\(problem))")
+            session.post(notice: problem)
+            return
+        }
+        do {
+            try session.begin(fromActionButton: true)
+        } catch {
+            SessionDiagnostics.note("action button: session did not start (\(error))")
+            session.post(notice: "Couldn't start the microphone")
+            return
+        }
+        SessionDiagnostics.note("action button: start")
+        target.host = nil
+        currentMode = .dictate
+        session.mode = .dictate
+        guard coordinator.handle(.begin, mode: .dictate) else {
+            session.post(notice: coordinator.coachingHint ?? "Still working on the last one")
+            return
+        }
+        coordinator.handle(.lockIn)
+        // The intent returns once recording is underway; iOS needs the Live
+        // Activity up by then.
+        for _ in 0..<20 {
+            if case .recording = coordinator.state { break }
+            try? await Task.sleep(for: .milliseconds(50))
         }
     }
 
@@ -327,6 +392,8 @@ final class AppModel: ObservableObject {
     }
 
     func appBecameActive() {
+        needsForeground = false
+        setup.refresh()
         drainCommands()
     }
 
@@ -346,6 +413,10 @@ final class AppModel: ObservableObject {
         defer { previousState = state }
         switch state {
         case .warming, .recording:
+            if case .recording = state, !(previousState.isRecording),
+               UIApplication.shared.applicationState != .active {
+                SessionDiagnostics.note("microphone started from the background (keeper: \(session.keeperDescription))")
+            }
             if session.recordingStartedAt == nil { session.recordingStartedAt = Date() }
             session.dictationPhase = .recording
         case .finalizing, .transcribing, .inserting:
@@ -355,7 +426,14 @@ final class AppModel: ObservableObject {
             session.recordingStartedAt = nil
             session.dictationPhase = .warm
             session.releaseBackgroundTime()
-            if state != previousState, let message = Self.notice(for: state, coordinator: coordinator) {
+            if state != previousState, case .failed(let failure) = state, Self.isMicrophoneFailure(failure),
+               UIApplication.shared.applicationState != .active {
+                // iOS refused the microphone to a backgrounded app. The next tap
+                // opens the app once, which always works.
+                SessionDiagnostics.note("background microphone start refused (\(failure)) with keeper \(self.session.keeperDescription); next dictation goes through the app")
+                needsForeground = true
+                session.post(notice: "Tap the mic again")
+            } else if state != previousState, let message = Self.notice(for: state, coordinator: coordinator) {
                 session.post(notice: message)
             }
         }
@@ -370,6 +448,13 @@ final class AppModel: ObservableObject {
 
     private func deliver(_ text: String, mode: KeyboardMode) {
         session.deliver(Delivery(mode: mode, text: text, hostBundleID: target.host))
+    }
+
+    static func isMicrophoneFailure(_ failure: DictationFailure) -> Bool {
+        switch failure {
+        case .audio, .noMicrophone: return true
+        default: return false
+        }
     }
 
     static func notice(for state: DictationState, coordinator: DictationCoordinator) -> String? {
@@ -418,4 +503,11 @@ final class KeyboardInserter: TextInserting {
 
 extension Notification.Name {
     static let voiceIQShowKeyboardSetup = Notification.Name("voiceIQShowKeyboardSetup")
+}
+
+private extension DictationState {
+    var isRecording: Bool {
+        if case .recording = self { return true }
+        return false
+    }
 }

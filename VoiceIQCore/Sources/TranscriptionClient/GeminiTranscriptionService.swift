@@ -17,13 +17,16 @@ import Foundation
 
 /// The transcription pipeline.
 ///
+///   Writing rules on (the default), under ten minutes:
+///   CAF → FLAC → flash model with the cleanup prompt and the audio, one call
+///       → ReplacementEngine → inserted text.
+///   Otherwise, or when that call fails:
 ///   CAF → FLAC → interactions (mode: smart, custom_vocabulary)
-///       → [optional] flash-lite cleanup for per-app tone → validation gate
+///       → [writing rules] flash cleanup → validation gate
 ///       → ReplacementEngine → inserted text.
 ///
-/// The model now does filler removal, self-correction collapse and list
-/// formatting itself, so the default path is ONE call. The cleanup pass survives
-/// as an opt-in because it is the only thing that carries per-app tone.
+/// The one-call path has no separate raw transcript, so there is nothing for
+/// the validation gate to compare against; the raw column holds the same text.
 ///
 /// Rules unchanged: one silent retry on transient transcribe failures; cleanup
 /// has a hard deadline and NEVER blocks a good transcript; every failure is a
@@ -61,6 +64,18 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
         // One request per chunk. A short dictation is one chunk, so this is the
         // old single-request path for everything under ten minutes.
         let ranges = try AudioChunker.ranges(cafURL: audioURL)
+
+        // A dictation with writing rules on goes to the flash model in one
+        // call, which hears the audio and writes the cleaned text. Anything
+        // that stops it (an error, a timeout, "no speech") falls through to
+        // transcription then cleanup below, so it can only cost time.
+        if context.mode == .dictate, policy.cleanupPass, ranges.count == 1,
+           !Self.oneCallRefused.contains(settings.activeProvider),
+           let text = await transcribeInOneCall(audioURL: audioURL, range: ranges[0],
+                                                durationSeconds: durationSeconds, context: context, config: config) {
+            return TranscriptionResult(rawTranscript: text, cleanedTranscript: text,
+                                       modelID: "\(config.cleanupModel)/one-call")
+        }
         // A multi-chunk upload can fail half way (Tier 1 meters ~400 s of audio
         // per minute, so chunk 1 is often refused right after chunk 0). Finished
         // chunks are kept next to the audio so a retry sends only the rest.
@@ -141,6 +156,68 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
             cleanedTranscript: cleaned,
             modelID: "\(config.transcribeModel)/\(policy.mode.rawValue)+\(config.cleanupModel)"
         )
+    }
+
+    /// The one-call dictation path. Returns nil when the caller should fall
+    /// back to the two-call pipeline.
+    private func transcribeInOneCall(
+        audioURL: URL, range: Range<AVAudioFramePosition>, durationSeconds: Double,
+        context: DictationContext, config: GeminiConfig
+    ) async -> String? {
+        let dictionary = DictionaryStore()
+        let prompt = PromptV1.dictationPrompt(
+            vocabulary: dictionary.sanitizedVocabulary(),
+            spellings: dictionary.spellings(),
+            instructions: settings.customInstructions,
+            imagesAttached: !context.screenshots.isEmpty
+        )
+        do {
+            let flac = try encodeChunk(audioURL: audioURL, range: range, index: 0)
+            // Measured at 2–4 s for up to three minutes of audio. Tighter than
+            // the transcription deadline because a miss still has the two-call
+            // path to run.
+            let deadline = 15 + durationSeconds / 8 + Double(context.screenshots.count * 2)
+            let response = try await client.cleanup(
+                prompt: prompt, images: context.screenshots, audioFLAC: flac,
+                model: config.cleanupModel, endpoint: config.endpoint, deadline: deadline, stage: .transcribe,
+                jsonSchema: PromptV1.dictationSchema
+            )
+            guard let answer = PromptV1.dictationText(fromJSON: response) else {
+                // Not the object the schema asked for: never paste the model's
+                // working. The two-call path has a validation gate.
+                Log.transcription.warning("one call returned something other than the JSON answer — transcribing, then cleaning up")
+                return nil
+            }
+            let text = ValidationGate.stripArtifacts(answer).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty, !text.contains(PromptV1.noSpeechToken) else {
+                Log.transcription.info("one call heard no speech — checking with the transcription model")
+                return nil
+            }
+            return ReplacementEngine.apply(dictionary.replacementRules(), to: text)
+        } catch {
+            if case .modelUnavailable = error as? TranscriptionError {
+                // A Vercel free-tier key is refused the flash model on every
+                // call; stop paying for the refusal until the app restarts.
+                Self.oneCallRefused.insert(settings.activeProvider)
+            }
+            Log.transcription.info("one call failed (\(String(describing: error), privacy: .public)) — transcribing, then cleaning up")
+            return nil
+        }
+    }
+
+    /// Providers whose key was refused the flash model this run.
+    private static let oneCallRefused = ProviderSet()
+    final class ProviderSet: @unchecked Sendable {
+        private let lock = NSLock()
+        private var providers: Set<ModelProvider> = []
+        func contains(_ provider: ModelProvider) -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            return providers.contains(provider)
+        }
+        func insert(_ provider: ModelProvider) {
+            lock.lock(); defer { lock.unlock() }
+            providers.insert(provider)
+        }
     }
 
     /// The cleanup stage on its own, for transcripts the live stream produced.

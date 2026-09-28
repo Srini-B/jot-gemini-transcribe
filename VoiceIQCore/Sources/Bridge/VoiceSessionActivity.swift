@@ -68,6 +68,37 @@ public struct StopDictationIntent: LiveActivityIntent {
     }
 }
 
+/// Where `ToggleDictationIntent` hands off inside the app. The app sets it at
+/// launch; iOS runs the intent in the app's process (it is a
+/// `LiveActivityIntent`), launching the app in the background if needed.
+@MainActor
+public enum ActionButtonBridge {
+    public static var toggle: (@MainActor () async -> Void)?
+}
+
+/// The Control Center control (and the Action button, when the user assigns
+/// the control to it). Starts a dictation without opening VoiceiQ, or stops
+/// the one in progress. As an audio-recording intent it may open the
+/// microphone from the background; iOS requires a Live Activity for as long
+/// as it records, which the app starts before returning.
+@available(iOS 18.0, *)
+public struct ToggleDictationIntent: AudioRecordingIntent, LiveActivityIntent {
+    public static let title: LocalizedStringResource = "Dictate with VoiceiQ"
+    public static let description = IntentDescription("Starts or stops a VoiceiQ dictation.")
+
+    public init() {}
+
+    @MainActor
+    public func perform() async throws -> some IntentResult {
+        // A cold launch can reach here before the app has finished setting up.
+        for _ in 0..<30 where ActionButtonBridge.toggle == nil {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        await ActionButtonBridge.toggle?()
+        return .result()
+    }
+}
+
 /// "Stop" in the Dynamic Island while recording a meeting.
 public struct StopMeetingIntent: LiveActivityIntent {
     public static let title: LocalizedStringResource = "Stop Meeting Recording"

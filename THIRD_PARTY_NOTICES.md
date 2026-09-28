@@ -3,7 +3,8 @@
 ## Fonts
 
 ### Google Sans Flex
-- File: `App/Resources/Fonts/GoogleSansFlex/GoogleSansFlex-Regular.ttf` (variable font)
+- File: `App/Resources/Fonts/GoogleSansFlex/GoogleSansFlex-Regular.ttf` (variable font), with an
+  identical copy and license in `iOS/App/Resources/Fonts/` for the iPhone app
 - Copyright: Google LLC / Font Bureau (David Berlow)
 - License: SIL Open Font License 1.1 — see `App/Resources/Fonts/GoogleSansFlex/OFL-GoogleSansFlex.txt`
 - Source: served via Google Fonts (fonts.google.com/specimen/Google+Sans+Flex); binary

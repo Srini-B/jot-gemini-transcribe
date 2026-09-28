@@ -326,8 +326,14 @@ public struct SettingsStore: Sendable {
     /// different endpoint entirely. Rather than let the two contradict each other
     /// silently, the hatch wins and live stands down.
     public var liveTranscriptionActive: Bool {
-        liveTranscription && !usesLegacyTranscribeEndpoint
+        liveTranscription && !usesLegacyTranscribeEndpoint && liveTranscriptionSupported
     }
+
+    /// Only Google's own endpoint serves the live model to this app. OpenRouter
+    /// has no streaming transcription. Vercel lists
+    /// `google/gemini-3.5-transcribe-live` over its beta WebSocket protocol,
+    /// which the app does not speak yet.
+    public var liveTranscriptionSupported: Bool { activeProvider == .gemini }
 
     // Raw override values for the Settings UI — panes must not duplicate the
     // defaults keys (a rename would silently desync display from effect).

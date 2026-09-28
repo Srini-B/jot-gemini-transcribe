@@ -29,6 +29,69 @@ public enum PromptV1 {
         imagesAttached: Bool = false,
         audioAttached: Bool = false
     ) -> String {
+        var sections = sharedSections(vocabulary: vocabulary, spellings: spellings,
+                                      instructions: instructions, imagesAttached: imagesAttached)
+        if audioAttached {
+            sections.append("AUDIO:\nThe attached recording is the dictation itself and is authoritative for the words. RAW is a machine transcript of that recording and can contain recognition errors, wrong sentence boundaries, and merged or split words; where the audio clearly says something different, follow the audio. Still output only the cleaned text.")
+        }
+        sections.append(examples)
+        sections.append(layoutReminder)
+        sections.append("RAW: \(raw)\nCLEAN:")
+        return sections.joined(separator: "\n\n")
+    }
+
+    /// Model output meaning "the recording has no speech" in the one-call path.
+    public static let noSpeechToken = "<<NO_SPEECH>>"
+
+    /// One call for a dictation: the model hears the recording and writes the
+    /// cleaned text directly, with the same rules, dictionary and examples as
+    /// the cleanup pass. MEASURED 2026-09-28 on gemini-3.8-flash: 2.4 s for a
+    /// 21 s dictation and 3.7 s for 164 s, against 7.5 s and 10.5 s for
+    /// transcription then cleanup, on both Google's endpoint and OpenRouter.
+    public static func dictationPrompt(
+        vocabulary: [String] = [],
+        spellings: [(wrong: String, right: String)] = [],
+        instructions: String? = nil,
+        imagesAttached: Bool = false
+    ) -> String {
+        var sections = sharedSections(vocabulary: vocabulary, spellings: spellings,
+                                      instructions: instructions, imagesAttached: imagesAttached)
+        sections.append(examples)
+        sections.append(layoutReminder)
+        sections.append("The dictation is the attached audio recording; there is no RAW text. Hear every word the speaker says, then write CLEAN for it by the rules above. Never add words that were not spoken. Answer with a JSON object whose only field, \"text\", is CLEAN and nothing else: no notes, timestamps, drafts or reasoning. If the recording has no intelligible speech, \"text\" is exactly \(noSpeechToken).")
+        return sections.joined(separator: "\n\n")
+    }
+
+    /// The one-call answer: `{"text": "..."}`.
+    public static let dictationSchema: [String: Any] = [
+        "type": "object",
+        "properties": ["text": ["type": "string"]],
+        "required": ["text"],
+        "additionalProperties": false,
+    ]
+
+    /// The `text` of a one-call answer, or nil when the reply is not that
+    /// object (a model that ignored the schema, or its working leaking out).
+    public static func dictationText(fromJSON reply: String) -> String? {
+        var body = reply.trimmingCharacters(in: .whitespacesAndNewlines)
+        if body.hasPrefix("```") {
+            body = body.replacingOccurrences(of: "^```[a-z]*\\s*|\\s*```$", with: "", options: .regularExpression)
+        }
+        guard let data = body.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let text = object["text"] as? String else { return nil }
+        return text
+    }
+
+    // Last thing before the transcript: the layout decision is the rule the
+    // model drops most often on long dictations, more so with audio attached
+    // (measured 2026-09-26), so it is restated here.
+    private static let layoutReminder = "Before writing CLEAN, decide the layout. Count the separate requests, tasks, or reported problems this dictation hands its reader to act on. Two or more become a numbered list, one item each with all of its sentences. Questions, context, and updates spoken before the first one stay as prose above the list. One request, a question, a status update, or a short conversational message stays prose."
+
+    private static func sharedSections(
+        vocabulary: [String], spellings: [(wrong: String, right: String)],
+        instructions: String?, imagesAttached: Bool
+    ) -> [String] {
         var sections: [String] = [rules]
         // The user's writing rules sit between the fixed rules and the examples
         // so the cacheable prefix stays stable across dictations. They are
@@ -56,16 +119,7 @@ public enum PromptV1 {
         if imagesAttached {
             sections.append("SCREEN CONTEXT:\nThe attached screenshots show what the user was looking at while dictating. Use them only to resolve the spelling of names, identifiers, file paths, URLs, and terms that appear on screen. Never add screen content that the user did not speak.")
         }
-        if audioAttached {
-            sections.append("AUDIO:\nThe attached recording is the dictation itself and is authoritative for the words. RAW is a machine transcript of that recording and can contain recognition errors, wrong sentence boundaries, and merged or split words; where the audio clearly says something different, follow the audio. Still output only the cleaned text.")
-        }
-        sections.append(examples)
-        // Last thing before the transcript: the layout decision is the rule
-        // the model drops most often on long dictations, more so with audio
-        // attached (measured 2026-09-26), so it is restated here.
-        sections.append("Before writing CLEAN, decide the layout. Count the separate requests, tasks, or reported problems this dictation hands its reader to act on. Two or more become a numbered list, one item each with all of its sentences. Questions, context, and updates spoken before the first one stay as prose above the list. One request, a question, a status update, or a short conversational message stays prose.")
-        sections.append("RAW: \(raw)\nCLEAN:")
-        return sections.joined(separator: "\n\n")
+        return sections
     }
 
     static let rules = """

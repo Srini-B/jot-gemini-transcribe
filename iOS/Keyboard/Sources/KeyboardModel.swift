@@ -62,7 +62,7 @@ final class KeyboardModel: ObservableObject {
 
     func appeared() {
         hasFullAccess = controller?.hasFullAccess ?? false
-        if hasFullAccess { store.keyboardSeenAt = Date() }
+        if hasFullAccess { store.noteKeyboardSeen() }
         observer = DarwinNotifier.observe(.state) { [weak self] in
             Task { @MainActor in self?.refresh() }
         }

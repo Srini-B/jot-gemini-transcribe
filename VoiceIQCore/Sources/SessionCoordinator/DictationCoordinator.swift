@@ -61,8 +61,14 @@ public final class DictationCoordinator: ObservableObject {
     static let trailingSpeechThreshold: Float = 0.08
     /// Quiet this long ⇒ they finished the word.
     static let trailingQuietToStop: TimeInterval = 0.25
-    /// Hard cap so a noisy room can never hold a session open.
+    /// Hard cap so a noisy room can never hold a session open. On iPhone the
+    /// stop is a tap on the keyboard, made after looking at the screen, so the
+    /// hand rarely runs ahead of the mouth and a long tail only adds wait.
+    #if os(iOS)
+    static let trailingCaptureCap: TimeInterval = 0.6
+    #else
     static let trailingCaptureCap: TimeInterval = 1.5
+    #endif
     /// How far above the measured room a level must sit to still read as speech.
     /// Only ever raises the bar from `trailingSpeechThreshold`, never lowers it.
     static let trailingFloorMarginDB: Double = 3

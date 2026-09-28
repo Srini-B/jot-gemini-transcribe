@@ -131,12 +131,14 @@ public actor GeminiClient {
         model: String,
         endpoint: URL,
         deadline: TimeInterval,
-        stage: UsageStage = .cleanup
+        stage: UsageStage = .cleanup,
+        jsonSchema: [String: Any]? = nil
     ) async throws -> String {
         let via = provider()
         if via != .gemini {
             return try await gatewayChat(prompt: prompt, images: images, audioFLAC: audioFLAC,
-                                         model: model, deadline: deadline, stage: stage, via: via)
+                                         model: model, deadline: deadline, stage: stage,
+                                         jsonSchema: jsonSchema, via: via)
         }
         let thinkingConfig: [String: Any] = model.hasPrefix("gemini-2")
             ? ["thinkingBudget": 0]
@@ -148,15 +150,23 @@ public actor GeminiClient {
         if let audioFLAC {
             parts.append(["inline_data": ["mime_type": "audio/flac", "data": audioFLAC.base64EncodedString()]])
         }
+        var generationConfig: [String: Any] = [
+            "temperature": 0,
+            "thinkingConfig": thinkingConfig,
+        ]
+        if let jsonSchema {
+            // Structured output keeps the model's working out of the answer:
+            // with audio attached, gemini-3.8-flash sometimes wrote its
+            // re-listening and drafts as plain text before the result.
+            generationConfig["responseMimeType"] = "application/json"
+            generationConfig["responseJsonSchema"] = jsonSchema
+        }
         let body: [String: Any] = [
             "contents": [[
                 "role": "user",
                 "parts": parts,
             ]],
-            "generationConfig": [
-                "temperature": 0,
-                "thinkingConfig": thinkingConfig,
-            ],
+            "generationConfig": generationConfig,
         ]
         return try await generateContent(body: body, model: model, endpoint: endpoint, deadline: deadline, stage: stage)
     }
@@ -262,6 +272,13 @@ public actor GeminiClient {
 
         let data: Data
         let response: URLResponse
+        let started = DispatchTime.now()
+        defer {
+            // One line per model call, so a slow dictation can be split into
+            // upload/transcription and cleanup from the device log alone.
+            let ms = Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000
+            Log.transcription.info("call \(stage.rawValue, privacy: .public) via \(via.rawValue, privacy: .public) (\(modelLabel, privacy: .public)) took \(ms, format: .fixed(precision: 0))ms, sent \(body.count) bytes")
+        }
         do {
             // URLRequest.timeoutInterval is an IDLE timer; enforce the true
             // overall deadline ourselves (audit L5).

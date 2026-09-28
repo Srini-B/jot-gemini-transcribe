@@ -30,13 +30,18 @@ struct VoiceIQMobileApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @Environment(\.scenePhase) private var scenePhase
 
+    init() {
+        Theme.applyAppearance()
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environmentObject(delegate.model)
                 .environmentObject(delegate.model.session)
                 .environmentObject(delegate.model.hostReturn)
-                .tint(Brand.accent)
+                .environmentObject(delegate.model.setup)
+                .tint(Theme.Colors.accent)
                 .onOpenURL { delegate.model.open($0) }
         }
         .onChange(of: scenePhase) { _, phase in
@@ -47,9 +52,4 @@ struct VoiceIQMobileApp: App {
             }
         }
     }
-}
-
-enum Brand {
-    static let accent = Color("AccentColor")
-    static let recording = Color(red: 0.92, green: 0.26, blue: 0.21)
 }

@@ -83,6 +83,19 @@ public final class SharedStore: @unchecked Sendable {
         set { defaults.set(newValue?.timeIntervalSince1970, forKey: Key.keyboardSeenAt) }
     }
 
+    /// Called by the keyboard each time it appears with Full Access. Pings the
+    /// app so a setup screen on show updates at once.
+    public func noteKeyboardSeen() {
+        keyboardSeenAt = Date()
+        DarwinNotifier.post(.keyboard)
+    }
+
+    /// Rereads values another process wrote. UserDefaults caches per process;
+    /// this drops the cache so a value the keyboard just wrote is visible.
+    public func reloadFromDisk() {
+        defaults.synchronize()
+    }
+
     // MARK: - Live Activity writes
 
     /// The last Dynamic Island button press. Writer: the Live Activity intents.

@@ -149,12 +149,14 @@ struct DictationPane: View {
                     // live cannot run alongside it. Disabling the control says so;
                     // leaving it tappable but inert is the exact silent no-op this
                     // app keeps writing comments about.
-                    .disabled(settings.usesLegacyTranscribeEndpoint)
+                    .disabled(settings.usesLegacyTranscribeEndpoint || !settings.liveTranscriptionSupported)
             } header: {
                 Text("Experimental")
             } footer: {
                 if settings.usesLegacyTranscribeEndpoint {
                     Text("Live transcription is unavailable while the legacy transcription endpoint is on in Advanced.")
+                } else if !settings.liveTranscriptionSupported {
+                    Text("Live transcription runs only with Google AI Studio as the provider.")
                 } else {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Live streams your voice as you speak instead of uploading at the end. It uses a separate model with a small daily request quota on free keys, and if the connection stumbles it falls back to the normal upload, so nothing is lost. Loud rooms judges your voice against the actual room noise instead of a fixed level.")

@@ -26,8 +26,15 @@ final class LiveActivityController {
     typealias State = VoiceSessionAttributes.ContentState
 
     /// The user swiped the activity away, or iOS ended it (it caps a Live
-    /// Activity at eight hours). Either way the session should end with it.
+    /// Activity at eight hours). The session stays warm; without an activity
+    /// iOS will not let the app start the microphone from the background, so
+    /// the next dictation opens the app once and a new activity starts there.
     var onEndedOutsideApp: (() -> Void)?
+
+    /// True while an activity is on screen. iOS lets a backgrounded app start
+    /// recording only while it has one (observed on device: with Live
+    /// Activities turned off, the second in-place dictation failed to start).
+    var isRunning: Bool { activity?.activityState == .active }
 
     private var activity: Activity<VoiceSessionAttributes>?
     private var lastState: State?
@@ -41,8 +48,11 @@ final class LiveActivityController {
         }
     }
 
+    /// Starts an activity if none is running. Only works while the app is in
+    /// the foreground; ActivityKit refuses the request from the background.
     func start(_ state: State) {
-        guard activity == nil else { update(state); return }
+        if isRunning { update(state); return }
+        activity = nil
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
             Log.session.info("live activities disabled by the user")
             return
@@ -57,7 +67,7 @@ final class LiveActivityController {
             lastState = state
             watch(activity)
         } catch {
-            Log.session.error("live activity request failed: \(String(describing: error), privacy: .public)")
+            SessionDiagnostics.note("live activity request failed: \(error)")
         }
     }
 

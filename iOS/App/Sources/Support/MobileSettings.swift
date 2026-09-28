@@ -33,6 +33,36 @@ enum MobileSettings {
         set { defaults.set(newValue, forKey: "mobileOnboardingDone") }
     }
 
+    /// The onboarding page the user last reached. iOS can end the app while
+    /// they are in Settings turning on the keyboard, so setup resumes here
+    /// instead of starting over.
+    static var onboardingStep: Int {
+        get { defaults.integer(forKey: "mobileOnboardingStep") }
+        set { defaults.set(newValue, forKey: "mobileOnboardingStep") }
+    }
+
+    /// How long the mic stays open after a dictation, so the next keyboard
+    /// tap records in place. When it runs out the session ends, and the next
+    /// tap opens VoiceiQ once.
+    enum WarmWindow: Int, CaseIterable, Identifiable {
+        case never = 0, fiveSeconds = 5, tenSeconds = 10, thirtySeconds = 30, oneMinute = 60
+
+        var id: Int { rawValue }
+        var seconds: TimeInterval { TimeInterval(rawValue) }
+        var label: String {
+            switch self {
+            case .never: return "Never"
+            case .oneMinute: return "1 minute"
+            default: return "\(rawValue) seconds"
+            }
+        }
+    }
+
+    static var warmWindow: WarmWindow {
+        get { WarmWindow(rawValue: defaults.object(forKey: "warmWindowSeconds") as? Int ?? 30) ?? .thirtySeconds }
+        set { defaults.set(newValue.rawValue, forKey: "warmWindowSeconds") }
+    }
+
     static let keyboardBundleID = "io.blue.voiceiq.ios.keyboard"
 
     /// The keyboard is in Settings › General › Keyboard › Keyboards.
@@ -83,6 +113,8 @@ enum AppNames {
 
     static func displayName(for bundleID: String) -> String {
         if let name = known[bundleID] { return name }
+        // Our own Try field: the last segment would read "Ios".
+        if bundleID == Bundle.main.bundleIdentifier { return "VoiceiQ" }
         let last = bundleID.split(separator: ".").last.map(String.init) ?? bundleID
         return last.prefix(1).uppercased() + last.dropFirst()
     }

@@ -52,6 +52,9 @@ extension GeminiClient {
         return "google/\(id)"
     }
 
+    /// OpenRouter slugs of Google's priority-tier endpoints.
+    static let openRouterPriorityEndpoints = ["google-ai-studio/priority", "google-vertex/global/priority"]
+
     static func gatewayEndpoint(_ via: ModelProvider) -> URL {
         via == .vercel ? vercelEndpoint : openRouterEndpoint
     }
@@ -107,6 +110,16 @@ extension GeminiClient {
             // Same knob as thinkingLevel "low" on the native API.
             "reasoning": ["effort": "low"],
         ]
+        if via == .openRouter {
+            // OpenRouter load-balances by price by default. A dictation waits on
+            // this call, so ask for the fastest endpoint of the same model.
+            // Google's endpoints come in flex (half price, measured 15–64 s),
+            // standard, and priority (1.8× standard) tiers; priority is never
+            // used. Measured 2026-09-28: this routes to Google AI Studio's
+            // standard tier at the standard price, 1.8–2.4 s against 2.7–3.5 s.
+            // https://openrouter.ai/docs/features/provider-routing
+            body["provider"] = ["sort": "latency", "ignore": Self.openRouterPriorityEndpoints]
+        }
         if let jsonSchema {
             body["response_format"] = ["type": "json_schema",
                                        "json_schema": ["name": "result", "strict": true, "schema": jsonSchema] as [String: Any]]

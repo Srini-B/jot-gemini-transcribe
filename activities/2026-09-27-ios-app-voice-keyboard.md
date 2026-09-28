@@ -96,15 +96,14 @@ Muesli, Handy, Bob). Research report: https://ordyse4h6ovt.postplan.dev
 
 ### Apple accounts (team G8K3545FJ2, signed in as a team Admin)
 
-- Registered App Group `group.io.blue.voiceiq` and App IDs
-  `io.blue.voiceiq.ios`, `.keyboard`, `.liveactivity`. Each ID has App Groups
+- Registered the App Group and the three App IDs. Each ID has App Groups
   enabled and assigned. This was done in Chrome through Cua Driver.
 - Created an Apple Distribution certificate from a CSR generated on the Mac
   mini. The key stays in `~/.voiceiq-signing` and a dedicated
   `voiceiq-signing` keychain on the Mac mini.
 - Created three App Store provisioning profiles.
-- Created the App Store Connect app "VoiceiQ Dictation" (6816685189, SKU
-  `voiceiq-ios`). "VoiceiQ" was already taken.
+- Created the App Store Connect app "VoiceiQ Dictation". "VoiceiQ" was
+  already taken.
 - Created the internal TestFlight group "VoiceiQ Internal" with automatic
   distribution and no testers.
 - asc (asccli.sh) could not be used. The account has no App Store Connect API
@@ -113,7 +112,7 @@ Muesli, Handy, Bob). Research report: https://ordyse4h6ovt.postplan.dev
 ### Upload
 
 - Archived and exported on the Mac mini (Xcode 27.0). `codesign --verify
-  --deep --strict` passed. All three bundles carry `group.io.blue.voiceiq`,
+  --deep --strict` passed. All three bundles carry the App Group,
   `beta-reports-active` and `get-task-allow` false.
 - The Mac mini's Xcode has no signed-in account. The archive was uploaded from
   the MacBook, whose Xcode is signed in to the team. It ran as

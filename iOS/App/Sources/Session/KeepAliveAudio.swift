@@ -15,17 +15,20 @@
 import AVFoundation
 import VoiceIQCore
 
-/// Keeps the app running in the background between dictations without the
-/// microphone.
+/// Keeps the app running in the background, with the microphone open, for the
+/// warm window after a dictation.
 ///
-/// iOS suspends a backgrounded app unless it is playing or recording. Recording
-/// the whole time would light the orange mic indicator; instead a playback-only
-/// engine loops silence. It never touches `inputNode`, so the input unit stays
-/// off. Because the `.playAndRecord` session is already active and the app is
-/// running, a dictation can start the mic from the background on demand.
+/// iOS lets a backgrounded app start recording only while it is already
+/// recording. Measured on device (builds 13–15): with silent playback alone, or
+/// with a Live Activity up, every in-place start failed; with a visible PiP it
+/// worked. So the keep-alive engine loops silence and also runs a discarding
+/// tap on `inputNode`: the mic stays open (the orange dot shows) and each
+/// dictation's own capture engine starts alongside it. The warm window, set in
+/// Settings › Dictation, decides how long this lasts after a dictation.
 ///
-/// The session must be started while the app is in the foreground: iOS refuses
-/// to activate an audio session from the background.
+/// The session must be started while the app is in the foreground, or inside
+/// the Action button's audio-recording intent: iOS refuses to activate an
+/// audio session from the background otherwise.
 @MainActor
 final class KeepAliveAudio {
     /// An interruption (a call, Siri) began. The mic is gone until it ends.
@@ -98,6 +101,12 @@ final class KeepAliveAudio {
         engine.attach(player)
         let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 2)!
         engine.connect(player, to: engine.mainMixerNode, format: format)
+        // Holds the microphone open. Buffers are dropped; nothing is recorded.
+        let input = engine.inputNode
+        let inputFormat = input.outputFormat(forBus: 0)
+        if inputFormat.sampleRate > 0, inputFormat.channelCount > 0 {
+            input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { _, _ in }
+        }
         guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 44_100) else { return }
         buffer.frameLength = buffer.frameCapacity
         if let channels = buffer.floatChannelData {
@@ -121,6 +130,7 @@ final class KeepAliveAudio {
 
     private func stopSilence() {
         player?.stop()
+        engine?.inputNode.removeTap(onBus: 0)
         engine?.stop()
         player = nil
         engine = nil

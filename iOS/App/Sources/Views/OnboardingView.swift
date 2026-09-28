@@ -12,159 +12,220 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import AVFoundation
 import SwiftUI
-import VoiceIQCore
 
-/// Four steps: key, microphone, keyboard, try it.
+/// Welcome, keys, permissions, try it. The page is saved as the user moves,
+/// because iOS may end the app while they are in Settings.
 struct OnboardingView: View {
     let onFinished: () -> Void
-    @State private var step = Step.welcome
-    @State private var status = SetupStatus.current()
-    @State private var tryText = ""
-    @Environment(\.scenePhase) private var scenePhase
+    @EnvironmentObject private var setup: SetupMonitor
+    @State private var step = Step(rawValue: MobileSettings.onboardingStep) ?? .welcome
+    @State private var forward = true
+    /// The CTAs hide while typing: with the keyboard's Done bar above them they
+    /// covered the key field the scroll view had just brought into view.
+    @State private var keyboardShown = false
 
-    enum Step: Int, CaseIterable { case welcome, key, microphone, keyboard, tryIt }
+    enum Step: Int, CaseIterable { case welcome, keys, permissions, tryIt }
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 24) {
-                ProgressView(value: Double(step.rawValue), total: Double(Step.allCases.count - 1))
-                    .padding(.horizontal)
-                content
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .padding(.horizontal, 24)
-                footer
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 16)
+        VStack(spacing: 0) {
+            if step != .welcome {
+                OnboardingHeader(step: step.rawValue, total: Step.allCases.count - 1, back: back)
+                    .padding(.horizontal, Theme.Spacing.page)
+                    .padding(.top, Theme.Spacing.s)
             }
-            .padding(.top, 12)
-            .onChange(of: scenePhase) { _, phase in
-                if phase == .active { status = SetupStatus.current() }
+            ScrollView {
+                page
+                    .padding(.horizontal, Theme.Spacing.page)
+                    .padding(.top, step == .welcome ? 0 : Theme.Spacing.xl)
+                    .padding(.bottom, Theme.Spacing.xl)
+                    .frame(maxWidth: .infinity)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .keyboardDismissable()
+            if !keyboardShown {
+                footer
+                    .padding(.horizontal, Theme.Spacing.page)
+                    .padding(.top, Theme.Spacing.m)
+                    .padding(.bottom, Theme.Spacing.s)
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            keyboardShown = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            keyboardShown = false
+        }
+        .background(Theme.Colors.canvas.ignoresSafeArea())
+        .onTapGesture { UIApplication.shared.endEditing() }
+        .onAppear { setup.refresh() }
+        .animation(.easeInOut(duration: 0.25), value: step)
     }
 
-    @ViewBuilder private var content: some View {
-        switch step {
-        case .welcome:
-            VStack(spacing: 16) {
-                Spacer()
-                Image(systemName: "waveform.circle.fill")
-                    .font(.system(size: 88))
-                    .foregroundStyle(Brand.accent)
-                Text("VoiceiQ").font(.largeTitle.bold())
-                Text("Tap the mic. Speak. It types.")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
-        case .key:
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Add your API key").font(.title.bold())
-                KeyForm(provider: .gemini) { status = SetupStatus.current() }
-                NavigationLink("Use OpenRouter or Vercel instead") { KeysView() }
-                    .font(.subheadline)
-            }
-        case .microphone:
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Allow the microphone").font(.title.bold())
-                SetupRow(title: "Microphone", done: status.micGranted)
-            }
-        case .keyboard:
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Add the keyboard").font(.title.bold())
-                KeyboardSetupSteps(status: status)
-            }
-        case .tryIt:
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Try it").font(.title.bold())
-                TextField("Switch to the VoiceiQ keyboard and tap the mic", text: $tryText, axis: .vertical)
-                    .lineLimit(4...10)
-                    .textFieldStyle(.roundedBorder)
+    @ViewBuilder private var page: some View {
+        Group {
+            switch step {
+            case .welcome: WelcomePage()
+            case .keys: KeysPage()
+            case .permissions: PermissionsPage()
+            case .tryIt: TryItPage()
             }
         }
+        .id(step)
+        .transition(.asymmetric(
+            insertion: .move(edge: forward ? .trailing : .leading).combined(with: .opacity),
+            removal: .opacity
+        ))
     }
 
     @ViewBuilder private var footer: some View {
-        switch step {
-        case .microphone where !status.micGranted:
-            primary("Allow") {
-                AVAudioApplication.requestRecordPermission { granted in
-                    Task { @MainActor in
-                        status = SetupStatus.current()
-                        if granted { advance() }
-                    }
+        let status = setup.status
+        VStack(spacing: Theme.Spacing.s) {
+            switch step {
+            case .welcome:
+                Button("Get started", action: advance).buttonStyle(.primaryPill)
+            case .keys:
+                Button("Continue", action: advance).buttonStyle(.primaryPill)
+                    .disabled(!status.hasKey)
+                if !status.hasKey {
+                    Button("Add a key later", action: advance).buttonStyle(.secondaryPill)
                 }
-            }
-        case .keyboard where !(status.keyboardAdded && status.fullAccess):
-            VStack(spacing: 10) {
-                primary("Open Settings") {
-                    UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!)
+            case .permissions:
+                Button("Continue", action: advance).buttonStyle(.primaryPill)
+                    .disabled(!(status.micGranted && status.keyboardAdded))
+                if !(status.micGranted && status.keyboardAdded) {
+                    Button("Set up later", action: advance).buttonStyle(.secondaryPill)
                 }
-                Button("Later", action: advance)
+            case .tryIt:
+                Button("Start using VoiceiQ", action: finish).buttonStyle(.primaryPill)
             }
-        case .key where !status.hasKey:
-            Button("Later", action: advance)
-        case .tryIt:
-            primary("Done", action: onFinished)
-        default:
-            primary("Continue", action: advance)
         }
-    }
-
-    private func primary(_ title: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title).font(.headline).frame(maxWidth: .infinity).padding(.vertical, 6)
-        }
-        .buttonStyle(.borderedProminent)
     }
 
     private func advance() {
-        status = SetupStatus.current()
-        if let next = Step(rawValue: step.rawValue + 1) {
-            withAnimation { step = next }
-        }
+        UIApplication.shared.endEditing()
+        guard let next = Step(rawValue: step.rawValue + 1) else { return finish() }
+        forward = true
+        step = next
+        MobileSettings.onboardingStep = next.rawValue
+    }
+
+    private func back() {
+        UIApplication.shared.endEditing()
+        guard let previous = Step(rawValue: step.rawValue - 1) else { return }
+        forward = false
+        step = previous
+        MobileSettings.onboardingStep = previous.rawValue
+    }
+
+    private func finish() {
+        MobileSettings.onboardingStep = 0
+        onFinished()
     }
 }
 
-/// The Settings path, with live checks for each part.
-struct KeyboardSetupSteps: View {
-    let status: SetupStatus
+/// Back button and a segmented bar: one segment per setup page, filled up to
+/// the current one.
+private struct OnboardingHeader: View {
+    let step: Int
+    let total: Int
+    let back: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Settings › VoiceiQ › Keyboards")
-                .font(.body.weight(.medium))
-            SetupRow(title: "Turn on VoiceiQ", done: status.keyboardAdded)
-            SetupRow(title: "Turn on Allow Full Access", done: status.fullAccess)
-            if status.keyboardAdded && !status.fullAccess {
-                Text("Then open the VoiceiQ keyboard once in any app.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+        HStack(spacing: Theme.Spacing.l) {
+            Button(action: back) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Theme.Colors.ink)
+                    .frame(width: 36, height: 36)
+                    .background(Circle().fill(Theme.Colors.porcelain))
             }
-        }
-    }
-}
-
-struct KeyboardSetupView: View {
-    @State private var status = SetupStatus.current()
-    @Environment(\.scenePhase) private var scenePhase
-
-    var body: some View {
-        Form {
-            Section {
-                KeyboardSetupSteps(status: status)
-                    .padding(.vertical, 6)
-            }
-            Section {
-                Button("Open Settings") {
-                    UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!)
+            .accessibilityLabel("Back")
+            HStack(spacing: 6) {
+                ForEach(1...total, id: \.self) { index in
+                    Capsule()
+                        .fill(index <= step ? Theme.Colors.accent : Theme.Colors.hairline)
+                        .frame(height: 4)
                 }
             }
+            .accessibilityElement()
+            .accessibilityLabel("Step \(step) of \(total)")
+            Color.clear.frame(width: 36, height: 36)
         }
-        .navigationTitle("Keyboard")
-        .onChange(of: scenePhase) { _, phase in if phase == .active { status = SetupStatus.current() } }
-        .onAppear { status = SetupStatus.current() }
+    }
+}
+
+// MARK: - Pages
+
+private struct WelcomePage: View {
+    @State private var appeared = false
+
+    var body: some View {
+        VStack(spacing: Theme.Spacing.xxl) {
+            Spacer(minLength: 56)
+            VStack(spacing: Theme.Spacing.xl) {
+                Wordmark(height: 52)
+                    .scaleEffect(appeared ? 1 : 0.9)
+                    .opacity(appeared ? 1 : 0)
+                Text("Speak in any app.\nVoiceiQ types it.")
+                    .font(Theme.Fonts.display())
+                    .foregroundStyle(Theme.Colors.ink)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+                FeatureLine(symbol: "mic.fill", text: "Tap the mic on the VoiceiQ keyboard, wherever you type.")
+                FeatureLine(symbol: "text.badge.checkmark", text: "Punctuation, lists and corrections come out right.")
+                FeatureLine(symbol: "key.fill", text: "Runs on your own API key, kept on your iPhone.")
+            }
+            .padding(.horizontal, Theme.Spacing.s)
+        }
+        .onAppear {
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) { appeared = true }
+        }
+    }
+}
+
+private struct FeatureLine: View {
+    let symbol: String
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: Theme.Spacing.m) {
+            IconTile(systemImage: symbol, size: 32)
+            Text(text)
+                .font(Theme.Fonts.callout())
+                .foregroundStyle(Theme.Colors.inkSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 6)
+        }
+    }
+}
+
+private struct KeysPage: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
+            PageTitle(title: "Connect a model", detail: "VoiceiQ runs on your own API key.")
+            ModelKeysForm()
+        }
+    }
+}
+
+private struct PermissionsPage: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
+            PageTitle(title: "Allow the microphone and keyboard")
+            PermissionsPanel()
+        }
+    }
+}
+
+private struct TryItPage: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
+            PageTitle(title: "Try it",
+                      detail: "Tap the box, hold the globe key to switch to VoiceiQ, then tap the mic.")
+            TryItCard()
+        }
     }
 }

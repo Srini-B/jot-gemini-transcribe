@@ -6,13 +6,14 @@ app, which records, transcribes with your own API key, and hands the text back.
 
 ## Targets
 
-| Target | Bundle ID | Contents |
-| --- | --- | --- |
-| `VoiceIQiOS` | `io.blue.voiceiq.ios` | App: onboarding, keys, settings, history, meetings, background voice session |
-| `VoiceIQKeyboard` | `io.blue.voiceiq.ios.keyboard` | Keyboard extension (`RequestsOpenAccess`), links `VoiceIQBridge` only |
-| `VoiceIQLiveActivity` | `io.blue.voiceiq.ios.liveactivity` | Dynamic Island and lock-screen Live Activity |
+| Target | Contents |
+| --- | --- |
+| `VoiceIQiOS` | App: onboarding, keys, settings, history, meetings, background voice session |
+| `VoiceIQKeyboard` | Keyboard extension (`RequestsOpenAccess`), links `VoiceIQBridge` only |
+| `VoiceIQLiveActivity` | Dynamic Island and lock-screen Live Activity |
 
-All three share the App Group `group.io.blue.voiceiq`. The app declares
+All three share one App Group. Bundle IDs, the App Group and profile names
+are in `project.yml`. The app declares
 `UIBackgroundModes: audio` and `NSSupportsLiveActivities`, and handles the
 `voiceiq://` scheme. Minimum iOS is 17 (Live Activity buttons need
 `LiveActivityIntent`).
@@ -51,7 +52,10 @@ because pings are dropped while a process is suspended.
 1. The keyboard resolves the host app (below), writes a `start` command and pings.
 2. If the heartbeat is fresh (under 3 s), the app is running. The keyboard waits
    up to 0.7 s for the app to acknowledge the command. The app starts recording
-   from the background. No app switch.
+   from the background. No app switch. The app acknowledges only when it can
+   start in place (`AppModel.canStartInPlace`): it is in the foreground, or the
+   session's Live Activity is on screen and no background start has failed
+   since the app was last opened.
 3. Otherwise, or without an acknowledgement, the keyboard opens
    `voiceiq://keyboard/start?cmd=<id>&host=<bundle id>`. The app starts the
    background session in the foreground (iOS refuses to activate audio from the
@@ -69,36 +73,73 @@ translation into the target language from Settings › Dictation.
 ### The background session
 
 `KeepAliveAudio` sets a `.playAndRecord` session (mix with others, A2DP; HFP
-only when "Use iPhone microphone" is off) and plays silence through a
-playback-only `AVAudioEngine`. It never touches `inputNode`, so the orange mic
-indicator stays off between dictations. Each dictation builds its own capture
-engine (`AudioCaptureEngine`), which lights the indicator only while recording.
+only when "Use iPhone microphone" is off), plays silence and taps `inputNode`
+without keeping the buffers. Each dictation builds its own capture engine
+(`AudioCaptureEngine`), which runs alongside it.
 
-The session ends when the user taps End (app or Dynamic Island), when the Live
-Activity is dismissed or ended by iOS (iOS caps a Live Activity at eight hours),
-or when an audio interruption cannot be resumed. There is no idle timeout.
-A call or Siri interruption finalizes an in-progress dictation, so the words
-are kept.
+The session ends when the user taps End (app or Dynamic Island) or when an
+audio interruption cannot be resumed. There is no idle timeout. A call or Siri
+interruption finalizes an in-progress dictation, so the words are kept.
 
-### Returning to the host app
+iOS lets a backgrounded app start recording only while it is already
+recording. Measured on device: silent playback alone and a Live Activity both
+failed at the second in-place start; a visible Picture in Picture window
+worked, but iOS gives the app no way to hide it (the only client-to-system
+PiP calls are start, stop and size). So the keep-alive engine also runs a
+discarding tap on `inputNode`: while a session is up the mic is open and the
+orange dot shows, and each dictation's capture engine starts alongside it.
 
-`HostAppResolver` (keyboard) joins two private UIKit surfaces, adapted from
-Dictus: `_UIKeyboardArbiterClient.currentClientState` gives (bundle ID, pid)
-pairs once its `+enabled` class method is forced to `YES` at load time
-(`HostArbiterActivation.m`), and `_hostProcessIdentifier` on the input view
-controller gives the current host pid. Pairs are only trusted during the
-keyboard appearance that recorded them, so a recycled pid can cause a miss but
-never a wrong app. Every surface is resolved at runtime; a missing one means no
-automatic return, never a crash.
+The session lasts for the warm window after each dictation, set in
+Settings › Dictation › Keep mic on after dictating (`MobileSettings.warmWindow`:
+Never, 5 s, 10 s, 30 s default, 1 minute). The window counts from when the
+text is delivered; "Never" closes the mic as soon as recording stops but keeps
+the session up (on background time) until the text is delivered, so the
+keyboard and the Dynamic Island show "Writing…" in between. Settings ›
+Dictation has an "Open Action Button settings" button (`App-prefs:ACTION_BUTTON`,
+falling back to VoiceiQ's page in Settings). When it runs out the mic
+closes and the next keyboard tap bounces through the app again.
 
-`KnownAppSchemes` (in `VoiceIQBridge`) maps bundle IDs to URLs that resume the
-app where the user left it: the Dictus table plus 14 apps from the Typeless
-2.7.0 table. The app opens it with `UIApplication.open`, which needs no
-`LSApplicationQueriesSchemes`.
+### Action button
 
-Settings › Return to Apps lists every app the keyboard was used in, with how
-the last bounce went. An app with no link can be given a custom one there;
-custom links take precedence over the table.
+`DictationControl` (in the widget extension) is a Control Center control,
+"VoiceiQ Dictate", which the user can assign to the Action button. Its
+`ToggleDictationIntent` is an `AudioRecordingIntent` and a
+`LiveActivityIntent`, so iOS runs it in the app's process (launching it in the
+background if needed) and lets it open the mic without bringing VoiceiQ
+forward. It calls `ActionButtonBridge.toggle`, which `AppModel` sets at launch:
+stop the dictation in progress, or begin a session with a Live Activity (iOS
+requires one for an audio-recording intent) and start a dictation for whatever
+app is in front. The keyboard follows the shared snapshot like any other
+dictation, and the result has no host app, so whichever field has the
+VoiceiQ keyboard within two minutes receives it. Keyboard-started sessions
+have no Live Activity.
+
+### Setup status
+
+`SetupMonitor` (app) publishes `SetupStatus`: microphone permission, whether
+the keyboard is added, Full Access, and Live Activities. It rereads the App
+Group with `SharedStore.reloadFromDisk()` whenever the app becomes active, when
+the keyboard pings `io.blue.voiceiq.bridge.keyboard` (`SharedStore.noteKeyboardSeen`,
+posted each time the keyboard appears), and on `activityEnablementUpdates`.
+Returning from Settings with Full Access turned on shows it as granted without
+restarting the app. Onboarding saves its page in `MobileSettings.onboardingStep`,
+so a trip to Settings resumes on the same page.
+
+Onboarding has four pages: welcome, API keys (every provider plus TinyFish on
+one page, with a provider picker once two or more keys are saved), permissions
+(microphone and keyboard together), and a Try it field.
+
+### Design system
+
+`iOS/App/Sources/Design/Theme.swift` holds colours, radii, spacing and type
+(Google Sans Flex, bundled in `Resources/Fonts`, registered through
+`UIAppFonts`). `Components.swift` holds the shared pieces: `PillButtonStyle`
+(`.primaryPill`, `.secondaryPill`, compact variants), `Card`, `GroupLabel`,
+`BrandMark`, `Wordmark`, `StatusChip`, `CheckLine`, and
+`.keyboardDismissable()` (a Done button above the keyboard plus interactive
+scroll dismissal). Every CTA uses a pill style. The launch screen shows the
+app mark (`LaunchMark`, `LaunchBackground`). The brand image sets are
+rendered from the app icon.
 
 ### Meetings
 
@@ -134,18 +175,15 @@ while a meeting records.
 ./scripts/build-ios.sh DEVICE=1 DEVELOPMENT_TEAM=XXXXXXXXXX
 ```
 
-A device build needs the App Group `group.io.blue.voiceiq` registered for all
+A device build needs the App Group from `project.yml` registered for all
 three bundle IDs under your team.
 
-### Apple Developer setup (team G8K3545FJ2)
+### Apple Developer setup
 
-| Item | Value |
-| --- | --- |
-| App Group | `group.io.blue.voiceiq` ("VoiceiQ Shared") |
-| App IDs, each with App Groups → `group.io.blue.voiceiq` | `io.blue.voiceiq.ios`, `io.blue.voiceiq.ios.keyboard`, `io.blue.voiceiq.ios.liveactivity` |
-| App Store profiles (`Release` uses these by name) | `VoiceiQ iOS App Store`, `VoiceiQ Keyboard App Store`, `VoiceiQ Live Activity App Store` |
-| Signing identity | `Apple Distribution: Blue Lobster Technology PTE. LTD (G8K3545FJ2)` |
-| App Store Connect app | "VoiceiQ Dictation", Apple ID 6816685189, SKU `voiceiq-ios` ("VoiceiQ" was taken) |
+The team needs the App Group, three App IDs with App Groups enabled and
+assigned, an App Store profile for each App ID (named as in the
+`PROVISIONING_PROFILE_SPECIFIER` settings in `project.yml`), an Apple
+Distribution certificate, and an App Store Connect app record.
 
 If a capability changes, the three profiles are invalidated and must be
 regenerated in the portal under the same names.
@@ -166,6 +204,8 @@ is `false`, so builds skip the export-compliance question.
 - The host-app resolver and the arbiter swizzle are private API. App Review may
   reject them; if it does, delete `HostArbiterActivation.m` and the resolver
   returns nil, which falls back to the swipe-back screen.
-- iOS ends a Live Activity after eight hours, which ends the session. The next
-  mic tap bounces once.
+- iOS ends a Live Activity after eight hours. The session stays up, and the
+  next mic tap bounces once to start a new activity.
+- The orange mic dot shows for the whole warm window.
+- The Action button control needs iOS 18 and Live Activities turned on.
 - The first dictation after a cold start costs one trip to the app.

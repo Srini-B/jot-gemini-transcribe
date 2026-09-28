@@ -15,155 +15,322 @@
 import SwiftUI
 import VoiceIQCore
 
-/// Provider keys, stored in the Keychain and only sent to that provider.
+/// Settings › API Keys.
 struct KeysView: View {
-    @State private var preferred = SettingsStore().preferredProvider
-    @State private var available = KeychainStore.providersWithKeys
-
     var body: some View {
-        Form {
-            if available.count > 1 {
-                Section {
-                    Picker("Provider", selection: $preferred) {
-                        ForEach(ModelProvider.allCases.filter(available.contains)) { provider in
-                            Text(provider.displayName).tag(provider)
-                        }
-                    }
-                    .onChange(of: preferred) { _, value in SettingsStore().setPreferredProvider(value) }
-                }
-            }
-            ForEach(ModelProvider.allCases) { provider in
-                Section(provider.displayName) {
-                    KeyForm(provider: provider) { available = KeychainStore.providersWithKeys }
-                }
-            }
-            Section("TinyFish") {
-                KeyForm(provider: nil) {}
-            }
+        ScrollView {
+            ModelKeysForm()
+                .padding(.horizontal, Theme.Spacing.page)
+                .padding(.vertical, Theme.Spacing.l)
         }
+        .keyboardDismissable()
+        .themedBackground()
         .navigationTitle("API Keys")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
-/// One key field with validation. `provider == nil` is the TinyFish search key.
-struct KeyForm: View {
-    let provider: ModelProvider?
+/// Every key on one page: the three model providers (one is enough) and the
+/// optional TinyFish key, with the provider picker once two or more are saved.
+struct ModelKeysForm: View {
+    @State private var saved = KeySlot.savedSlots()
+    @State private var preferred = SettingsStore().preferredProvider
+
+    private var savedModelProviders: [ModelProvider] {
+        ModelProvider.allCases.filter { saved.contains(KeySlot(provider: $0)) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
+            HStack(alignment: .top, spacing: Theme.Spacing.m) {
+                Image(systemName: "info.circle.fill")
+                    .foregroundStyle(Theme.Colors.accent)
+                    .font(.system(size: 17))
+                Text("Add a key for **one** provider: Gemini or OpenRouter or Vercel AI Gateway. You don't need all three. The TinyFish key is optional.")
+                    .font(Theme.Fonts.subheadline())
+                    .foregroundStyle(Theme.Colors.inkSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(Theme.Spacing.l)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                .fill(Theme.Colors.accent.opacity(0.08)))
+
+            VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+                GroupLabel(text: "Model provider · one is enough")
+                if savedModelProviders.count > 1 {
+                    Card {
+                        Text("Provider").font(Theme.Fonts.headline()).foregroundStyle(Theme.Colors.ink)
+                        Picker("Provider", selection: $preferred) {
+                            ForEach(savedModelProviders) { provider in
+                                Text(provider.shortName).tag(provider)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .onChange(of: preferred) { _, value in SettingsStore().setPreferredProvider(value) }
+                    }
+                }
+                ForEach([KeySlot.gemini, .openRouter, .vercel], id: \.self) { slot in
+                    KeyCard(slot: slot, onChange: reload)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+                GroupLabel(text: "Optional")
+                KeyCard(slot: .tinyFish, onChange: reload)
+            }
+        }
+    }
+
+    private func reload() {
+        saved = KeySlot.savedSlots()
+        preferred = SettingsStore().activeProvider
+    }
+}
+
+private extension ModelProvider {
+    var shortName: String {
+        switch self {
+        case .gemini: return "Gemini"
+        case .openRouter: return "OpenRouter"
+        case .vercel: return "Vercel"
+        }
+    }
+}
+
+/// One saved-or-not key, with its purpose, a field and its actions.
+private struct KeyCard: View {
+    let slot: KeySlot
     let onChange: () -> Void
 
     @State private var text = ""
     @State private var stored = false
+    @State private var replacing = false
     @State private var checking = false
     @State private var message: String?
+    @FocusState private var focused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                SecureField(stored ? "Saved in Keychain" : "Paste your key", text: $text)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.system(.body, design: .monospaced))
-                if checking {
-                    ProgressView()
-                } else if stored && text.isEmpty {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                }
-            }
-            HStack {
-                Button("Save") { Task { await save() } }
-                    .disabled(text.trimmingCharacters(in: .whitespaces).isEmpty || checking)
+        Card {
+            HStack(spacing: Theme.Spacing.m) {
+                IconTile(systemImage: slot.symbol, size: 32)
+                Text(slot.title).font(Theme.Fonts.headline()).foregroundStyle(Theme.Colors.ink)
+                Spacer(minLength: 0)
                 if stored {
-                    Button("Remove", role: .destructive) { remove() }
+                    StatusChip(text: "Saved", tone: .done)
+                } else {
+                    Link(destination: slot.keyURL) {
+                        Label("Get a key", systemImage: "arrow.up.right")
+                            .labelStyle(TrailingIconLabelStyle())
+                            .font(Theme.Fonts.label())
+                            .foregroundStyle(Theme.Colors.accent)
+                    }
                 }
-                Spacer()
-                Link("Get a key", destination: keyURL)
-                    .font(.subheadline)
             }
-            .buttonStyle(.borderless)
+            Text(slot.purpose)
+                .font(Theme.Fonts.footnote())
+                .foregroundStyle(Theme.Colors.muted)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if stored && !replacing {
+                HStack(spacing: Theme.Spacing.s) {
+                    Text("••••••••••••")
+                        .font(Theme.Fonts.code)
+                        .foregroundStyle(Theme.Colors.muted)
+                    Spacer(minLength: 0)
+                    Button("Replace") { replacing = true; focused = true }.buttonStyle(.compactSecondary)
+                    Button("Remove", action: remove).buttonStyle(.compactDestructive)
+                }
+                .padding(.leading, Theme.Spacing.m)
+                .padding(.trailing, 6)
+                .frame(minHeight: 48)
+                .background(fieldBackground)
+            } else {
+                HStack(spacing: Theme.Spacing.s) {
+                    SecureField("", text: $text, prompt: Text("Paste key").font(Theme.Fonts.callout()))
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .font(Theme.Fonts.code)
+                        .focused($focused)
+                        .submitLabel(.done)
+                        .onSubmit { Task { await save() } }
+                    if checking {
+                        ProgressView().padding(.horizontal, Theme.Spacing.m)
+                    } else {
+                        Button("Save") { Task { await save() } }
+                            .buttonStyle(.compactPrimary)
+                            .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                }
+                .padding(.leading, Theme.Spacing.m)
+                .padding(.trailing, 6)
+                .frame(minHeight: 48)
+                .background(fieldBackground)
+            }
+
             if let message {
-                Text(message).font(.footnote).foregroundStyle(.secondary)
+                Text(message)
+                    .font(Theme.Fonts.footnote())
+                    .foregroundStyle(message.hasPrefix("Saved") ? Theme.Colors.muted : Theme.Colors.recording)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .onAppear { stored = load() != nil }
+        .onAppear { stored = slot.load() != nil }
     }
 
-    private var keyURL: URL {
-        switch provider {
-        case .gemini: return URL(string: "https://aistudio.google.com/apikey")!
-        case .openRouter: return URL(string: "https://openrouter.ai/settings/keys")!
-        case .vercel: return URL(string: "https://vercel.com/ai-gateway")!
-        case nil: return URL(string: "https://agent.tinyfish.ai/api-keys")!
-        }
-    }
-
-    private func load() -> String? {
-        switch provider {
-        case .gemini: return KeychainStore.loadAPIKey()
-        case .openRouter: return KeychainStore.loadOpenRouterKey()
-        case .vercel: return KeychainStore.loadVercelKey()
-        case nil: return KeychainStore.loadTinyFishKey()
-        }
+    private var fieldBackground: some View {
+        RoundedRectangle(cornerRadius: Theme.Radius.field, style: .continuous)
+            .fill(Theme.Colors.surfaceNested)
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.field, style: .continuous)
+                .strokeBorder(focused ? Theme.Colors.accent : Theme.Colors.hairline, lineWidth: focused ? 1.5 : 0.5))
     }
 
     private func remove() {
-        switch provider {
-        case .gemini: KeychainStore.deleteAPIKey(notify: true)
-        case .openRouter: KeychainStore.deleteOpenRouterKey(notify: true)
-        case .vercel: KeychainStore.deleteVercelKey(notify: true)
-        case nil: KeychainStore.deleteTinyFishKey(notify: true)
-        }
+        slot.delete()
         stored = false
+        replacing = false
         message = nil
         onChange()
     }
 
     private func save() async {
         let key = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty, !checking else { return }
         checking = true
         defer { checking = false }
-        let accepted: Bool
-        let offline: Bool
-        switch provider {
-        case .some(let provider):
-            let check: GeminiClient.KeyCheck
-            switch provider {
-            case .gemini:
-                check = await GeminiClient(apiKey: { key }).validateKey(endpoint: SettingsStore().geminiConfig.endpoint)
-            case .openRouter:
-                check = await GeminiClient(apiKey: { nil }, openRouterKey: { key }).validateOpenRouterKey()
-            case .vercel:
-                check = await GeminiClient(apiKey: { nil }, vercelKey: { key }).validateVercelKey()
-            }
-            switch check {
-            case .valid: accepted = true; offline = false
-            case .unreachable: accepted = true; offline = true
-            case .rejected(let detail):
-                message = detail ?? "\(provider.displayName) rejected that key"
-                return
-            }
-        case nil:
-            switch await TinyFishClient(apiKey: { key }).validateKey() {
-            case .valid: accepted = true; offline = false
-            case .unreachable: accepted = true; offline = true
-            case .rejected:
-                message = "TinyFish rejected that key"
-                return
-            }
-        }
-        guard accepted else { return }
-        let saved: Bool
-        switch provider {
-        case .gemini: saved = KeychainStore.saveAPIKey(key)
-        case .openRouter: saved = KeychainStore.saveOpenRouterKey(key)
-        case .vercel: saved = KeychainStore.saveVercelKey(key)
-        case nil: saved = KeychainStore.saveTinyFishKey(key)
-        }
-        guard saved else {
-            message = "Couldn't save to the Keychain"
+        switch await slot.validate(key) {
+        case .rejected(let detail):
+            message = detail
             return
+        case .accepted(let offline):
+            guard slot.save(key) else {
+                message = "Couldn't save to the Keychain. Try again."
+                return
+            }
+            text = ""
+            stored = true
+            replacing = false
+            focused = false
+            message = offline ? "Saved. It will be checked on your first dictation." : nil
+            onChange()
         }
-        text = ""
-        stored = true
-        message = offline ? "Saved. It will be checked on your first dictation." : nil
-        onChange()
+    }
+}
+
+private struct TrailingIconLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 3) {
+            configuration.title
+            configuration.icon.imageScale(.small)
+        }
+    }
+}
+
+/// A place a key can be stored, with what it is for.
+enum KeySlot: Hashable, CaseIterable {
+    case gemini, openRouter, vercel, tinyFish
+
+    init(provider: ModelProvider) {
+        switch provider {
+        case .gemini: self = .gemini
+        case .openRouter: self = .openRouter
+        case .vercel: self = .vercel
+        }
+    }
+
+    static func savedSlots() -> Set<KeySlot> {
+        Set(allCases.filter { $0.load() != nil })
+    }
+
+    var title: String {
+        switch self {
+        case .gemini: return "Gemini"
+        case .openRouter: return "OpenRouter"
+        case .vercel: return "Vercel AI Gateway"
+        case .tinyFish: return "TinyFish"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .gemini: return "sparkles"
+        case .openRouter: return "arrow.triangle.branch"
+        case .vercel: return "triangle.fill"
+        case .tinyFish: return "globe"
+        }
+    }
+
+    var purpose: String {
+        switch self {
+        case .gemini:
+            return "Google's Gemini API, with a free tier. Stored in your iPhone's Keychain and only ever sent to Google."
+        case .openRouter:
+            return "Runs the same Gemini models through OpenRouter, which has no per-minute tier limits. Stored in your iPhone's Keychain and only ever sent to OpenRouter."
+        case .vercel:
+            return "Runs the same Gemini models through Vercel AI Gateway, billed per call. Stored in your iPhone's Keychain and only ever sent to Vercel."
+        case .tinyFish:
+            return "Lets Ask Anything look up current information on the web. Stored in your iPhone's Keychain and only ever sent to TinyFish."
+        }
+    }
+
+    var keyURL: URL {
+        switch self {
+        case .gemini: return URL(string: "https://aistudio.google.com/apikey")!
+        case .openRouter: return URL(string: "https://openrouter.ai/settings/keys")!
+        case .vercel: return URL(string: "https://vercel.com/ai-gateway")!
+        case .tinyFish: return URL(string: "https://agent.tinyfish.ai/api-keys")!
+        }
+    }
+
+    func load() -> String? {
+        switch self {
+        case .gemini: return KeychainStore.loadAPIKey()
+        case .openRouter: return KeychainStore.loadOpenRouterKey()
+        case .vercel: return KeychainStore.loadVercelKey()
+        case .tinyFish: return KeychainStore.loadTinyFishKey()
+        }
+    }
+
+    func save(_ key: String) -> Bool {
+        switch self {
+        case .gemini: return KeychainStore.saveAPIKey(key)
+        case .openRouter: return KeychainStore.saveOpenRouterKey(key)
+        case .vercel: return KeychainStore.saveVercelKey(key)
+        case .tinyFish: return KeychainStore.saveTinyFishKey(key)
+        }
+    }
+
+    func delete() {
+        switch self {
+        case .gemini: _ = KeychainStore.deleteAPIKey(notify: true)
+        case .openRouter: _ = KeychainStore.deleteOpenRouterKey(notify: true)
+        case .vercel: _ = KeychainStore.deleteVercelKey(notify: true)
+        case .tinyFish: _ = KeychainStore.deleteTinyFishKey(notify: true)
+        }
+    }
+
+    enum Validation { case accepted(offline: Bool), rejected(String) }
+
+    func validate(_ key: String) async -> Validation {
+        let check: GeminiClient.KeyCheck
+        switch self {
+        case .gemini:
+            check = await GeminiClient(apiKey: { key }).validateKey(endpoint: SettingsStore().geminiConfig.endpoint)
+        case .openRouter:
+            check = await GeminiClient(apiKey: { nil }, openRouterKey: { key }).validateOpenRouterKey()
+        case .vercel:
+            check = await GeminiClient(apiKey: { nil }, vercelKey: { key }).validateVercelKey()
+        case .tinyFish:
+            switch await TinyFishClient(apiKey: { key }).validateKey() {
+            case .valid: return .accepted(offline: false)
+            case .unreachable: return .accepted(offline: true)
+            case .rejected: return .rejected("TinyFish rejected that key, or the account has no Search access.")
+            }
+        }
+        switch check {
+        case .valid: return .accepted(offline: false)
+        case .unreachable: return .accepted(offline: true)
+        case .rejected(let detail): return .rejected(detail ?? "\(title) rejected that key.")
+        }
     }
 }

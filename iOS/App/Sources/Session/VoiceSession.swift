@@ -17,21 +17,36 @@ import UIKit
 import VoiceIQBridge
 import VoiceIQCore
 
-/// The background voice session: keep-alive audio, the Live Activity, and
-/// everything the keyboard reads from the App Group.
+/// The background voice session: the keep-alive engine that holds the mic
+/// open, the warm window, and everything the keyboard reads from the App Group.
 ///
-/// It ends only when the user ends it (Dynamic Island, app), when the Live
-/// Activity goes away, or when iOS takes the audio session and will not give
-/// it back. Stopping a dictation or dismissing the keyboard does not end it.
+/// A session starts when a keyboard tap opens the app (the one-time bounce)
+/// or when the Action button runs `ToggleDictationIntent`. It stays warm for
+/// `MobileSettings.warmWindow` after each dictation finishes, then ends and
+/// the mic closes; the next keyboard tap bounces again. The Live Activity is
+/// shown only for sessions the Action button started (iOS requires one for an
+/// audio-recording intent) and for meetings.
 @MainActor
 final class VoiceSession: ObservableObject {
     @Published private(set) var isActive = false
+    /// When the warm window runs out, while it is counting.
+    @Published private(set) var warmUntil: Date?
 
     /// What the dictation pipeline is doing. Set by the app model.
-    var dictationPhase: SessionSnapshot.Phase = .warm { didSet { publishIfChanged() } }
+    var dictationPhase: SessionSnapshot.Phase = .warm {
+        didSet {
+            publishIfChanged()
+            if dictationPhase != oldValue { phaseChanged() }
+        }
+    }
     var mode: KeyboardMode = .dictate { didSet { publishIfChanged() } }
     var recordingStartedAt: Date? { didSet { publishIfChanged() } }
-    var meetingStartedAt: Date? { didSet { publishIfChanged() } }
+    var meetingStartedAt: Date? {
+        didSet {
+            publishIfChanged()
+            if meetingStartedAt == nil, oldValue != nil { scheduleWarmEnd() }
+        }
+    }
 
     var onInterruptionBegan: (() -> Void)?
 
@@ -39,10 +54,13 @@ final class VoiceSession: ObservableObject {
     private let activity = LiveActivityController()
     private let store = SharedStore.shared
     private var heartbeat: Timer?
+    private var warmTimer: Timer?
     private var delivery: Delivery?
     private var notice: Notice?
     private var lastPublished: SessionSnapshot?
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+    /// The Action button started this session, so it carries a Live Activity.
+    private var startedByActionButton = false
 
     init() {
         LiveActivityController.endLeftovers()
@@ -54,29 +72,50 @@ final class VoiceSession: ObservableObject {
             self?.post(notice: message)
             self?.end()
         }
-        activity.onEndedOutsideApp = { [weak self] in
-            Log.session.info("live activity ended outside the app — ending session")
-            self?.end()
+        activity.onEndedOutsideApp = {
+            SessionDiagnostics.note("live activity ended outside the app")
         }
     }
 
-    /// Starts the session. Must run while the app is in the foreground.
-    func begin() throws {
-        guard !isActive else { return }
+    /// Starts the session. Runs in the foreground, or inside the Action
+    /// button's intent with `fromActionButton`.
+    func begin(fromActionButton: Bool = false) throws {
+        if isActive {
+            if fromActionButton, !startedByActionButton {
+                startedByActionButton = true
+                activity.start(activityState)
+            }
+            return
+        }
         try audio.start(preferBuiltInMic: MobileSettings.preferBuiltInMic)
         isActive = true
-        activity.start(activityState)
+        startedByActionButton = fromActionButton
+        if fromActionButton { activity.start(activityState) }
         heartbeat = Timer.scheduledTimer(withTimeInterval: SharedStore.heartbeatInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.beat() }
         }
         beat()
         publish(force: true)
-        Log.session.info("voice session began")
+        SessionDiagnostics.note("session began (\(fromActionButton ? "action button" : "keyboard")), warm window \(MobileSettings.warmWindow.label)")
+        // The dictation that opened the session starts right after this. If
+        // none does (it was refused), count the warm window from now.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            guard let self, self.isActive, self.dictationPhase == .warm, self.warmTimer == nil else { return }
+            self.scheduleWarmEnd()
+        }
     }
+
+    /// Whether a dictation can start without opening the app: the session is
+    /// up, so the mic is already open.
+    var canRecordInBackground: Bool { isActive && audio.isRunning }
+
+    var keeperDescription: String { canRecordInBackground ? "open mic" : "none" }
 
     func end() {
         guard isActive else { return }
         isActive = false
+        startedByActionButton = false
+        cancelWarmEnd()
         heartbeat?.invalidate()
         heartbeat = nil
         store.heartbeat = nil
@@ -84,7 +123,55 @@ final class VoiceSession: ObservableObject {
         audio.stop()
         activity.end()
         publish(force: true)
-        Log.session.info("voice session ended")
+        SessionDiagnostics.note("session ended")
+    }
+
+    // MARK: - Warm window
+
+    private func phaseChanged() {
+        guard isActive else { return }
+        switch dictationPhase {
+        case .recording:
+            cancelWarmEnd()
+        case .processing where MobileSettings.warmWindow.seconds == 0 && meetingStartedAt == nil:
+            // "Never": the mic closes as soon as the dictation stops, but the
+            // session stays up until the text is delivered, so the keyboard
+            // and the Dynamic Island show "Writing…" meanwhile. It ends at
+            // `.warm`. Background time covers the transcription.
+            holdBackgroundTime()
+            audio.stop()
+            SessionDiagnostics.note("mic closed (keep mic on: Never)")
+        case .warm:
+            scheduleWarmEnd()
+        default:
+            break
+        }
+    }
+
+    /// Counts the warm window from the end of the dictation (the text has
+    /// been delivered); a meeting in progress holds it open.
+    private func scheduleWarmEnd() {
+        guard isActive, meetingStartedAt == nil, dictationPhase == .warm else { return }
+        cancelWarmEnd()
+        let seconds = MobileSettings.warmWindow.seconds
+        guard seconds > 0 else {
+            end()
+            return
+        }
+        warmUntil = Date().addingTimeInterval(seconds)
+        warmTimer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.dictationPhase == .warm, self.meetingStartedAt == nil else { return }
+                SessionDiagnostics.note("warm window over")
+                self.end()
+            }
+        }
+    }
+
+    private func cancelWarmEnd() {
+        warmTimer?.invalidate()
+        warmTimer = nil
+        warmUntil = nil
     }
 
     func setPreferBuiltInMic(_ prefer: Bool) {
@@ -156,9 +243,23 @@ final class VoiceSession: ObservableObject {
     private func publish(force: Bool) {
         let current = snapshot
         guard force || current != lastPublished else { return }
+        if current.phase != lastPublished?.phase {
+            SessionDiagnostics.note("phase \(current.phase.rawValue)")
+        }
         lastPublished = current
         store.publish(current)
-        if isActive { activity.update(activityState) }
+        guard isActive else { return }
+        if meetingStartedAt != nil || startedByActionButton {
+            if activity.isRunning {
+                activity.update(activityState)
+            } else if meetingStartedAt != nil, UIApplication.shared.applicationState == .active {
+                // Meetings start in the app, so the activity with its Stop
+                // button can be requested here.
+                activity.start(activityState)
+            }
+        } else if activity.isRunning {
+            activity.end()
+        }
     }
 
     private func beat() {

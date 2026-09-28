@@ -26,6 +26,8 @@ public enum DarwinNotifier {
         case command = "io.blue.voiceiq.bridge.command"
         /// App → keyboard: the snapshot changed.
         case state = "io.blue.voiceiq.bridge.state"
+        /// The keyboard ran with Full Access. Writer: keyboard.
+        case keyboard = "io.blue.voiceiq.bridge.keyboard"
     }
 
     private static let lock = NSLock()

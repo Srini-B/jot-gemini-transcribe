@@ -22,51 +22,78 @@ import WidgetKit
 struct VoiceIQWidgets: WidgetBundle {
     var body: some Widget {
         VoiceSessionLiveActivity()
+        if #available(iOS 18.0, *) {
+            DictationControl()
+        }
     }
 }
 
-private let accent = Color(red: 0.341, green: 0.525, blue: 0.941)
+/// "VoiceiQ Dictate" in Control Center, assignable to the Action button.
+/// Press once to start dictating in whatever app is open, again to stop.
+@available(iOS 18.0, *)
+struct DictationControl: ControlWidget {
+    var body: some ControlWidgetConfiguration {
+        StaticControlConfiguration(kind: "io.blue.voiceiq.ios.control.dictate") {
+            ControlWidgetButton(action: ToggleDictationIntent()) {
+                Label("Dictate", systemImage: "mic.fill")
+            }
+        }
+        .displayName("VoiceiQ Dictate")
+        .description("Start or stop a dictation without opening VoiceiQ.")
+    }
+}
+
+private let brandBlue = Color(UIColor { traits in
+    traits.userInterfaceStyle == .dark
+        ? UIColor(red: 0.341, green: 0.525, blue: 0.941, alpha: 1)
+        : UIColor(red: 0.133, green: 0.322, blue: 0.737, alpha: 1)
+})
 private let recordingRed = Color(red: 0.92, green: 0.26, blue: 0.21)
+private let activityInk = Color(red: 0.09, green: 0.094, blue: 0.102).opacity(0.92)
 
 struct VoiceSessionLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: VoiceSessionAttributes.self) { context in
             LockScreenView(state: context.state)
-                .padding(16)
-                .activityBackgroundTint(Color.black.opacity(0.8))
+                .padding(context.state.phase == .ready ? 12 : 16)
+                .activityBackgroundTint(activityInk)
                 .activitySystemActionForegroundColor(.white)
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    PhaseIcon(phase: context.state.phase)
-                        .font(.title2)
-                        .padding(.leading, 6)
-                }
-                DynamicIslandExpandedRegion(.trailing) {
-                    ElapsedText(state: context.state)
-                        .font(.title3.monospacedDigit())
-                        .padding(.trailing, 6)
+                    Image("BrandMark")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 36, height: 36)
+                        .padding(.leading, 4)
                 }
                 DynamicIslandExpandedRegion(.center) {
                     Text(title(for: context.state))
                         .font(.headline)
+                        .lineLimit(1)
+                }
+                DynamicIslandExpandedRegion(.trailing) {
+                    TrailingStatus(state: context.state)
+                        .padding(.trailing, 4)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    ActionButtons(state: context.state)
-                        .padding(.top, 4)
+                    ActionButton(state: context.state, expanded: true)
+                        .padding(.top, 6)
                 }
             } compactLeading: {
-                PhaseIcon(phase: context.state.phase)
+                CompactLeading(state: context.state)
             } compactTrailing: {
-                ElapsedText(state: context.state)
-                    .font(.caption2.monospacedDigit())
-                    .frame(maxWidth: 44)
+                CompactTrailing(state: context.state)
             } minimal: {
-                PhaseIcon(phase: context.state.phase)
+                MinimalView(state: context.state)
             }
-            .keylineTint(context.state.phase == .recording || context.state.phase == .meeting ? recordingRed : accent)
+            .keylineTint(isRecording(context.state.phase) ? recordingRed : brandBlue)
         }
     }
+}
+
+private func isRecording(_ phase: VoiceSessionAttributes.ContentState.Phase) -> Bool {
+    phase == .recording || phase == .meeting
 }
 
 private func title(for state: VoiceSessionAttributes.ContentState) -> String {
@@ -78,62 +105,124 @@ private func title(for state: VoiceSessionAttributes.ContentState) -> String {
     }
 }
 
-private struct PhaseIcon: View {
-    let phase: VoiceSessionAttributes.ContentState.Phase
+private struct CompactLeading: View {
+    let state: VoiceSessionAttributes.ContentState
 
-    var body: some View {
-        switch phase {
+    @ViewBuilder var body: some View {
+        switch state.phase {
         case .ready:
-            Image(systemName: "mic.fill").foregroundStyle(accent)
+            EmptyView()
         case .recording:
-            Image(systemName: "waveform").foregroundStyle(recordingRed)
+            TinyWaveform()
         case .processing:
-            Image(systemName: "ellipsis").foregroundStyle(accent)
+            Image("BrandMark").resizable().scaledToFit().frame(width: 20, height: 20)
         case .meeting:
-            Image(systemName: "record.circle").foregroundStyle(recordingRed)
+            Image(systemName: "record.circle.fill").foregroundStyle(recordingRed)
         }
     }
 }
 
-private struct ElapsedText: View {
+private struct CompactTrailing: View {
     let state: VoiceSessionAttributes.ContentState
 
+    @ViewBuilder var body: some View {
+        switch state.phase {
+        case .ready:
+            EmptyView()
+        case .recording, .meeting:
+            TimerText(state: state)
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(recordingRed)
+                .frame(maxWidth: 46)
+        case .processing:
+            ProgressView().controlSize(.mini).tint(brandBlue)
+        }
+    }
+}
+
+private struct MinimalView: View {
+    let state: VoiceSessionAttributes.ContentState
+
+    @ViewBuilder var body: some View {
+        switch state.phase {
+        case .ready:
+            EmptyView()
+        case .recording:
+            TinyWaveform()
+        case .processing:
+            ProgressView().controlSize(.mini).tint(brandBlue)
+        case .meeting:
+            Image(systemName: "record.circle.fill").foregroundStyle(recordingRed)
+        }
+    }
+}
+
+private struct TinyWaveform: View {
     var body: some View {
-        if let since = state.since, state.phase == .recording || state.phase == .meeting {
+        HStack(spacing: 2) {
+            ForEach([8.0, 15.0, 11.0], id: \.self) { height in
+                Capsule().fill(recordingRed).frame(width: 3, height: height)
+            }
+        }
+        .frame(width: 18, height: 18)
+    }
+}
+
+private struct TimerText: View {
+    let state: VoiceSessionAttributes.ContentState
+
+    @ViewBuilder var body: some View {
+        if let since = state.since, isRecording(state.phase) {
             Text(timerInterval: since...Date.distantFuture, countsDown: false)
                 .multilineTextAlignment(.trailing)
-        } else if state.phase == .ready {
-            Text("Ready").foregroundStyle(.secondary)
-        } else {
-            Text("")
         }
     }
 }
 
-private struct ActionButtons: View {
+private struct TrailingStatus: View {
     let state: VoiceSessionAttributes.ContentState
 
+    @ViewBuilder var body: some View {
+        if isRecording(state.phase) {
+            TimerText(state: state)
+                .font(.title3.monospacedDigit())
+                .foregroundStyle(recordingRed)
+        } else if state.phase == .processing {
+            ProgressView().tint(brandBlue)
+        } else {
+            Text("Ready").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct ActionButton: View {
+    let state: VoiceSessionAttributes.ContentState
+    var expanded = false
+
     var body: some View {
-        HStack(spacing: 12) {
+        Group {
             switch state.phase {
             case .recording:
                 Button(intent: StopDictationIntent()) {
-                    Label("Stop", systemImage: "stop.fill").frame(maxWidth: .infinity)
+                    Label("Stop", systemImage: "stop.fill")
                 }
                 .tint(recordingRed)
             case .meeting:
                 Button(intent: StopMeetingIntent()) {
-                    Label("Stop", systemImage: "stop.fill").frame(maxWidth: .infinity)
+                    Label("Stop", systemImage: "stop.fill")
                 }
                 .tint(recordingRed)
             case .ready, .processing:
                 Button(intent: EndVoiceSessionIntent()) {
-                    Label("End session", systemImage: "xmark").frame(maxWidth: .infinity)
+                    Label(expanded ? "End session" : "End", systemImage: "xmark")
                 }
-                .tint(.gray)
+                .tint(.white.opacity(0.18))
             }
         }
+        .font(.system(size: 13, weight: .semibold))
         .buttonStyle(.borderedProminent)
+        .buttonBorderShape(.capsule)
+        .foregroundStyle(.white)
     }
 }
 
@@ -142,13 +231,33 @@ private struct LockScreenView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            PhaseIcon(phase: state.phase).font(.title2)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title(for: state)).font(.headline).foregroundStyle(.white)
-                ElapsedText(state: state).font(.subheadline.monospacedDigit()).foregroundStyle(.white.opacity(0.7))
+            Image("BrandMark")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 36, height: 36)
+            if state.phase == .ready {
+                Text("VoiceiQ ready")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+            } else {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title(for: state))
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                    if isRecording(state.phase) {
+                        TimerText(state: state)
+                            .font(.subheadline.monospacedDigit())
+                            .foregroundStyle(.white.opacity(0.72))
+                    } else {
+                        Text("In progress")
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.72))
+                    }
+                }
             }
-            Spacer()
-            ActionButtons(state: state).frame(width: 150)
+            Spacer(minLength: 8)
+            ActionButton(state: state)
         }
     }
 }
