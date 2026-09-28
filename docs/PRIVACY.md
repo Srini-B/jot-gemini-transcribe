@@ -35,7 +35,9 @@ on your Mac.
    attached to this request too (FLAC, up to 12 MB), so the writing model
    checks the words against what you said instead of trusting the live
    transcript. OpenAI's writing model takes no audio, so with OpenAI only text
-   (and screen images, item 4) is sent. It contains the transcript being
+   (and screen images, item 4) is sent. On OpenAI's own API, the dictation
+   audio also goes to OpenAI's `whisper-1` for a second transcript, which is
+   added to this prompt so the writing model can repair misheard words. It contains the transcript being
    formatted, the built-in formatting rules, your custom instructions from the
    same pane, the frontmost app's name, and your dictionary terms. No tone or
    category is derived from the app; the model reads intent from your speech. With that

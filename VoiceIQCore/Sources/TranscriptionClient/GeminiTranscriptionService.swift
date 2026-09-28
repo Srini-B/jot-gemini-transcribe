@@ -24,6 +24,9 @@ import Foundation
 ///   CAF → FLAC → interactions (mode: smart, custom_vocabulary)
 ///       → [writing rules] flash cleanup → validation gate
 ///       → ReplacementEngine → inserted text.
+///   On OpenAI's own API the writing model cannot hear the audio, so a
+///   single-chunk dictation also gets whisper-1's transcript as SECOND,
+///   fetched in parallel, for cleanup to repair misheard stretches of RAW.
 ///
 /// The one-call path has no separate raw transcript, so there is nothing for
 /// the validation gate to compare against; the raw column holds the same text.
@@ -87,6 +90,8 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
             Log.transcription.info("long recording (\(Int(durationSeconds))s) split into \(ranges.count) chunks, \(done.count) already transcribed")
         }
         var pieces: [String] = []
+        var secondOpinion: Task<String?, Never>?
+        defer { secondOpinion?.cancel() }
         for (index, range) in ranges.enumerated() {
             if let earlier = done[range] {
                 if !earlier.isEmpty { pieces.append(earlier) }
@@ -95,6 +100,10 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
             let flacData = try encodeChunk(audioURL: audioURL, range: range, index: index)
             let seconds = durationSeconds * Double(range.count) / Double(max(1, ranges.reduce(0) { $0 + $1.count }))
             let deadline = TimeoutPolicy.overallDeadline(audioDuration: seconds)
+            if ranges.count == 1, context.mode == .dictate, policy.cleanupPass {
+                let client = client
+                secondOpinion = Task { try? await client.secondOpinionTranscript(flacData: flacData, deadline: deadline) }
+            }
             var raw = try await transcribeWithRetry(
                 flacData: flacData, config: config, policy: policy,
                 vocabulary: vocabulary, deadline: deadline
@@ -152,12 +161,29 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
             )
         }
 
-        let cleaned = await cleanupOrFallback(raw: trimmedRaw, context: context, config: config)
+        let second = await Self.awaitSecondOpinion(secondOpinion, raw: trimmedRaw, audioSeconds: durationSeconds)
+        let cleaned = await cleanupOrFallback(raw: trimmedRaw, context: context, config: config, second: second)
         return TranscriptionResult(
             rawTranscript: trimmedRaw,
             cleanedTranscript: cleaned,
             modelID: "\(names.transcribe)+\(names.writing)"
         )
+    }
+
+    /// The second transcript runs alongside the primary one; once RAW is in,
+    /// waits at most `grace` more for it. MEASURED 2026-09-28: whisper-1 took
+    /// 1.4–2.3 s on a 21 s dictation (gpt-transcribe 2.3–2.9 s) and 5.8–6.1 s
+    /// on 84 s (gpt-transcribe 3.1 s), so the wait only shows on long ones.
+    static func awaitSecondOpinion(_ task: Task<String?, Never>?, raw: String, audioSeconds: Double) async -> String? {
+        guard let task else { return nil }
+        let grace = min(5, max(1.5, audioSeconds * 0.04))
+        let text = try? await GeminiClient.withDeadline(seconds: grace) { await task.value }
+        task.cancel()
+        guard let text, !text.isEmpty else {
+            Log.transcription.info("second transcript not used (late or failed after \(String(format: "%.1f", grace))s grace)")
+            return nil
+        }
+        return text.caseInsensitiveCompare(raw) == .orderedSame ? nil : text
     }
 
     /// The one-call dictation path. Returns nil when the caller should fall
@@ -463,9 +489,9 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
     }
 
     private func cleanupOrFallback(
-        raw: String, context: DictationContext, config: GeminiConfig, audio: Data? = nil
+        raw: String, context: DictationContext, config: GeminiConfig, audio: Data? = nil, second: String? = nil
     ) async -> String {
-        settle(await runCleanup(raw: raw, context: context, config: config, audio: audio), raw: raw)
+        settle(await runCleanup(raw: raw, context: context, config: config, audio: audio, second: second), raw: raw)
     }
 
     /// Turns a cleanup outcome into the text to insert. The dictionary's hard
@@ -486,7 +512,7 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
     }
 
     private func runCleanup(
-        raw: String, context: DictationContext, config: GeminiConfig, audio: Data?
+        raw: String, context: DictationContext, config: GeminiConfig, audio: Data?, second: String? = nil
     ) async -> CleanupOutcome {
         let dictionary = DictionaryStore()
         let prompt = PromptV1.cleanupPrompt(
@@ -495,7 +521,8 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
             spellings: dictionary.spellings(),
             instructions: settings.customInstructions,
             imagesAttached: !context.screenshots.isEmpty,
-            audioAttached: audio != nil
+            audioAttached: audio != nil,
+            secondTranscript: second
         )
         do {
             let deadline = min(

@@ -37,7 +37,8 @@ usage, it estimates: audio seconds × 25 tokens/s for the transcribe models
 (32 for other models) and output characters ÷ 4, flagged `isEstimated`.
 
 On OpenAI's own API, the transcription models (`gpt-transcribe`,
-`gpt-4o-transcribe`) bill per audio minute and report
+`gpt-4o-transcribe`, and `whisper-1`, which each OpenAI dictation with writing
+rules also sends for a second transcript) bill per audio minute and report
 `usage: {type: "duration", seconds}`; `TokenUsage.fromOpenAIDuration` books
 `seconds / 60 × PriceBook.perMinutePrice` as `reportedCostUSD` with no token
 counts. The realtime socket (`OpenAILiveDialect`) books the seconds it sent

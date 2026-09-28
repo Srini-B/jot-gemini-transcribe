@@ -30,6 +30,9 @@ public struct OpenAIConfig: Sendable, Equatable {
     public var writingModel = "gpt-6-luna"
     /// Meetings only. `gpt-transcribe` has no speaker labels.
     public var diarizeModel = "gpt-4o-transcribe-diarize"
+    /// Dictation only: a second transcript for the writing model, which cannot
+    /// hear the recording. A different model family errs in different places.
+    public var secondOpinionModel = "whisper-1"
     public var liveDelay: LiveDelay = .low
 
     public init() {}
@@ -43,15 +46,17 @@ public struct OpenAIConfig: Sendable, Equatable {
 ///  - `/audio/transcriptions` takes the app's FLAC as is (FLAC is not in the
 ///    documented format list; the transcript was identical to WAV and M4A).
 ///  - GPT-6 Luna rejects `temperature: 0` (only the default is allowed) and
-///    takes audio only as wav/mp3 `input_audio`, so the writing model never
-///    hears the recording on this provider.
+///    takes no audio at all: Chat Completions answers 400 for `input_audio`
+///    (wav included), and the Responses API answers "Audio input is not
+///    available". The writing model never hears the recording on this
+///    provider; `secondOpinionTranscript` is what it gets instead.
 ///  - A keyword containing `<` fails the whole request with 400.
 extension GeminiClient {
     static let openAIEndpoint = URL(string: "https://api.openai.com/v1")!
 
     func openAITranscribe(audio: Data, mimeType: String = "audio/flac", keywords: [String],
-                          deadline: TimeInterval) async throws -> String {
-        let model = openAIConfig().transcribeModel
+                          deadline: TimeInterval, model override: String? = nil) async throws -> String {
+        let model = override ?? openAIConfig().transcribeModel
         var form = MultipartForm()
         form.field("model", model)
         form.file("file", filename: "audio.\(Self.audioFormat(mimeType))", mimeType: mimeType, data: audio)
@@ -60,6 +65,17 @@ extension GeminiClient {
                                   deadline: deadline, modelLabel: model, stage: .transcribe, via: .openAI,
                                   extraHeaders: ["Content-Type": form.contentType])
         return try Self.extractGatewayTranscript(from: data)
+    }
+
+    /// A transcript of the same recording by a different speech model, for
+    /// the cleanup pass to check the primary transcript against. Only on
+    /// OpenAI's own API; nil everywhere else. No keywords: whisper-1 takes a
+    /// free-text prompt instead, and SECOND is more useful when independent.
+    public func secondOpinionTranscript(flacData: Data, deadline: TimeInterval) async throws -> String? {
+        guard route() == ModelRoute(provider: .openAI, gateway: .direct) else { return nil }
+        let text = try await openAITranscribe(audio: flacData, keywords: [], deadline: deadline,
+                                              model: openAIConfig().secondOpinionModel)
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     func openAIChat(prompt: String, images: [Data] = [], deadline: TimeInterval, stage: UsageStage,
@@ -124,7 +140,8 @@ extension GeminiClient {
         let imageParts: [[String: Any]] = images.map {
             ["type": "image_url", "image_url": ["url": "data:image/jpeg;base64,\($0.base64EncodedString())"]]
         }
-        guard !images.isEmpty, let split = prompt.range(of: "RAW: ", options: .backwards) else {
+        let dictation = prompt.range(of: "SECOND: ", options: .backwards) ?? prompt.range(of: "RAW: ", options: .backwards)
+        guard !images.isEmpty, let split = dictation else {
             return [["role": "user", "content": [["type": "text", "text": prompt]] + imageParts]]
         }
         let label = images.count == 1 ? "Screenshot" : "Screenshots"

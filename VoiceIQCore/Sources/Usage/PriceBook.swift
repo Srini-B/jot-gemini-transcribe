@@ -83,6 +83,7 @@ public enum PriceBook {
         ("gpt-4o-mini-transcribe", 0.003),
         ("gpt-4o-transcribe", 0.006),
         ("gpt-realtime-translate", 0.034),
+        ("whisper-1", 0.006),
     ]
 
     public static func perMinutePrice(for model: String) -> Double? {
