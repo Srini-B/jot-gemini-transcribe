@@ -50,17 +50,21 @@ struct PermissionsPanel: View {
                     if status.keyboardReady {
                         StatusChip(text: "Ready", tone: .done)
                     } else if status.keyboardAdded {
-                        StatusChip(text: "Almost", tone: .pending)
+                        StatusChip(text: "Open it once", tone: .pending)
                     }
                 }
-                SettingsMockup(keyboardOn: status.keyboardAdded, fullAccessOn: status.fullAccess)
+                SettingsMockup(keyboardOn: status.keyboardAdded,
+                               fullAccess: status.fullAccess ? .on : status.keyboardAdded ? .unconfirmed : .off)
                 if status.keyboardAdded && !status.fullAccess {
-                    Label("Full Access is confirmed the first time the VoiceiQ keyboard opens.", systemImage: "clock")
+                    // iOS does not tell the app whether Full Access is on. The
+                    // keyboard reports it the first time it opens.
+                    Label("iOS only lets VoiceiQ check Full Access from the keyboard. Switch to the VoiceiQ keyboard once in the Try it box to finish.",
+                          systemImage: "keyboard")
                         .font(Theme.Fonts.footnote())
                         .foregroundStyle(Theme.Colors.pending)
                         .fixedSize(horizontal: false, vertical: true)
-                }
-                if !status.keyboardReady {
+                    Button("Open Settings", action: openSettings).buttonStyle(.secondaryPill)
+                } else if !status.keyboardReady {
                     Button("Open Settings", action: openSettings).buttonStyle(.primaryPill)
                 }
             }
@@ -89,10 +93,12 @@ struct PermissionsPanel: View {
 }
 
 /// A miniature of the Keyboards page in Settings with the two switches the
-/// user must turn on, mirroring their real state.
+/// user must turn on, mirroring what VoiceiQ knows of their state.
 private struct SettingsMockup: View {
+    enum FullAccess { case on, off, unconfirmed }
+
     let keyboardOn: Bool
-    let fullAccessOn: Bool
+    let fullAccess: FullAccess
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -103,7 +109,17 @@ private struct SettingsMockup: View {
             VStack(spacing: 0) {
                 row("VoiceiQ", on: keyboardOn)
                 Divider().padding(.leading, 12)
-                row("Allow Full Access", on: fullAccessOn)
+                if fullAccess == .unconfirmed {
+                    HStack {
+                        Text("Allow Full Access").font(Theme.Fonts.subheadline()).foregroundStyle(Theme.Colors.ink)
+                        Spacer()
+                        Text("Not confirmed").font(Theme.Fonts.caption()).foregroundStyle(Theme.Colors.pending)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 11)
+                } else {
+                    row("Allow Full Access", on: fullAccess == .on)
+                }
             }
             .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.Colors.surface))
             .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.Colors.hairline, lineWidth: 0.5))
@@ -151,6 +167,9 @@ struct TryItCard: View {
                     Button("Clear") { text = "" }.buttonStyle(.compactSecondary)
                 }
             }
+            if !setup.status.fullAccess {
+                KeyboardSwitchSteps()
+            }
             TextField("Try: “Remind me to call Sam at three, no, four pm.”", text: $text, axis: .vertical)
                 .font(Theme.Fonts.body())
                 .lineLimit(4...10)
@@ -159,6 +178,31 @@ struct TryItCard: View {
                 .background(RoundedRectangle(cornerRadius: Theme.Radius.field, style: .continuous).fill(Theme.Colors.surfaceNested))
                 .overlay(RoundedRectangle(cornerRadius: Theme.Radius.field, style: .continuous)
                     .strokeBorder(focused ? Theme.Colors.accent : Theme.Colors.hairline, lineWidth: focused ? 1.5 : 0.5))
+        }
+    }
+}
+
+/// How to reach the VoiceiQ keyboard: iOS shows the keyboard the user last
+/// picked, and switching is done with the globe key below it.
+private struct KeyboardSwitchSteps: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            step(1, Text("Tap the box below."))
+            step(2, Text("Touch and hold \(Image(systemName: "globe")) at the bottom left of the keyboard."))
+            step(3, Text("Choose **VoiceiQ**, then tap the mic."))
+        }
+        .font(Theme.Fonts.callout())
+        .foregroundStyle(Theme.Colors.ink)
+    }
+
+    private func step(_ number: Int, _ text: Text) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.s) {
+            Text("\(number)")
+                .font(Theme.Fonts.caption())
+                .foregroundStyle(Theme.Colors.accent)
+                .frame(width: 20, height: 20)
+                .background(Circle().fill(Theme.Colors.accent.opacity(0.12)))
+            text.fixedSize(horizontal: false, vertical: true)
         }
     }
 }

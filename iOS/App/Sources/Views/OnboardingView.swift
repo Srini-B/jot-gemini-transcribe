@@ -223,8 +223,7 @@ private struct PermissionsPage: View {
 private struct TryItPage: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
-            PageTitle(title: "Try it",
-                      detail: "Tap the box, hold the globe key to switch to VoiceiQ, then tap the mic.")
+            PageTitle(title: "Try it")
             TryItCard()
         }
     }

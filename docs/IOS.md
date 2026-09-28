@@ -122,7 +122,10 @@ Group with `SharedStore.reloadFromDisk()` whenever the app becomes active, when
 the keyboard pings `io.blue.voiceiq.bridge.keyboard` (`SharedStore.noteKeyboardSeen`,
 posted each time the keyboard appears), and on `activityEnablementUpdates`.
 Returning from Settings with Full Access turned on shows it as granted without
-restarting the app. Onboarding saves its page in `MobileSettings.onboardingStep`,
+restarting the app, once the keyboard has opened: iOS gives the app no way to
+read the Full Access switch, so until the VoiceiQ keyboard has run with it,
+the setup card shows "Open it once" and "Not confirmed", and the Try it card
+lists how to switch to the VoiceiQ keyboard with the globe key. Onboarding saves its page in `MobileSettings.onboardingStep`,
 so a trip to Settings resumes on the same page.
 
 Onboarding has four pages: welcome, API keys (every provider plus TinyFish on
