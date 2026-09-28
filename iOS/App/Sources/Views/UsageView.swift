@@ -1,0 +1,164 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+import SwiftUI
+import VoiceIQCore
+
+/// Cost, as on the Mac: one provider at a time, opening on the selected one.
+/// Period totals, cost per action, and in Detailed the per-model table and
+/// the most recent calls.
+struct UsageView: View {
+    enum Period: String, CaseIterable, Identifiable {
+        case today, week, month, all
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .today: return "Today"
+            case .week: return "Week"
+            case .month: return "Month"
+            case .all: return "All time"
+            }
+        }
+        var start: Date? {
+            let calendar = Calendar.current
+            let now = Date()
+            switch self {
+            case .today: return calendar.startOfDay(for: now)
+            case .week: return calendar.dateInterval(of: .weekOfYear, for: now)?.start
+            case .month: return calendar.dateInterval(of: .month, for: now)?.start
+            case .all: return nil
+            }
+        }
+    }
+
+    @State private var provider = SettingsStore().preferredProvider
+    @State private var period: Period = .month
+    @AppStorage("costPaneDetailed") private var detailed = false
+    @State private var total = UsageStore.Total.zero
+    @State private var byActivity: [(key: String, total: UsageStore.Total)] = []
+    @State private var byModel: [(key: String, total: UsageStore.Total)] = []
+    @State private var recent: [UsageRecord] = []
+
+    var body: some View {
+        List {
+            Section {
+                VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+                    Picker("Provider", selection: $provider) {
+                        ForEach(ModelProvider.allCases) { Text($0.displayName).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    Picker("Period", selection: $period) {
+                        ForEach(Period.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    Card {
+                        Text(Self.money(total.costUSD, approximate: total.isApproximate))
+                            .font(Theme.Fonts.numeric(40, weight: 250)).foregroundStyle(Theme.Colors.ink)
+                        Text("\(total.calls.formatted()) requests")
+                            .font(Theme.Fonts.caption()).foregroundStyle(Theme.Colors.muted)
+                    }
+                }
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+            }
+            Section {
+                if byActivity.isEmpty {
+                    Text("No calls in this period").foregroundStyle(Theme.Colors.muted)
+                }
+                ForEach(byActivity, id: \.key) { item in
+                    row(UsageActivity(rawValue: item.key)?.displayName ?? item.key, item.total)
+                }
+            } header: { SettingsSectionHeader("By action") }
+            Section {
+                Toggle("Detailed", isOn: $detailed)
+            }
+            if detailed {
+                Section {
+                    ForEach(byModel, id: \.key) { item in row(item.key, item.total) }
+                } header: { SettingsSectionHeader("By model") }
+                Section {
+                    if recent.isEmpty {
+                        Text("Nothing recorded yet").foregroundStyle(Theme.Colors.muted)
+                    }
+                    ForEach(recent) { record in
+                        HStack(alignment: .firstTextBaseline) {
+                            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                                Text("\(record.activityValue.displayName) · \(record.stageValue?.displayName ?? record.stage)")
+                                    .font(Theme.Fonts.body()).foregroundStyle(Theme.Colors.ink)
+                                Text("\(record.model) · in \(Self.tokens(record.usage.totalIn)) · out \(Self.tokens(record.usage.totalOut)) · \(record.at.formatted(date: .abbreviated, time: .shortened))")
+                                    .font(Theme.Fonts.caption()).foregroundStyle(Theme.Colors.muted)
+                            }
+                            Spacer()
+                            Text(Self.money(record.costUSD, approximate: record.isEstimated || record.costUSD == nil))
+                                .font(Theme.Fonts.body()).monospacedDigit().foregroundStyle(Theme.Colors.ink)
+                        }
+                    }
+                } header: { SettingsSectionHeader("Recent calls") }
+            }
+            Section {
+                Text(footer)
+                    .font(Theme.Fonts.footnote()).foregroundStyle(Theme.Colors.muted)
+            }
+        }
+        .settingsPage(title: "Cost")
+        .onAppear(perform: reload)
+        .onChange(of: provider) { _, _ in reload() }
+        .onChange(of: period) { _, _ in reload() }
+        .onReceive(NotificationCenter.default.publisher(for: .gtUsageDidChange)
+            .debounce(for: .milliseconds(250), scheduler: RunLoop.main)) { _ in reload() }
+    }
+
+    /// The shown provider's price source: the active gateway's for the
+    /// selected provider, the provider's own pricing page for the other.
+    private var footer: String {
+        let active = SettingsStore().activeRoute
+        let note = ModelRoute(provider: provider, gateway: provider == active.provider ? active.gateway : .direct).pricingNote
+        return detailed ? note + " ≈ marks estimated tokens or an unpriced model." : note
+    }
+
+    private func row(_ name: String, _ total: UsageStore.Total) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                Text(name).font(Theme.Fonts.body()).foregroundStyle(Theme.Colors.ink)
+                Text(detailed
+                     ? "\(total.calls) calls · in \(Self.tokens(total.tokensIn)) · out \(Self.tokens(total.tokensOut))"
+                     : "\(total.calls) calls")
+                    .font(Theme.Fonts.caption()).foregroundStyle(Theme.Colors.muted)
+            }
+            Spacer()
+            Text(Self.money(total.costUSD, approximate: total.isApproximate))
+                .font(Theme.Fonts.body()).monospacedDigit().foregroundStyle(Theme.Colors.ink)
+        }
+    }
+
+    private func reload() {
+        guard let store = UsageMeter.store else { return }
+        total = store.total(since: period.start, provider: provider)
+        byActivity = store.totalsByActivity(since: period.start, provider: provider)
+        byModel = store.totalsByModel(since: period.start, provider: provider)
+        recent = store.recent(limit: 30, provider: provider)
+    }
+
+    /// Costs are fractions of a cent per dictation: four decimals under a
+    /// dollar, two above.
+    static func money(_ value: Double?, approximate: Bool = false) -> String {
+        guard let value else { return "—" }
+        let text = value >= 1 ? String(format: "$%.2f", value) : String(format: "$%.4f", value)
+        return approximate ? "≈" + text : text
+    }
+
+    static func tokens(_ count: Int) -> String {
+        count >= 10_000 ? String(format: "%.1fk", Double(count) / 1000) : "\(count)"
+    }
+}

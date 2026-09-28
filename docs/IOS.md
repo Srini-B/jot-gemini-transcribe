@@ -3,8 +3,8 @@
 A voice-only keyboard backed by the same dictation pipeline as the Mac app.
 The keyboard never records or calls a model. It sends commands to the VoiceiQ
 app, which records, transcribes with your own API key, and hands the text back.
-The iPhone app runs Gemini models, with a Gemini key or through OpenRouter or
-Vercel AI Gateway; the OpenAI provider is macOS-only for now.
+Like the Mac, it runs Gemini or OpenAI models, with that provider's own key or
+through OpenRouter or Vercel AI Gateway.
 
 ## Targets
 
@@ -213,10 +213,11 @@ while a meeting records.
 | Pill | Keyboard status plus Dynamic Island |
 | AX and paste insertion | `textDocumentProxy.insertText` |
 | Ask Anything, Translate, Paste last | Keyboard modes and Paste last |
-| Providers, keys, TinyFish | Same, in the iOS Keychain |
+| Provider (Gemini or OpenAI), gateways under Experimental, TinyFish | Same, in Settings › Provider & Keys and the iOS Keychain |
 | Dictionary, writing rules, smart transcription, live, noise handling | Same settings |
 | History, retry, crash recovery, retention | Same |
-| Cost | Same ledger |
+| Cost with the provider toggle, periods and Detailed | Same |
+| Advanced: the selected provider's models | Same, plus the session log |
 | Screen context, auto-learn, shortcuts, call detection, mute other audio, sounds | Not on iOS |
 
 ## Building

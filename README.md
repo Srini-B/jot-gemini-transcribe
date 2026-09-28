@@ -186,10 +186,9 @@ lands where you were typing.
 - **One trip to the app, once.** The first tap starts a background session and
   sends you back to the app you were in. After that the mic starts in place,
   and the session shows in the Dynamic Island until you end it.
-- **Same settings as the Mac.** Your own Gemini, OpenRouter or Vercel key
-  (stored in the iOS Keychain), dictionary, writing rules, Ask Anything,
-  Translate, History and Cost. The iPhone app runs Gemini models only for
-  now; OpenAI is on the Mac.
+- **Same settings as the Mac.** Gemini or OpenAI with your own key, or
+  through OpenRouter or Vercel under Experimental (keys in the iOS Keychain),
+  dictionary, writing rules, Ask Anything, Translate, History and Cost.
 - **Meetings are a recorder.** Record in the app, stop, and the notes are
   written with the same pipeline as on the Mac. The iPhone records the room
   mic only, because iOS does not let an app capture call audio.

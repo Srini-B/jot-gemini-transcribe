@@ -36,7 +36,7 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    settingsLink("API Keys", icon: "key.fill", destination: KeysView()) {
+                    settingsLink("Provider & Keys", icon: "key.fill", destination: KeysView()) {
                         if !KeychainStore.hasModelKey { StatusChip(text: "Missing", tone: .pending) }
                     }
                     settingsLink("Keyboard & Permissions", icon: "keyboard.fill", destination: KeyboardSetupView()) {
@@ -137,13 +137,22 @@ struct DictationSettingsView: View {
                 Toggle("Better hearing in loud rooms", isOn: $noiseHandling)
                     .onChange(of: noiseHandling) { _, value in settings.setExperimentalNoiseHandling(value) }
                 Toggle("Live transcription", isOn: $liveTranscription)
-                    .onChange(of: liveTranscription) { _, value in settings.setLiveTranscription(value) }
+                    .onChange(of: liveTranscription) { _, value in
+                        settings.setLiveTranscription(value)
+                        // Switching it on is an explicit "try again": clear the
+                        // failure streak that turned it off.
+                        if value { LiveStats().clearStreak() }
+                    }
                     .disabled(settings.usesLegacyTranscribeEndpoint || !settings.liveTranscriptionSupported)
             } header: {
                 SettingsSectionHeader("Experimental")
             } footer: {
-                if !settings.liveTranscriptionSupported {
-                    Text("Live transcription runs only with Google AI Studio as the provider.")
+                if settings.usesLegacyTranscribeEndpoint {
+                    Text("Live transcription is unavailable while the previous transcription endpoint is on in Advanced.")
+                } else if !settings.liveTranscriptionSupported {
+                    Text("Live transcription needs the provider's own API key; it is unavailable through a gateway.")
+                } else if let summary = LiveStats().summary {
+                    Text(summary)
                 }
             }
             Section {
@@ -357,6 +366,15 @@ private struct ReturnAppDetail: View {
 
 struct PrivacyView: View {
     @State private var retentionDays = SettingsStore().audioRetentionDays
+    @State private var route = SettingsStore().activeRoute
+
+    private var owner: String { route.provider == .gemini ? "Google" : "OpenAI" }
+
+    /// Where requests go on the active route: the provider, or a gateway that
+    /// forwards them to the provider.
+    private var audioDestination: String {
+        route.gateway == .direct ? "\(owner), with your key" : "\(route.endpoint.hostName), then \(owner)"
+    }
 
     var body: some View {
         Form {
@@ -371,70 +389,62 @@ struct PrivacyView: View {
                 }
             }
             Section {
-                LabeledContent("Audio", value: "Your model provider")
-                LabeledContent("Dictionary terms", value: "Your model provider")
+                LabeledContent("Audio", value: audioDestination)
+                LabeledContent("Transcript text", value: "Only with writing rules on")
+                LabeledContent("Meeting notes", value: route.provider.displayName)
+                LabeledContent("Dictionary terms", value: "Sent with the audio")
                 LabeledContent("Ask search queries", value: "TinyFish, if its key is saved")
                 LabeledContent("What you type", value: "Never")
             } header: { SettingsSectionHeader("What leaves your iPhone") }
         }
         .settingsPage(title: "Privacy")
+        .onAppear { route = SettingsStore().activeRoute }
     }
 }
 
-struct UsageView: View {
-    @State private var total = UsageMeter.store?.total() ?? .zero
-    @State private var byActivity = UsageMeter.store?.totalsByActivity() ?? []
-
-    var body: some View {
-        List {
-            Section {
-                Card {
-                    Text(total.costUSD.formatted(.currency(code: "USD").precision(.fractionLength(2...4))))
-                        .font(Theme.Fonts.numeric(40, weight: 250)).foregroundStyle(Theme.Colors.ink)
-                    Text("\(total.calls.formatted()) requests")
-                        .font(Theme.Fonts.caption()).foregroundStyle(Theme.Colors.muted)
-                }
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(Color.clear)
-            }
-            Section {
-                ForEach(byActivity, id: \.key) { item in
-                    LabeledContent(UsageActivity(rawValue: item.key)?.displayName ?? item.key,
-                                   value: item.total.costUSD.formatted(.currency(code: "USD").precision(.fractionLength(2...4))))
-                }
-            } header: { SettingsSectionHeader("By activity") }
-            Section {
-                Text(SettingsStore().activeRoute.pricingNote)
-                    .font(Theme.Fonts.footnote()).foregroundStyle(Theme.Colors.muted)
-            }
-        }
-        .settingsPage(title: "Cost")
-    }
-}
-
+/// Session log and the selected provider's models, as in the Mac's
+/// Advanced pane. The provider and keys are under Provider & Keys.
 struct AdvancedView: View {
     private let settings = SettingsStore()
+    private let provider = SettingsStore().preferredProvider
     @State private var endpoint = SettingsStore().endpointOverride ?? ""
     @State private var transcribeModel = SettingsStore().transcribeModelOverride ?? ""
     @State private var liveModel = SettingsStore().liveModelOverride ?? ""
     @State private var cleanupModel = SettingsStore().cleanupModelOverride ?? ""
     @State private var legacyEndpoint = SettingsStore().usesLegacyTranscribeEndpoint
-    private let defaults = GeminiConfig()
+    @State private var openAITranscribe = SettingsStore().openAITranscribeModelOverride ?? ""
+    @State private var openAILive = SettingsStore().openAILiveModelOverride ?? ""
+    @State private var openAIWriting = SettingsStore().openAIWritingModelOverride ?? ""
+    @State private var openAILiveDelay = SettingsStore().openAIConfig.liveDelay
+    private let geminiDefaults = GeminiConfig()
+    private let openAIDefaults = OpenAIConfig()
 
     var body: some View {
         Form {
             Section {
                 NavigationLink("Session log") { SessionLogView() }
             }
-            Section {
-                field("Endpoint", text: $endpoint, prompt: defaults.endpoint.absoluteString) { settings.setEndpointOverride($0) }
-                field("Transcription", text: $transcribeModel, prompt: defaults.transcribeModel) { settings.setTranscribeModelOverride($0) }
-                field("Live", text: $liveModel, prompt: defaults.liveModel) { settings.setLiveModelOverride($0) }
-                field("Formatting", text: $cleanupModel, prompt: defaults.cleanupModel) { settings.setCleanupModelOverride($0) }
-            } header: { SettingsSectionHeader("Model overrides") }
-            Section {
-                Toggle("Use the previous transcription endpoint", isOn: $legacyEndpoint)
-                    .onChange(of: legacyEndpoint) { _, value in settings.setLegacyTranscribeEndpoint(value) }
+            if provider == .gemini {
+                Section {
+                    field("Endpoint", text: $endpoint, prompt: geminiDefaults.endpoint.absoluteString) { settings.setEndpointOverride($0) }
+                    field("Transcription", text: $transcribeModel, prompt: geminiDefaults.transcribeModel) { settings.setTranscribeModelOverride($0) }
+                    field("Live", text: $liveModel, prompt: geminiDefaults.liveModel) { settings.setLiveModelOverride($0) }
+                    field("Formatting", text: $cleanupModel, prompt: geminiDefaults.cleanupModel) { settings.setCleanupModelOverride($0) }
+                } header: { SettingsSectionHeader("Gemini models") }
+                Section {
+                    Toggle("Use the previous transcription endpoint", isOn: $legacyEndpoint)
+                        .onChange(of: legacyEndpoint) { _, value in settings.setLegacyTranscribeEndpoint(value) }
+                }
+            } else {
+                Section {
+                    field("Transcription", text: $openAITranscribe, prompt: openAIDefaults.transcribeModel) { settings.setOpenAITranscribeModelOverride($0) }
+                    field("Live", text: $openAILive, prompt: openAIDefaults.liveModel) { settings.setOpenAILiveModelOverride($0) }
+                    Picker("Live delay", selection: $openAILiveDelay) {
+                        ForEach(OpenAIConfig.LiveDelay.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
+                    }
+                    .onChange(of: openAILiveDelay) { _, value in settings.setOpenAILiveDelay(value) }
+                    field("Formatting", text: $openAIWriting, prompt: openAIDefaults.writingModel) { settings.setOpenAIWritingModelOverride($0) }
+                } header: { SettingsSectionHeader("OpenAI models") }
             }
         }
         .settingsPage(title: "Advanced", keyboard: true)
@@ -457,13 +467,13 @@ struct AdvancedView: View {
     }
 }
 
-private struct SettingsSectionHeader: View {
+struct SettingsSectionHeader: View {
     let text: String
     init(_ text: String) { self.text = text }
     var body: some View { GroupLabel(text: text) }
 }
 
-private extension View {
+extension View {
     func settingsPage(title: String, keyboard: Bool = false) -> some View {
         self
             .listStyle(.insetGrouped)

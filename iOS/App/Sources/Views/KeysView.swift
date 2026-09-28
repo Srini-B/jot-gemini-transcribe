@@ -15,7 +15,7 @@
 import SwiftUI
 import VoiceIQCore
 
-/// Settings › API Keys.
+/// Settings › Provider & Keys.
 struct KeysView: View {
     var body: some View {
         ScrollView {
@@ -25,20 +25,22 @@ struct KeysView: View {
         }
         .keyboardDismissable()
         .themedBackground()
-        .navigationTitle("API Keys")
+        .navigationTitle("Provider & Keys")
         .navigationBarTitleDisplayMode(.inline)
     }
 }
 
-/// Every key on one page: the three model providers (one is enough) and the
-/// optional TinyFish key, with the provider picker once two or more are saved.
+/// The provider (Gemini or OpenAI) and its key, the optional TinyFish key,
+/// and the gateways under a collapsed Experimental section, as on the Mac.
+/// Gateway keys serve both providers, so they are entered once.
 struct ModelKeysForm: View {
-    @State private var saved = KeySlot.savedSlots()
-    @State private var preferred = SettingsStore().activeRoute.gateway
+    @State private var provider = SettingsStore().preferredProvider
+    @State private var gateway = SettingsStore().activeRoute.gateway
+    @State private var available = KeychainStore.gatewaysWithKeys(for: SettingsStore().preferredProvider)
+    /// Collapsed on every visit, like the Mac's Experimental group.
+    @State private var experimentalExpanded = false
 
-    private var savedGateways: [ModelGateway] {
-        ModelGateway.allCases.filter { saved.contains(KeySlot(gateway: $0)) }
-    }
+    private var providerSlot: KeySlot { provider == .gemini ? .gemini : .openAI }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
@@ -46,7 +48,7 @@ struct ModelKeysForm: View {
                 Image(systemName: "info.circle.fill")
                     .foregroundStyle(Theme.Colors.accent)
                     .font(.system(size: 17))
-                Text("Add a key for **one** provider: Gemini or OpenRouter or Vercel AI Gateway. You don't need all three. The TinyFish key is optional.")
+                Text("Pick **Gemini** or **OpenAI** and add that provider's key. The TinyFish key is optional.")
                     .font(Theme.Fonts.subheadline())
                     .foregroundStyle(Theme.Colors.inkSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -57,42 +59,83 @@ struct ModelKeysForm: View {
                 .fill(Theme.Colors.accent.opacity(0.08)))
 
             VStack(alignment: .leading, spacing: Theme.Spacing.m) {
-                GroupLabel(text: "Model provider · one is enough")
-                if savedGateways.count > 1 {
-                    Card {
-                        Text("Gateway").font(Theme.Fonts.headline()).foregroundStyle(Theme.Colors.ink)
-                        Picker("Gateway", selection: $preferred) {
-                            ForEach(savedGateways) { gateway in
-                                Text(gateway.shortName).tag(gateway)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        .onChange(of: preferred) { _, value in SettingsStore().setPreferredGateway(value) }
-                    }
+                GroupLabel(text: "Provider")
+                Picker("Provider", selection: $provider) {
+                    ForEach(ModelProvider.allCases) { Text($0.displayName).tag($0) }
                 }
-                ForEach([KeySlot.gemini, .openRouter, .vercel], id: \.self) { slot in
-                    KeyCard(slot: slot, onChange: reload)
+                .pickerStyle(.segmented)
+                .onChange(of: provider) { _, value in
+                    SettingsStore().setPreferredProvider(value)
+                    reload()
                 }
+                KeyCard(slot: providerSlot, onChange: reload)
+                    .id(providerSlot)
             }
 
             VStack(alignment: .leading, spacing: Theme.Spacing.m) {
                 GroupLabel(text: "Optional")
                 KeyCard(slot: .tinyFish, onChange: reload)
             }
+
+            experimental
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .gtSettingDidChange).receive(on: RunLoop.main)) { _ in
+            reload()
+        }
+    }
+
+    @ViewBuilder private var experimental: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { experimentalExpanded.toggle() }
+            } label: {
+                HStack(spacing: Theme.Spacing.s) {
+                    GroupLabel(text: "Experimental")
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.Colors.muted)
+                        .rotationEffect(.degrees(experimentalExpanded ? 90 : 0))
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Experimental")
+            .accessibilityValue(experimentalExpanded ? "Expanded" : "Collapsed")
+
+            if experimentalExpanded {
+                if available.count > 1 {
+                    Card {
+                        Text("Gateway").font(Theme.Fonts.headline()).foregroundStyle(Theme.Colors.ink)
+                        Picker("Gateway", selection: $gateway) {
+                            ForEach(ModelGateway.allCases.filter(available.contains)) { option in
+                                Text(option.shortName(for: provider)).tag(option)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .onChange(of: gateway) { _, value in
+                            if value != SettingsStore().activeRoute.gateway { SettingsStore().setPreferredGateway(value) }
+                        }
+                    }
+                }
+                KeyCard(slot: .openRouter, onChange: reload)
+                KeyCard(slot: .vercel, onChange: reload)
+            }
         }
     }
 
     private func reload() {
-        saved = KeySlot.savedSlots()
-        preferred = SettingsStore().activeRoute.gateway
+        let settings = SettingsStore()
+        provider = settings.preferredProvider
+        available = KeychainStore.gatewaysWithKeys(for: provider)
+        gateway = settings.activeRoute.gateway
     }
 }
 
 private extension ModelGateway {
-    /// The iPhone app runs Gemini only, so the direct route is Gemini's key.
-    var shortName: String {
+    func shortName(for provider: ModelProvider) -> String {
         switch self {
-        case .direct: return "Gemini"
+        case .direct: return provider.displayName
         case .openRouter: return "OpenRouter"
         case .vercel: return "Vercel"
         }
@@ -229,20 +272,7 @@ private struct TrailingIconLabelStyle: LabelStyle {
 
 /// A place a key can be stored, with what it is for.
 enum KeySlot: Hashable, CaseIterable {
-    // `openAI` is not offered on iOS yet; the macOS app ships it first.
-    case gemini, openRouter, vercel, openAI, tinyFish
-
-    init(gateway: ModelGateway) {
-        switch gateway {
-        case .direct: self = .gemini
-        case .openRouter: self = .openRouter
-        case .vercel: self = .vercel
-        }
-    }
-
-    static func savedSlots() -> Set<KeySlot> {
-        Set(allCases.filter { $0.load() != nil })
-    }
+    case gemini, openAI, openRouter, vercel, tinyFish
 
     var title: String {
         switch self {
@@ -269,11 +299,11 @@ enum KeySlot: Hashable, CaseIterable {
         case .gemini:
             return "Google's Gemini API, with a free tier. Stored in your iPhone's Keychain and only ever sent to Google."
         case .openRouter:
-            return "Runs the same Gemini models through OpenRouter, which has no per-minute tier limits. Stored in your iPhone's Keychain and only ever sent to OpenRouter."
+            return "Runs Gemini or OpenAI models through OpenRouter, which has no per-minute tier limits. Stored in your iPhone's Keychain and only ever sent to OpenRouter."
         case .vercel:
-            return "Runs the same Gemini models through Vercel AI Gateway, billed per call. Stored in your iPhone's Keychain and only ever sent to Vercel."
+            return "Runs Gemini or OpenAI models through Vercel AI Gateway, billed per call. Stored in your iPhone's Keychain and only ever sent to Vercel."
         case .openAI:
-            return "Uses OpenAI's own models instead of Gemini. Stored in your iPhone's Keychain and only ever sent to OpenAI."
+            return "OpenAI's API. Stored in your iPhone's Keychain and only ever sent to OpenAI."
         case .tinyFish:
             return "Lets Ask Anything look up current information on the web. Stored in your iPhone's Keychain and only ever sent to TinyFish."
         }

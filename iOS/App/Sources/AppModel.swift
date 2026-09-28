@@ -61,6 +61,8 @@ final class AppModel: ObservableObject {
             apiKey: { KeychainStore.loadAPIKey() },
             openRouterKey: { KeychainStore.loadOpenRouterKey() },
             vercelKey: { KeychainStore.loadVercelKey() },
+            openAIKey: { KeychainStore.loadOpenAIKey() },
+            openAIConfig: { SettingsStore().openAIConfig },
             route: { SettingsStore().activeRoute }
         )
         transcription = GeminiTranscriptionService(client: client)
