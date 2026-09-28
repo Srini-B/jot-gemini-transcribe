@@ -42,6 +42,8 @@ final class KeyboardModel: ObservableObject {
     private static let modeKey = "keyboardMode"
 
     weak var controller: KeyboardViewController?
+    /// Called after the keyboard itself writes to the clipboard.
+    var onOwnCopy: (() -> Void)?
     private let store = SharedStore.shared
     private var observer: UUID?
     private var timer: Timer?
@@ -155,6 +157,7 @@ final class KeyboardModel: ObservableObject {
     func copyAnswer() {
         guard let answer else { return }
         UIPasteboard.general.string = answer.text
+        onOwnCopy?()
         dismissAnswer()
     }
 

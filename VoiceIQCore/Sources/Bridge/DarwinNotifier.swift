@@ -28,6 +28,8 @@ public enum DarwinNotifier {
         case state = "io.blue.voiceiq.bridge.state"
         /// The keyboard ran with Full Access. Writer: keyboard.
         case keyboard = "io.blue.voiceiq.bridge.keyboard"
+        /// Keyboard → app: a word was queued for the dictionary.
+        case dictionary = "io.blue.voiceiq.bridge.dictionary"
     }
 
     private static let lock = NSLock()

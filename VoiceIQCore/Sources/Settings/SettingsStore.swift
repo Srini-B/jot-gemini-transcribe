@@ -19,14 +19,8 @@ public extension Notification.Name {
     /// with `object` = the key ("showIdleIndicator", "apiKey", …). Runtime
     /// surfaces that render a setting (pill, status line, hotkey engine) observe
     /// this so toggles take effect the moment they're flipped — never "on the
-    /// next unrelated transition". (gateTrips bookkeeping is exempt: nothing
-    /// renders it.)
+    /// next unrelated transition".
     static let gtSettingDidChange = Notification.Name("io.blue.voiceiq.setting-changed")
-
-    /// Posted when the gate auto-disables the opt-in tone pass (3 trips in 24h)
-    /// so the app can tell the user instead of silently dropping it. Native smart
-    /// transcription is unaffected — the user loses an extra, not their words.
-    static let gtSmartFormattingAutoDegraded = Notification.Name("io.blue.voiceiq.auto-degraded")
 }
 
 /// UserDefaults-backed settings (M3 minimal; the Settings UI lands at M7).
@@ -317,14 +311,8 @@ public struct SettingsStore: Sendable {
         Self.set(enabled, forKey: "meetingDetection")
     }
 
+    /// Only the user changes this. Rejected rewrites never turn it off.
     public func setSmartCleanupPass(_ enabled: Bool) {
-        if enabled {
-            // A deliberate re-enable is a clean slate. This moved here with the
-            // gate counter: auto-degrade now switches THIS flag off, so leaving
-            // the clear on setSmartFormatting would resurrect the bug where one
-            // stale trip inside the old 24h window instantly re-degrades.
-            Self.defaults.removeObject(forKey: "gateTrips")
-        }
         Self.set(enabled, forKey: "smartCleanupPass")
     }
 
@@ -419,14 +407,5 @@ public struct SettingsStore: Sendable {
 
     public func setAudioRetentionDays(_ days: Int) {
         Self.set(days, forKey: "audioRetentionDays")
-    }
-
-    /// Auto-degrade bookkeeping (F11): ≥3 gate trips in 24h ⇒ verbatim by default.
-    public func recordGateTrip(now: Date = Date()) -> Int {
-        var trips = (Self.defaults.array(forKey: "gateTrips") as? [Date]) ?? []
-        trips = trips.filter { now.timeIntervalSince($0) < 86_400 }
-        trips.append(now)
-        Self.defaults.set(trips, forKey: "gateTrips")
-        return trips.count
     }
 }

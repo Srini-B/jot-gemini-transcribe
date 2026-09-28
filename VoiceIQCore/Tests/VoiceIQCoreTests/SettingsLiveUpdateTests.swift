@@ -69,20 +69,6 @@ final class SettingsLiveUpdateTests: XCTestCase {
         settings.setLiveModelOverride("gemini-3.8-live")
         XCTAssertEqual(settings.geminiConfig.liveModel, "gemini-3.8-live")
     }
-
-    func testManualReEnableClearsGateTrips() {
-        // Three trips inside the window = degraded.
-        _ = settings.recordGateTrip()
-        _ = settings.recordGateTrip()
-        XCTAssertEqual(settings.recordGateTrip(), 3)
-        // The user deliberately re-enables the tone pass: the slate must be clean,
-        // or a single further trip instantly re-degrades and their choice loses.
-        // (This clear moved from setSmartFormatting when auto-degrade re-pointed
-        // at the opt-in pass — if it had not moved, this test would still pass on
-        // the old key while the real behaviour silently regressed.)
-        settings.setSmartCleanupPass(true)
-        XCTAssertEqual(settings.recordGateTrip(), 1)
-    }
 }
 
 final class DictionaryImportTests: XCTestCase {

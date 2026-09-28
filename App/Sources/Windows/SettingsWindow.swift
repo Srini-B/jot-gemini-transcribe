@@ -325,6 +325,7 @@ struct PrivacyPane: View {
                 LabeledContent("Transcript text") { Text("Only if writing rules are on — otherwise it never leaves") }
                 LabeledContent("Meeting audio") { Text("Only if call recording is on; notes are made by \(route.provider.displayName)") }
                 LabeledContent("Dictionary terms") { Text("Sent with the audio, so names are spelled right as you speak") }
+                LabeledContent("Dictionary") { Text("Synced to your iPhone through your iCloud account") }
                 LabeledContent("Screen snapshots") { Text("Only if screen context is on; sent with the audio, never stored") }
                 LabeledContent("Ask Anything search") { Text("Only if a TinyFish key is saved; the search query goes to TinyFish") }
                 LabeledContent("Everything else") { Text("Never leaves this Mac") }

@@ -476,9 +476,9 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
         case .accepted(let cleaned):
             return ReplacementEngine.apply(rules, to: cleaned)
         case .rejected(let reason):
-            let trips = settings.recordGateTrip()
-            Log.transcription.warning("cleanup gate REJECTED (\(reason, privacy: .public), trip #\(trips) in 24h) — inserting raw")
-            autoDegradeIfNeeded(trips: trips)
+            // Writing rules stay on: only the user turns them off. One bad
+            // rewrite costs that dictation its formatting, nothing more.
+            Log.transcription.warning("cleanup gate REJECTED (\(reason, privacy: .public)) — inserting raw")
             return ReplacementEngine.apply(rules, to: raw)
         case .unavailable:
             return ReplacementEngine.apply(rules, to: raw)
@@ -518,14 +518,5 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
             Log.transcription.info("cleanup unavailable (\(String(describing: error), privacy: .public)) — inserting raw")
             return .unavailable
         }
-    }
-
-    /// F11 auto-degrade (audit L10): three gate trips in 24h means cleanup can't
-    /// be trusted right now — switch to exact transcription until re-enabled.
-    private func autoDegradeIfNeeded(trips: Int) {
-        guard trips >= 3, settings.smartCleanupPassEnabled else { return }
-        settings.setSmartCleanupPass(false)
-        NotificationCenter.default.post(name: .gtSmartFormattingAutoDegraded, object: nil)
-        Log.transcription.warning("cleanup unreliable (3 gate trips in 24h) — cleanup pass auto-disabled; smart transcription unaffected")
     }
 }

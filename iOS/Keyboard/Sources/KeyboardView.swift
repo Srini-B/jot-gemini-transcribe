@@ -32,6 +32,7 @@ private enum KeyboardPalette {
 
 struct KeyboardView: View {
     @ObservedObject var model: KeyboardModel
+    @ObservedObject var offer: DictionaryOffer
     let controller: KeyboardViewController
 
     var body: some View {
@@ -77,11 +78,17 @@ struct KeyboardView: View {
                 }
                 .frame(maxWidth: .infinity)
 
-                Text(model.notice ?? "")
-                    .font(.caption)
-                    .foregroundStyle(KeyboardPalette.recording)
-                    .lineLimit(1)
-                    .frame(height: 15)
+                Group {
+                    if let notice = model.notice {
+                        Text(notice)
+                            .font(.caption)
+                            .foregroundStyle(KeyboardPalette.recording)
+                            .lineLimit(1)
+                    } else if model.phase == .off || model.phase == .warm {
+                        DictionaryOfferChip(offer: offer)
+                    }
+                }
+                .frame(height: 26)
             }
         }
     }

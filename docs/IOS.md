@@ -205,6 +205,49 @@ iOS). Speaker linking, meeting-type notes, suggested speaker names and Redo
 (notes only, or transcript and notes) work as on the Mac. Dictation is refused
 while a meeting records.
 
+### Dictionary
+
+Settings › Dictionary matches the Mac: search, add with "Heard as", separate
+Dictionary and Auto-learned sections (auto-learned words come from the Mac),
+stars, swipe to delete, and CSV import and export from the ⋯ menu.
+
+**iCloud sync.** The dictionary is the same on the Mac and the iPhone, with no
+setting. `DictionarySync` (VoiceIQCore) keeps the whole dictionary as one iCloud
+key-value storage value, `dictionary.v1`, in the store both apps share
+(`com.apple.developer.ubiquity-kvstore-identifier` = `G8K3545FJ2.io.blue.voiceiq`).
+Every local edit and every change from iCloud merges the two copies with
+`DictionarySnapshot.merge` and writes the result to both sides:
+
+- each entry carries `updatedAt`; the newer version wins;
+- deletions are kept as tombstones for 180 days, so an older copy on another
+  device does not bring a deleted word back;
+- the same word added on two devices becomes one entry (the older one,
+  starred if either was).
+
+iOS delivers no iCloud change while the app is suspended, so the app also
+merges when it becomes active (`DictionaryBridge.appBecameActive`). Without an
+iCloud account the dictionary stays local and uploads once one is signed in.
+Key-value storage holds 1 MB; a dictionary over 900 KB stays on the device and
+the session log says so.
+
+**Adding from the keyboard.** When text is selected in the field the keyboard
+is typing into, the keyboard shows "Add “…” to Dictionary" under the mic bar
+(or "“…” is in your Dictionary"). A keyboard can see only its own field, so
+text selected anywhere else (a web page, a message) comes in through the
+clipboard: after a copy, the next time the keyboard opens it shows "Add copied
+text to Dictionary" with the system paste button, which reads the clipboard
+without a paste prompt. Only one line of 1–60 characters is accepted, the
+dictionary's own limit. Results VoiceiQ itself put on the clipboard are not
+offered (`SharedStore.appPasteboardChangeCount`).
+
+The keyboard queues the word in the App Group (`SharedStore.dictionaryAdditions`,
+keyboard-written) and pings `DarwinNotifier.Name.dictionary`; the app adds it
+(`DictionaryBridge`), remembers which queued IDs it handled in its own
+defaults, and publishes the lowercased word list back
+(`SharedStore.dictionaryTerms`, app-written) so the keyboard knows what is
+saved. A word queued while the app is suspended is added when the app next
+runs. Everything needs Full Access.
+
 ## Feature parity with macOS
 
 | macOS | iOS |
@@ -214,7 +257,8 @@ while a meeting records.
 | AX and paste insertion | `textDocumentProxy.insertText` |
 | Ask Anything, Translate, Paste last | Keyboard modes and Paste last |
 | Provider (Gemini or OpenAI), gateways under Experimental, TinyFish | Same, in Settings › Provider & Keys and the iOS Keychain |
-| Dictionary, writing rules, smart transcription, live, noise handling | Same settings |
+| Dictionary with search, CSV and Auto-learned | Same, synced through iCloud, plus adding a selection or a copied word from the keyboard |
+| Writing rules, smart transcription, live, noise handling | Same settings |
 | History, retry, crash recovery, retention | Same |
 | Cost with the provider toggle, periods and Detailed | Same |
 | Advanced: the selected provider's models | Same, plus the session log |

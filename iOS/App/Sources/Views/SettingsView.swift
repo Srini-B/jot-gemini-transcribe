@@ -164,6 +164,19 @@ struct DictationSettingsView: View {
             } header: { SettingsSectionHeader("Action button") }
         }
         .settingsPage(title: "Dictation")
+        // A change made elsewhere (another screen, a migration) must not
+        // leave a stale toggle here.
+        .onReceive(NotificationCenter.default.publisher(for: .gtSettingDidChange).receive(on: RunLoop.main)) { note in
+            switch note.object as? String {
+            case "smartTranscription": smartTranscription = settings.smartTranscriptionEnabled
+            case "smartCleanupPass": cleanupPass = settings.smartCleanupPassEnabled
+            case "customInstructions": instructions = settings.customInstructions
+            case "liveTranscription": liveTranscription = settings.liveTranscription
+            case "experimentalNoiseHandling": noiseHandling = settings.experimentalNoiseHandling
+            case "translationTargetLanguage": translationTarget = settings.translationTargetLanguage
+            default: break
+            }
+        }
     }
 }
 
@@ -232,65 +245,6 @@ private struct LanguageList: View {
         }
         .searchable(text: $search)
         .settingsPage(title: "Translate To", keyboard: true)
-    }
-}
-
-struct DictionaryView: View {
-    @State private var entries = DictionaryStore().entries()
-    @State private var newTerm = ""
-    @State private var misspelling = ""
-
-    var body: some View {
-        Form {
-            Section {
-                TextField("Word or name", text: $newTerm).textInputAutocapitalization(.never)
-                TextField("Often heard as (optional)", text: $misspelling).textInputAutocapitalization(.never)
-                HStack {
-                    Spacer()
-                    Button("Add", action: addEntry)
-                        .buttonStyle(.compactPrimary)
-                        .disabled(newTerm.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-            }
-            Section {
-                ForEach(entries) { entry in
-                    HStack {
-                        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                            Text(entry.term).font(Theme.Fonts.body()).foregroundStyle(Theme.Colors.ink)
-                            if let wrong = entry.misspelling {
-                                Text(wrong).font(Theme.Fonts.caption()).foregroundStyle(Theme.Colors.muted)
-                            }
-                        }
-                        Spacer()
-                        Button {
-                            DictionaryStore().toggleStar(id: entry.id)
-                            entries = DictionaryStore().entries()
-                        } label: {
-                            Image(systemName: entry.starred ? "star.fill" : "star")
-                                .foregroundStyle(Theme.Colors.accent)
-                                .frame(width: 44, height: 44)
-                        }
-                        .buttonStyle(.borderless)
-                        .accessibilityLabel(entry.starred ? "Remove favorite" : "Add favorite")
-                    }
-                }
-                .onDelete { offsets in
-                    for index in offsets { DictionaryStore().remove(id: entries[index].id) }
-                    entries = DictionaryStore().entries()
-                }
-            }
-        }
-        .settingsPage(title: "Dictionary", keyboard: true)
-    }
-
-    private func addEntry() {
-        let term = newTerm.trimmingCharacters(in: .whitespacesAndNewlines)
-        let wrong = misspelling.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !term.isEmpty else { return }
-        _ = DictionaryStore().add(term: term, misspelling: wrong.isEmpty ? nil : wrong)
-        newTerm = ""
-        misspelling = ""
-        entries = DictionaryStore().entries()
     }
 }
 
@@ -393,6 +347,7 @@ struct PrivacyView: View {
                 LabeledContent("Transcript text", value: "Only with writing rules on")
                 LabeledContent("Meeting notes", value: route.provider.displayName)
                 LabeledContent("Dictionary terms", value: "Sent with the audio")
+                LabeledContent("Dictionary", value: "Your iCloud, to sync")
                 LabeledContent("Ask search queries", value: "TinyFish, if its key is saved")
                 LabeledContent("What you type", value: "Never")
             } header: { SettingsSectionHeader("What leaves your iPhone") }
@@ -419,6 +374,12 @@ struct AdvancedView: View {
     private let geminiDefaults = GeminiConfig()
     private let openAIDefaults = OpenAIConfig()
 
+    /// The same test the client uses, so the warning matches what happens.
+    private var endpointInvalid: Bool {
+        let trimmed = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && SettingsStore.usableEndpointURL(trimmed) == nil
+    }
+
     var body: some View {
         Form {
             Section {
@@ -427,6 +388,11 @@ struct AdvancedView: View {
             if provider == .gemini {
                 Section {
                     field("Endpoint", text: $endpoint, prompt: geminiDefaults.endpoint.absoluteString) { settings.setEndpointOverride($0) }
+                    if endpointInvalid {
+                        Text("Not a valid http(s) URL — the default endpoint is being used.")
+                            .font(Theme.Fonts.footnote())
+                            .foregroundStyle(Theme.Colors.recording)
+                    }
                     field("Transcription", text: $transcribeModel, prompt: geminiDefaults.transcribeModel) { settings.setTranscribeModelOverride($0) }
                     field("Live", text: $liveModel, prompt: geminiDefaults.liveModel) { settings.setLiveModelOverride($0) }
                     field("Formatting", text: $cleanupModel, prompt: geminiDefaults.cleanupModel) { settings.setCleanupModelOverride($0) }

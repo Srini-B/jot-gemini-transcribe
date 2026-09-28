@@ -163,3 +163,24 @@ public struct ActivityRequest: Codable, Equatable, Sendable, Identifiable {
         self.issuedAt = issuedAt
     }
 }
+
+/// A word the keyboard asked the app to add to the dictionary.
+public struct DictionaryAddition: Codable, Equatable, Sendable, Identifiable {
+    public let id: UUID
+    public let term: String
+    public let createdAt: Date
+
+    public init(id: UUID = UUID(), term: String, createdAt: Date = Date()) {
+        self.id = id
+        self.term = term
+        self.createdAt = createdAt
+    }
+
+    /// What the keyboard offers to add: one line, 1–60 characters after
+    /// trimming, the dictionary's own limit. Nil otherwise.
+    public static func candidate(from text: String?) -> String? {
+        guard let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines),
+              (1...60).contains(trimmed.count), !trimmed.contains(where: \.isNewline) else { return nil }
+        return trimmed
+    }
+}

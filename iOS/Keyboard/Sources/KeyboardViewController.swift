@@ -17,12 +17,15 @@ import UIKit
 
 final class KeyboardViewController: UIInputViewController {
     private let model = KeyboardModel()
+    private let dictionaryOffer = DictionaryOffer()
     private var hosting: UIHostingController<KeyboardView>?
 
     override func viewDidLoad() {
         super.viewDidLoad()
         model.controller = self
-        let hosting = UIHostingController(rootView: KeyboardView(model: model, controller: self))
+        dictionaryOffer.controller = self
+        model.onOwnCopy = { [weak dictionaryOffer] in dictionaryOffer?.noteOwnCopy() }
+        let hosting = UIHostingController(rootView: KeyboardView(model: model, offer: dictionaryOffer, controller: self))
         hosting.view.backgroundColor = .clear
         hosting.sizingOptions = []
         addChild(hosting)
@@ -43,6 +46,7 @@ final class KeyboardViewController: UIInputViewController {
         super.viewWillAppear(animated)
         HostAppResolver.keyboardWillAppear()
         model.appeared()
+        dictionaryOffer.appeared(hasFullAccess: hasFullAccess)
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -54,16 +58,19 @@ final class KeyboardViewController: UIInputViewController {
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         model.disappeared()
+        dictionaryOffer.disappeared()
     }
 
     override func textDidChange(_ textInput: UITextInput?) {
         super.textDidChange(textInput)
         HostAppResolver.harvest()
+        dictionaryOffer.selectionChanged()
     }
 
     override func selectionDidChange(_ textInput: UITextInput?) {
         super.selectionDidChange(textInput)
         HostAppResolver.harvest()
+        dictionaryOffer.selectionChanged()
     }
 
     /// Opens a URL from inside the extension. `UIApplication.open` is marked

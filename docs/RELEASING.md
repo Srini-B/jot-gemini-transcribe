@@ -43,6 +43,20 @@ The login keychain must contain this identity:
 Developer ID Application: Blue Lobster Technology PTE. LTD (G8K3545FJ2)
 ```
 
+It also needs the Developer ID provisioning profile "VoiceiQ macOS Developer ID"
+in `~/Library/Developer/Xcode/UserData/Provisioning Profiles`. Release builds
+carry the iCloud key-value storage entitlement (dictionary sync,
+`App/VoiceIQ-Release.entitlements`), which macOS allows only with a profile;
+without it the build fails at signing. Debug builds are ad-hoc and have no
+iCloud. The profile is for App ID `io.blue.voiceiq` with the iCloud capability:
+
+```bash
+asc --profile voiceiq profiles list --profile-type MAC_APP_DIRECT
+asc --profile voiceiq profiles download --id PROFILE_ID --output VoiceiQ-macOS.provisionprofile
+```
+
+Name the installed file `<UUID>.provisionprofile` (the UUID inside the profile).
+
 The shell must export these values before the script starts:
 
 ```bash
@@ -142,6 +156,17 @@ key the profiles can be recreated from the terminal:
 ```bash
 asc --profile voiceiq profiles list --profile-type IOS_APP_STORE
 asc --profile voiceiq profiles download --id PROFILE_ID --output profile.mobileprovision
+```
+
+A profile lists the capabilities its App ID had when it was made. After a
+capability is added (iCloud on `io.blue.voiceiq.ios` on 2026-09-28), delete the
+profile and create it again with the same name, then install the new file and
+remove the old one:
+
+```bash
+asc --profile voiceiq profiles delete --id OLD_PROFILE_ID --confirm
+asc --profile voiceiq profiles create --name "VoiceiQ iOS App Store" --profile-type IOS_APP_STORE \
+  --bundle BUNDLE_ID_RESOURCE_ID --certificate APPLE_DISTRIBUTION_CERT_ID
 ```
 
 **asc (App Store Connect CLI, https://asccli.sh).** Uploads, build numbers

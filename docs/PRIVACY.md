@@ -89,10 +89,12 @@ and are never applied as automatic text replacements. Everything it reads stays 
 
 - Your history database and stored recordings — audio and transcript text leave
   only as part of the requests above, never in bulk and never anywhere else
-- Your dictionary as a file. Individual terms ride with the audio as described
-  above, and your misspelling rules are included in the writing-rules prompt
-  while that pass is on. The store itself, and everything you have not
-  dictated against, stays on this Mac
+- Your dictionary as a file, to anyone but you. Individual terms ride with the
+  audio as described above, and your misspelling rules are included in the
+  writing-rules prompt while that pass is on. The dictionary itself (words,
+  "heard as" spellings, stars, and when entries were added or deleted) is
+  kept in your own iCloud account, in VoiceiQ's key-value storage, so the Mac
+  and iPhone apps share it. Nothing else VoiceiQ stores goes to iCloud
 - Which apps you use, when you dictate, or anything you type
 - Keystrokes: the event tap watches your dictation key, plus — only while a
   dictation is active — Esc (cancel), Space (the hands-free gesture), and the

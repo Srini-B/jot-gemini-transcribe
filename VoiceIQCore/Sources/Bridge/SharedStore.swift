@@ -54,6 +54,9 @@ public final class SharedStore: @unchecked Sendable {
         static let keyboardSeenAt = "bridge.keyboardSeenAt"
         static let activityRequest = "bridge.activityRequest"
         static let keyboardLog = "bridge.keyboardLog"
+        static let dictionaryAdditions = "bridge.dictionaryAdditions"
+        static let dictionaryTerms = "bridge.dictionaryTerms"
+        static let appPasteboardChangeCount = "bridge.appPasteboardChangeCount"
     }
 
     // MARK: - Keyboard diagnostics
@@ -116,6 +119,39 @@ public final class SharedStore: @unchecked Sendable {
     /// this drops the cache so a value the keyboard just wrote is visible.
     public func reloadFromDisk() {
         defaults.synchronize()
+    }
+
+    // MARK: - Dictionary
+
+    /// Words the keyboard asked to add, oldest first. The app adds each once
+    /// and remembers which it handled in its own defaults. Writer: keyboard.
+    public var dictionaryAdditions: [DictionaryAddition] {
+        decode([DictionaryAddition].self, forKey: Key.dictionaryAdditions) ?? []
+    }
+
+    public func requestDictionaryAddition(_ term: String) {
+        var list = dictionaryAdditions
+        list.append(DictionaryAddition(term: term))
+        encode(Array(list.suffix(50)), forKey: Key.dictionaryAdditions)
+        DarwinNotifier.post(.dictionary)
+    }
+
+    /// Every dictionary word, lowercased, so the keyboard can tell whether a
+    /// selection is already saved. Writer: app.
+    public var dictionaryTerms: Set<String> {
+        Set(defaults.stringArray(forKey: Key.dictionaryTerms) ?? [])
+    }
+
+    public func setDictionaryTerms(_ terms: [String]) {
+        defaults.set(terms.map { $0.lowercased() }, forKey: Key.dictionaryTerms)
+    }
+
+    /// `UIPasteboard.changeCount` right after the app put a result on the
+    /// clipboard, so the keyboard does not offer a dictation as a copied
+    /// word. Writer: app.
+    public var appPasteboardChangeCount: Int? {
+        get { defaults.object(forKey: Key.appPasteboardChangeCount) as? Int }
+        set { defaults.set(newValue, forKey: Key.appPasteboardChangeCount) }
     }
 
     // MARK: - Live Activity writes

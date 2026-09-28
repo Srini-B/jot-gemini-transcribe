@@ -86,9 +86,24 @@ public enum FormattingSettingsMigration {
             return
         }
         defaults.set(true, forKey: "smartCleanupPass")
-        // A fresh start for the gate counter, same as a deliberate re-enable.
-        defaults.removeObject(forKey: "gateTrips")
         Log.session.info("writing rules migration: cleanup pass enabled")
+    }
+
+    private static let undegradeFlag = "didRestoreAutoDegradedWritingRules"
+
+    /// Fourth one-time step: writing rules no longer switch themselves off. The
+    /// old auto-degrade turned them off on the third rejected rewrite within
+    /// 24 hours and left those three trips in `gateTrips`; a user who turned
+    /// them off by hand has fewer. Turn them back on for the first group, then
+    /// drop the counter, which nothing reads any more.
+    public static func restoreAutoDegradedWritingRulesOnce(defaults: UserDefaults = .standard) {
+        guard !defaults.bool(forKey: undegradeFlag) else { return }
+        defaults.set(true, forKey: undegradeFlag)
+        let trips = (defaults.array(forKey: "gateTrips") as? [Date]) ?? []
+        defaults.removeObject(forKey: "gateTrips")
+        guard trips.count >= 3, (defaults.object(forKey: "smartCleanupPass") as? Bool) == false else { return }
+        defaults.set(true, forKey: "smartCleanupPass")
+        Log.session.info("writing rules migration: auto-degraded writing rules turned back on")
     }
 
     private static let liveOffFlag = "didDisableLiveTranscription"

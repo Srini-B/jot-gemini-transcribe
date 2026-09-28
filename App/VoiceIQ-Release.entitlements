@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Release (Developer ID) only. Same as VoiceIQ.entitlements, plus iCloud
+	     key-value storage for the dictionary. The store identifier is shared
+	     with the iPhone app. iCloud is a restricted entitlement: it needs the
+	     "VoiceiQ macOS Developer ID" profile, which ad-hoc Debug builds lack,
+	     so Debug keeps VoiceIQ.entitlements. The identifiers are spelled out
+	     because Release does not inject base entitlements. -->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+	<key>com.apple.application-identifier</key>
+	<string>G8K3545FJ2.io.blue.voiceiq</string>
+	<key>com.apple.developer.team-identifier</key>
+	<string>G8K3545FJ2</string>
+	<key>com.apple.developer.ubiquity-kvstore-identifier</key>
+	<string>G8K3545FJ2.io.blue.voiceiq</string>
+</dict>
+</plist>

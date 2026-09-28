@@ -45,6 +45,9 @@ struct DictionaryView: View {
             footer
         }
         .onAppear(perform: reload)
+        // Auto-learned words and entries synced from the iPhone arrive while
+        // the pane is open.
+        .onReceive(NotificationCenter.default.publisher(for: .gtDictionaryDidChange).receive(on: RunLoop.main)) { _ in reload() }
     }
 
     // Same field as History's header, so the two data panes share one header

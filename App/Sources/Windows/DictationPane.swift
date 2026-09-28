@@ -178,8 +178,6 @@ struct DictationPane: View {
             switch note.object as? String {
             case "smartTranscription": smartTranscription = settings.smartTranscriptionEnabled
             case "liveTranscription": liveTranscription = settings.liveTranscription
-            // Auto-degrade flips this one off after three gate trips, so a stale
-            // ON toggle would make the user's next tap a silent no-op.
             case "smartCleanupPass": cleanupPass = settings.smartCleanupPassEnabled
             case "customInstructions": instructions = settings.customInstructions
             case "autoLearn": autoLearn = settings.autoLearnEnabled

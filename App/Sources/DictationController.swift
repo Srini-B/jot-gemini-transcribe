@@ -163,22 +163,6 @@ final class DictationController {
                 self?.applySettingChange(key: note.object as? String)
             }
         }
-        // Auto-degrade must never be silent: the user's next dictations arrive
-        // verbatim, and they deserve to know why and where to turn it back on.
-        NotificationCenter.default.addObserver(forName: .gtSmartFormattingAutoDegraded, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in
-                // Deferred: this fires MID-SESSION (inside the cleanup call) and a
-                // direct notice would be stomped by the session's own transitions.
-                // Don't assert what we haven't read: with Smart transcription off,
-                // or on the legacy endpoint, "still on" would be a lie.
-                let settings = SettingsStore()
-                let stillSmart = settings.smartTranscriptionEnabled && !settings.usesLegacyTranscribeEndpoint
-                let tail = stillSmart
-                    ? "Smart transcription is still on."
-                    : "Re-enable it in Settings → Dictation."
-                self?.showBackgroundNotice("Turned off writing rules — the second model kept misfiring. \(tail)", for: 5.0, sound: nil)
-            }
-        }
         learner.onLearned = { [weak self] entries in
             let terms = entries.map(\.term).joined(separator: ", ")
             self?.showBackgroundNotice("Learned \(terms) — see Dictionary", for: 4.0, sound: nil)
@@ -847,7 +831,7 @@ final class DictationController {
         }
     }
 
-    /// Notices about BACKGROUND events (retry drain, recovery, auto-degrade)
+    /// Notices about BACKGROUND events (retry drain, recovery)
     /// must never hijack a live session's pill — they wait for it to end.
     /// Session-critical notices (cap warning, device change) still interrupt.
     private var pendingNotice: (message: String, seconds: TimeInterval, sound: EarconPlayer.Earcon?)?

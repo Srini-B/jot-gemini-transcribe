@@ -59,7 +59,9 @@ in Settings → Dictation. See [PRIVACY.md](docs/PRIVACY.md).
 **Your jargon, spelled right.** Names and product terms go in the Dictionary and
 ride along with the audio, so the model hears "Kubernetes" instead of guessing
 "cooper netties" — corrected at the source, not patched afterwards. Fix a word
-after VoiceiQ types it and the correction is learned into the Dictionary on its own.
+after VoiceiQ types it and the correction is learned into the Dictionary on its own. The
+Dictionary syncs between the Mac and iPhone through your iCloud account, and the
+iPhone keyboard adds a selected or copied word in one tap.
 
 **It writes the way you meant it.** A writing-rules pass runs on every
 transcript: "scratch that", "change the first point to…" and other mid-dictation

@@ -42,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         FormattingSettingsMigration.runIfNeeded()
         FormattingSettingsMigration.enableWritingRulesIfNeeded()
         FormattingSettingsMigration.disableLiveTranscriptionOnce()
+        FormattingSettingsMigration.restoreAutoDegradedWritingRulesOnce()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -57,6 +58,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Log.ui.error("app icon NOT set — url: \(Bundle.main.url(forResource: "VoiceIQ", withExtension: "icns")?.path ?? "nil", privacy: .public)")
         }
         FontLoader.registerBundledFonts()
+        // Dictionary shared with the iPhone through iCloud; always on.
+        DictionarySync.shared.start()
         let controller = DictationController()
         statusItemController = StatusItemController(
             onOpenHistory: { [weak controller] in controller?.openHistory() },

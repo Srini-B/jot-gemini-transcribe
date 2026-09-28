@@ -22,6 +22,7 @@ public enum DictionarySource: String, Codable, Sendable {
 /// The personal dictionary: terms (spelling hints fed to the cleanup prompt) and
 /// explicit wrong→right rules (enforced deterministically post-model).
 /// UserDefaults-backed — entries are small and this keeps v1 dependency-free.
+/// `DictionarySync` keeps it the same on every device on the iCloud account.
 public struct DictionaryEntry: Codable, Equatable, Identifiable, Sendable {
     public var id: UUID
     /// The correct term ("Kubernetes", "Ammaar", "gRPC"). 1–60 chars.
@@ -34,6 +35,8 @@ public struct DictionaryEntry: Codable, Equatable, Identifiable, Sendable {
     public var starred: Bool
     public var createdAt: Date
     public var source: DictionarySource
+    /// Last change on any device. Sync keeps the newer copy of an entry.
+    public var updatedAt: Date
 
     public init(
         term: String,
@@ -49,10 +52,11 @@ public struct DictionaryEntry: Codable, Equatable, Identifiable, Sendable {
         self.starred = starred
         self.createdAt = Date()
         self.source = source
+        self.updatedAt = createdAt
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, term, misspelling, learnedFrom, starred, createdAt, source
+        case id, term, misspelling, learnedFrom, starred, createdAt, source, updatedAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -64,6 +68,7 @@ public struct DictionaryEntry: Codable, Equatable, Identifiable, Sendable {
         starred = try container.decode(Bool.self, forKey: .starred)
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         source = try container.decodeIfPresent(DictionarySource.self, forKey: .source) ?? .manual
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
         // Auto-learned entries used to be stored as wrong→right rules. Demote
         // them to plain words so an old edit cannot rewrite unrelated text.
         if source == .auto, let rule = misspelling {
@@ -71,10 +76,18 @@ public struct DictionaryEntry: Codable, Equatable, Identifiable, Sendable {
             misspelling = nil
         }
     }
+
+    /// Equal apart from `updatedAt`: whether an edit changed anything.
+    func sameContent(as other: DictionaryEntry) -> Bool {
+        var copy = other
+        copy.updatedAt = updatedAt
+        return copy == self
+    }
 }
 
 public struct DictionaryStore: Sendable {
     private static let key = "dictionaryEntries"
+    private static let tombstonesKey = "dictionaryTombstones"
     private static let defaults = UserDefaults.standard
 
     public init() {}
@@ -87,10 +100,49 @@ public struct DictionaryStore: Sendable {
         return entries
     }
 
+    /// Saves an edit made on this device. Changed entries get a new
+    /// `updatedAt` and removed ones a tombstone, so sync can tell the edit
+    /// from an older copy on another device.
     public func save(_ entries: [DictionaryEntry]) {
-        if let data = try? JSONEncoder().encode(entries) {
-            Self.defaults.set(data, forKey: Self.key)
+        let now = Date()
+        let previous = Dictionary(self.entries().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var stamped = entries
+        for index in stamped.indices {
+            if let old = previous[stamped[index].id], old.sameContent(as: stamped[index]) { continue }
+            stamped[index].updatedAt = now
         }
+        var tombstones = self.tombstones()
+        let kept = Set(stamped.map(\.id))
+        for id in previous.keys where !kept.contains(id) {
+            tombstones[id.uuidString] = now
+        }
+        write(DictionarySnapshot(entries: stamped, tombstones: tombstones), origin: "local")
+    }
+
+    // MARK: - Sync
+
+    public func snapshot() -> DictionarySnapshot {
+        DictionarySnapshot(entries: entries(), tombstones: tombstones())
+    }
+
+    /// Replaces the dictionary with a merged copy from sync, as is.
+    public func apply(_ snapshot: DictionarySnapshot) {
+        write(snapshot, origin: "sync")
+    }
+
+    private func tombstones() -> [String: Date] {
+        guard let data = Self.defaults.data(forKey: Self.tombstonesKey),
+              let tombstones = try? JSONDecoder().decode([String: Date].self, from: data) else { return [:] }
+        return tombstones
+    }
+
+    private func write(_ snapshot: DictionarySnapshot, origin: String) {
+        let encoder = JSONEncoder()
+        guard let entries = try? encoder.encode(snapshot.entries),
+              let tombstones = try? encoder.encode(snapshot.tombstones) else { return }
+        Self.defaults.set(entries, forKey: Self.key)
+        Self.defaults.set(tombstones, forKey: Self.tombstonesKey)
+        NotificationCenter.default.post(name: .gtDictionaryDidChange, object: origin)
     }
 
     @discardableResult

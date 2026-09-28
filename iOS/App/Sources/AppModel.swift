@@ -57,6 +57,7 @@ final class AppModel: ObservableObject {
     private var needsForeground = false
 
     init() {
+        FormattingSettingsMigration.restoreAutoDegradedWritingRulesOnce()
         let client = GeminiClient(
             apiKey: { KeychainStore.loadAPIKey() },
             openRouterKey: { KeychainStore.loadOpenRouterKey() },
@@ -101,6 +102,7 @@ final class AppModel: ObservableObject {
 
         bind()
         startHistoryServices()
+        DictionaryBridge.start()
         ActionButtonBridge.toggle = { [weak self] in await self?.toggleFromActionButton() }
         commandObserver = DarwinNotifier.observe(.command) { [weak self] in
             Task { @MainActor in self?.drainCommands() }
@@ -394,6 +396,7 @@ final class AppModel: ObservableObject {
         needsForeground = false
         setup.refresh()
         drainCommands()
+        DictionaryBridge.appBecameActive()
     }
 
     func appEnteredBackground() {
@@ -470,6 +473,9 @@ final class AppModel: ObservableObject {
             // Handled: a keyboard opened later must not type it as well.
             store.insertedDeliveryID = delivery.id
             UIPasteboard.general.string = delivery.text
+            // Not something the user copied: the keyboard must not offer it
+            // for the dictionary.
+            store.appPasteboardChangeCount = UIPasteboard.general.changeCount
             SessionDiagnostics.note("result not typed by a keyboard; copied to the clipboard")
         }
     }
