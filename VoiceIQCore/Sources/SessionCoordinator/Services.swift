@@ -85,6 +85,10 @@ public struct DictationContext: Equatable, Sendable {
     public var mode: DictationMode
     public var selectedTextIsSettable: Bool
     public var screenshots: [Data]
+    /// False when the mic never rose clearly above the room. The one-call flash
+    /// model writes plausible sentences for such recordings (3 of 6 runs on a
+    /// silent AirPods clip, 2026-09-28); the transcription model returns nothing.
+    public var speechHeard = true
 
     public init(
         targetAppBundleID: String? = nil,

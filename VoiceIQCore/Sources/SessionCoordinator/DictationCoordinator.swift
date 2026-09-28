@@ -85,6 +85,12 @@ public final class DictationCoordinator: ObservableObject {
     /// room. This clause can only ever prevent a discard, never cause one.
     static let discardSNRThreshold: Double = 6
 
+    /// Speech must rise this far above the room, for this many ~100 ms buffers,
+    /// before live text is shown or trusted. Room tone stays within ~6 dB of
+    /// its 10th percentile; speech crosses 12 dB within 0.2–3 s of the key.
+    static let speechAboveRoomDB: Double = 12
+    static let speechBuffersRequired = 3
+
     /// Live sessions are server-capped at ten minutes. Past this point the
     /// stream is about to be (or has been) closed, so the batch path over the
     /// CAF is the only complete transcript; waiting on a live final would only
@@ -154,10 +160,12 @@ public final class DictationCoordinator: ObservableObject {
     /// How loud the room is. Always measured, never in charge: what it feeds is
     /// gated on `noiseHandlingActive`, what it records is not.
     private var noiseFloor = NoiseFloorEstimator()
-    /// Whether the mic has heard anything louder than room tone this session.
-    /// Live partials are hidden until it has: fed silence, the stream model
-    /// guesses a dictionary term, and showing that guess reads as a transcript
-    /// of words nobody said.
+    /// Whether the mic has heard speech above the room this session. Live
+    /// partials are hidden until it has, and a live final from a session that
+    /// never heard speech is not used: fed silence, the stream model guesses a
+    /// dictionary term. Relative to the room, not absolute: AirPods room tone
+    /// sits near −52 dBFS, above `trailingSpeechThreshold` (−54.6 dBFS), so an
+    /// absolute bar latched on the first buffer (measured 2026-09-28).
     private var speechHeard = false
     /// Why the last session ended with no speech — the pill copy differs, nothing
     /// else does, so this rides alongside the outcome instead of widening the
@@ -476,7 +484,15 @@ public final class DictationCoordinator: ObservableObject {
         if updatingMeter { micLevel = level }
         latestLevel = level
         noiseFloor.ingest(level: level)
-        if level >= Self.trailingSpeechThreshold { speechHeard = true }
+        if !speechHeard,
+           let loud = noiseFloor.samplesAboveFloor(
+               byDB: Self.speechAboveRoomDB,
+               minimumDBFS: AudioLevelCurve.dBFS(fromLevel: Self.trailingSpeechThreshold)
+           ),
+           loud >= Self.speechBuffersRequired {
+            speechHeard = true
+            Log.audio.info("speech heard above the room after \(self.noiseFloor.sampleCount) buffers")
+        }
     }
 
     /// The level below which the user has stopped talking.
@@ -573,6 +589,7 @@ public final class DictationCoordinator: ObservableObject {
             return
         }
         session.peakLevel = result.peakLevel
+        session.context.speechHeard = speechHeard
         self.session = session
         // Only meaningful together: a peak with no floor to compare it against
         // says nothing about the room, and would read as a measurement.
@@ -641,7 +658,10 @@ public final class DictationCoordinator: ObservableObject {
                         framesWritten: result.framesWritten
                     )
                     guard !Task.isCancelled else { return }
-                    if let liveResult {
+                    if liveResult != nil, !self.speechHeard {
+                        Log.transcription.info("live text from a session with no speech above the room — uploading instead")
+                    }
+                    if let liveResult, self.speechHeard {
                         // Show the finished text in place of the guess before the
                         // pill moves on. This is the beat the landing page sells:
                         // the sentence visibly becomes the polished one.

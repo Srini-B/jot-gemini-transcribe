@@ -69,7 +69,7 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
         // call, which hears the audio and writes the cleaned text. Anything
         // that stops it (an error, a timeout, "no speech") falls through to
         // transcription then cleanup below, so it can only cost time.
-        if context.mode == .dictate, policy.cleanupPass, ranges.count == 1,
+        if context.mode == .dictate, policy.cleanupPass, ranges.count == 1, context.speechHeard,
            !Self.oneCallRefused.contains(settings.activeProvider),
            let text = await transcribeInOneCall(audioURL: audioURL, range: ranges[0],
                                                 durationSeconds: durationSeconds, context: context, config: config) {
