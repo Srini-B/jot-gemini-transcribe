@@ -37,11 +37,31 @@ failure.
 
 ### Prerequisites
 
-The login keychain must contain this identity:
+A keychain must contain this identity:
 
 ```text
 Developer ID Application: Blue Lobster Technology PTE. LTD (G8K3545FJ2)
 ```
+
+The MacBook has it in the login keychain. Any other Mac (the Mac mini) gets a
+copy of the same identity, not a new certificate: the API key cannot create
+Developer ID certificates (Apple allows that only to the Account Holder), and
+the Developer ID profile names this certificate. To set up another Mac:
+
+1. On the MacBook, in Keychain Access › login › My Certificates, select
+   "Developer ID Application: …", File › Export Items…, save as `.p12` with a
+   password. macOS asks for the login password; it cannot be done over SSH.
+2. Copy the `.p12` to the other Mac and run:
+
+   ```bash
+   P12=~/DeveloperID.p12 P12_PASSWORD='…' scripts/setup-mac-signing.sh
+   ```
+
+   It imports the identity into `~/Library/Keychains/voiceiq-signing.keychain-db`
+   (the release keychain, unlocked by the release scripts with
+   `~/.voiceiq-signing/keychain.pass`, so signing works from SSH), installs the
+   Developer ID profile with asc, and checks the notarization variables. Delete
+   the `.p12` afterwards. Run it without `P12` any time to see what is missing.
 
 It also needs the Developer ID provisioning profile "VoiceiQ macOS Developer ID"
 in `~/Library/Developer/Xcode/UserData/Provisioning Profiles`. Release builds
@@ -91,6 +111,17 @@ are: the app inside each carries a stapled notarization ticket, so testers can
 open it after the usual first-launch confirmation without an internet check.
 
 The bundle identifier is `io.blue.voiceiq`. Changing it resets the app's UserDefaults domain and requires users to grant microphone, Accessibility, and other TCC permissions again. `FileLayout` and `KeychainStore` migrate the previous VoiceiQ folder and API-key service, but macOS permissions cannot be migrated.
+
+If the log shows "Finder scripting unavailable — DMG still works, layout will
+be default", Finder did not answer the layout script in time (seen once on the
+Mac mini, AppleEvent -1712). The DMG works but opens without the designed
+window. Rebuild it from the stapled app, then sign, notarize and staple it as
+`release.sh` does:
+
+```bash
+APP=build/release/DerivedData/Build/Products/Release/VoiceiQ.app
+APP_NAME=VoiceiQ scripts/make-dmg.sh "$APP" build/release/VoiceiQ-<version>.dmg
+```
 
 ### Verification
 

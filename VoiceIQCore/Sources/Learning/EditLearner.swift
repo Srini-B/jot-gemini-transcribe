@@ -76,6 +76,22 @@ public final class EditLearner {
         self.dictionary = dictionary
     }
 
+    private static let pruneFlag = "didPruneOrdinaryAutoLearned"
+
+    /// One-time: removes auto-learned entries that are ordinary words, learned
+    /// before the rule above existed. Entries the user added are untouched.
+    /// The removal syncs to the iPhone like any other deletion.
+    public static func pruneOrdinaryAutoLearnedOnce(dictionary: DictionaryStore = DictionaryStore()) {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: pruneFlag) else { return }
+        defaults.set(true, forKey: pruneFlag)
+        let entries = dictionary.entries()
+        let kept = entries.filter { $0.source != .auto || !CommonWords.isOrdinary($0.term) }
+        guard kept.count != entries.count else { return }
+        dictionary.save(kept)
+        Log.learning.info("Removed \(entries.count - kept.count) auto-learned ordinary word(s)")
+    }
+
     deinit {
         for field in fields.values { field.pollTask?.cancel() }
     }
@@ -230,6 +246,13 @@ public final class EditLearner {
                     || misspelling == original || misspelling == replacement
                     || learnedFrom == original
             }) else { continue }
+            // Only words the language does not already have: a name, a
+            // product term, jargon. Changing "They" to "we" or fixing the
+            // case of "There's" is an edit, not a new word.
+            guard !CommonWords.isOrdinary(correction.replacement) else {
+                Log.learning.info("Skipped an edit to ordinary words")
+                continue
+            }
             // Learned as a word only, never as a wrong→right rule: a rule
             // built from one edit ("stack" → "pstack") would rewrite every
             // later "stack". The word rides in the vocabulary; `learnedFrom`

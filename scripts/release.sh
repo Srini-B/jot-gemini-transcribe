@@ -20,6 +20,17 @@ for variable in APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
   fi
 done
 
+# The Mac mini keeps the Developer ID key in its own keychain, unlocked with a
+# password file only the release user can read (scripts/setup-mac-signing.sh).
+signing_keychain="$HOME/Library/Keychains/voiceiq-signing.keychain-db"
+if [[ -f "$signing_keychain" && -f "$HOME/.voiceiq-signing/keychain.pass" ]]; then
+  security unlock-keychain -p "$(cat "$HOME/.voiceiq-signing/keychain.pass")" "$signing_keychain"
+fi
+security find-identity -v -p codesigning | grep -q "Developer ID Application: .*(G8K3545FJ2)" || {
+  echo "error: no Developer ID Application identity; run scripts/setup-mac-signing.sh (docs/RELEASING.md)" >&2
+  exit 1
+}
+
 VERSION=$(awk '/MARKETING_VERSION:/ {gsub(/"/, "", $2); print $2; exit}' project.yml)
 BUILD_DIR="build/release"
 DERIVED_DATA="$BUILD_DIR/DerivedData"

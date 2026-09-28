@@ -58,6 +58,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Log.ui.error("app icon NOT set — url: \(Bundle.main.url(forResource: "VoiceIQ", withExtension: "icns")?.path ?? "nil", privacy: .public)")
         }
         FontLoader.registerBundledFonts()
+        // Before sync starts, so the cleanup goes up with the first merge.
+        EditLearner.pruneOrdinaryAutoLearnedOnce()
         // Dictionary shared with the iPhone through iCloud; always on.
         DictionarySync.shared.start()
         let controller = DictationController()
