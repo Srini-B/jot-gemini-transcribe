@@ -61,8 +61,14 @@ public final class MicTap: @unchecked Sendable {
                                                  mElement: kAudioObjectPropertyElementMain)
         var stream = AudioStreamBasicDescription(), size = UInt32(MemoryLayout.size(ofValue: stream))
         try check(AudioObjectGetPropertyData(device, &address, 0, nil, &size, &stream))
-        guard let input = AVAudioFormat(streamDescription: &stream),
+        // While a call app runs voice processing (WhatsApp, FaceTime), the
+        // built-in mic reports 3 channels. AVAudioFormat needs a layout for
+        // more than 2, and the converter's default map for them is silence.
+        let channels = stream.mChannelsPerFrame
+        let layout = channels > 2 ? AVAudioChannelLayout(layoutTag: kAudioChannelLayoutTag_DiscreteInOrder | channels) : nil
+        guard let input = layout.map({ AVAudioFormat(streamDescription: &stream, channelLayout: $0) }) ?? AVAudioFormat(streamDescription: &stream),
               let converter = AVAudioConverter(from: input, to: target) else { throw MicError.format }
+        if channels > 2 { converter.channelMap = [0] }
         inputFormat = input; self.converter = converter; deviceID = device
         try check(AudioDeviceCreateIOProcIDWithBlock(&procID, device, ioQueue) { [weak self] _, inputData, _, _, _ in
             self?.consume(inputData)

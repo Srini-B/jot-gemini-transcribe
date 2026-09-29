@@ -216,7 +216,11 @@ import Foundation
             onCallEnded?()
         }
     }
-    private func fail(_ id: MeetingID, _ error: Error) { phase = .failed(id, String(describing: error)); onNotice?("Meeting recording failed") }
+    private func fail(_ id: MeetingID, _ error: Error) {
+        Log.meeting.error("meeting \(id.uuid.uuidString, privacy: .public) could not start: \(String(describing: error), privacy: .public)")
+        try? store.delete(id: id)
+        phase = .failed(id, String(describing: error)); onNotice?("Meeting recording failed")
+    }
     public static func name(_ source: CallSource) -> String { switch source { case let .app(_, name): return name; case let .browser(_, host): return host } }
 }
 
