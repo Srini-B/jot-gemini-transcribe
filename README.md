@@ -272,3 +272,12 @@ whose signature or entitlements fail verification. Bump `MARKETING_VERSION`
 and `CURRENT_PROJECT_VERSION` in `project.yml` before a release. The full
 process, one-time setup and checks are in
 [docs/RELEASING.md](docs/RELEASING.md).
+
+## License and attribution
+
+VoiceiQ is based on [Jot](https://github.com/google-gemini/jot-gemini-transcribe-macOS),
+Copyright 2026 Google LLC, and is distributed under the Apache License 2.0
+([LICENSE](LICENSE)). Changes since the fork are by Blue Lobster Technology.
+Third-party components and their licenses are listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). This is not an officially
+supported Google product.

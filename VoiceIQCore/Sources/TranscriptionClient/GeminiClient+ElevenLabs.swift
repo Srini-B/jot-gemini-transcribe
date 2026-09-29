@@ -1,6 +1,3 @@
-// Copyright 2026 Google LLC
-// Licensed under the Apache License, Version 2.0.
-
 import Foundation
 
 /// ElevenLabs Scribe: speech-to-text only, used in place of the provider's

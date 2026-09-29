@@ -1,7 +1,4 @@
 #!/bin/bash
-# Copyright 2026 Google LLC
-# Licensed under the Apache License, Version 2.0.
-
 # Makes this Mac able to run scripts/release.sh: puts the Developer ID
 # Application identity in the release keychain and installs the
 # "VoiceiQ macOS Developer ID" profile. Idempotent.
