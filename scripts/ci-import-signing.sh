@@ -30,7 +30,8 @@ security unlock-keychain -p "$(cat "$pass_file")" "$keychain"
 p12=$(mktemp)
 trap 'rm -f "$p12"' EXIT
 printf '%s' "$P12_BASE64" | base64 --decode > "$p12"
-security import "$p12" -k "$keychain" -P "$P12_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+# The temp file has no .p12 extension, so the format must be named.
+security import "$p12" -k "$keychain" -f pkcs12 -P "$P12_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
 security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$(cat "$pass_file")" "$keychain" >/dev/null
 
 profiles_dir="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
