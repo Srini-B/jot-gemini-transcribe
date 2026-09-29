@@ -40,7 +40,7 @@ for name in "$@"; do
   id=$(asc profiles list --name "$name" --profile-state ACTIVE --output json \
     | python3 -c 'import json,sys; data=json.load(sys.stdin)["data"]; print(data[0]["id"] if data else "")')
   [[ -n "$id" ]] || { echo "error: no active provisioning profile named '$name'" >&2; exit 1; }
-  file=$(mktemp)
+  file="$(mktemp -d)/profile"  # asc will not overwrite an existing file
   asc profiles download --id "$id" --output "$file" >/dev/null
   uuid=$(security cms -D -i "$file" | plutil -extract UUID raw -o - -)
   platforms=$(security cms -D -i "$file" | plutil -extract Platform.0 raw -o - - 2>/dev/null || true)
