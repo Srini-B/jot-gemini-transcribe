@@ -25,8 +25,8 @@ on your Mac.
 ## What leaves your machine (the complete list)
 
 1. **The audio of each dictation** (FLAC-compressed), sent to the provider —
-   the only network host this app talks to unless you add a TinyFish key
-   (item 5). With live transcription on, the audio streams to the provider over
+   the only network host this app talks to apart from the update check
+   (item 9) and a TinyFish key if you add one (item 5). With live transcription on, the audio streams to the provider over
    a WebSocket while you speak (the provider's own API only).
    With ElevenLabs as the transcription source, this audio (batch or live)
    goes to ElevenLabs instead, along with up to 100 dictionary terms as
@@ -86,6 +86,13 @@ on your Mac.
    Gemini key to Google, the OpenAI key to OpenAI, a gateway key to that
    gateway, the ElevenLabs key to ElevenLabs. They are stored in the macOS Keychain, never in files or
    preferences.
+9. **Update checks.** Every six hours, and when you choose Check for Updates, the
+   app downloads the update feed (`appcast.xml`) from the project's GitHub
+   Releases (`github.com`, which redirects to GitHub's download host). The
+   request carries only the app name and version and the Sparkle version in its
+   User-Agent; Sparkle's system profiling is off. When an update is offered, the
+   ZIP comes from the same place. GitHub sees your IP address, as with any
+   download. Turn the checks off in Settings › About.
 
 The auto-learn feature ("Learn from your edits") never sends anything. It
 re-reads the field VoiceiQ typed into, through the Accessibility API, for up to ten
@@ -114,7 +121,8 @@ Everything it reads stays on this Mac.
   transmitted). When you're not dictating, other keys pass through untouched.
 - Screen context images are never stored on disk and are never attached to Ask
   Anything, Translate, meeting, or transcription requests.
-- Telemetry: there is none. No analytics SDK, no crash uploader, no phone-home.
+- Telemetry: there is none. No analytics SDK, no crash uploader, no phone-home
+  beyond the update check in item 9.
 
 ## What's stored locally, and your controls
 

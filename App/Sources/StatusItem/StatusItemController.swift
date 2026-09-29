@@ -1,17 +1,3 @@
-// Copyright 2026 Google LLC
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     https://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 import AppKit
 import CoreAudio
 import VoiceIQCore
@@ -32,6 +18,7 @@ final class StatusItemController: NSObject {
     private let onOpenSettings: () -> Void
     private let onStartHandsFree: () -> Void
     private let onOpenAbout: () -> Void
+    private let onCheckForUpdates: () -> Void
     private let templateImage: NSImage
     private var animationTimer: Timer?
     private var animationStartedAt = Date()
@@ -42,7 +29,8 @@ final class StatusItemController: NSObject {
         onPasteLast: @escaping () -> Void,
         onOpenSettings: @escaping () -> Void,
         onStartHandsFree: @escaping () -> Void,
-        onOpenAbout: @escaping () -> Void
+        onOpenAbout: @escaping () -> Void,
+        onCheckForUpdates: @escaping () -> Void
     ) {
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         self.onOpenHistory = onOpenHistory
@@ -50,6 +38,7 @@ final class StatusItemController: NSObject {
         self.onOpenSettings = onOpenSettings
         self.onStartHandsFree = onStartHandsFree
         self.onOpenAbout = onOpenAbout
+        self.onCheckForUpdates = onCheckForUpdates
         self.templateImage = Self.loadTemplateImage()
         super.init()
 
@@ -98,9 +87,18 @@ final class StatusItemController: NSObject {
     // MARK: - Menu
 
     private var statusLine: NSMenuItem?
+    private var updatesItem: NSMenuItem?
 
     func setStatusLine(_ text: String) {
         statusLine?.title = text
+    }
+
+    func setAvailableUpdate(_ update: AppUpdater.AvailableUpdate?) {
+        switch update {
+        case nil: updatesItem?.title = "Check for Updates…"
+        case .found(let version): updatesItem?.title = "Install VoiceiQ \(version)…"
+        case .downloaded(let version): updatesItem?.title = "Restart to Install VoiceiQ \(version)"
+        }
     }
 
     private func makeMenu() -> NSMenu {
@@ -145,6 +143,11 @@ final class StatusItemController: NSObject {
         about.target = self
         menu.addItem(about)
 
+        let updates = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
+        updates.target = self
+        updatesItem = updates
+        menu.addItem(updates)
+
         let quit = NSMenuItem(title: "Quit VoiceiQ", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
 
@@ -169,6 +172,10 @@ final class StatusItemController: NSObject {
 
     @objc private func openAbout() {
         onOpenAbout()
+    }
+
+    @objc private func checkForUpdates() {
+        onCheckForUpdates()
     }
 
     @objc private func selectMicrophone(_ sender: NSMenuItem) {

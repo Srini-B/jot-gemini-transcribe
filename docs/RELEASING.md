@@ -1,12 +1,15 @@
 # Releasing VoiceiQ
 
 VoiceiQ ships two apps from one project, built on the same `VoiceIQCore`
-package, and each has its own release script:
+package, with one version number. Releases normally run in GitHub Actions:
+pushing a new `MARKETING_VERSION` to `main` builds and ships both apps. That
+flow, its secrets and the Mac auto-update are in [UPDATES.md](UPDATES.md). This
+page covers the scripts it runs, which also work on a release Mac:
 
 | | macOS | iPhone |
 | --- | --- | --- |
 | Script | `scripts/release.sh` | `scripts/release-ios.sh` |
-| Channel | Notarized DMG and ZIP, shared directly | TestFlight |
+| Channel | Notarized DMG and ZIP on GitHub Releases, with Sparkle auto-update | TestFlight |
 
 Both scripts follow the same flow and stop at the first failure:
 
@@ -24,7 +27,8 @@ preflight (tools, identity, credentials)
 ## Before any release
 
 1. Bump `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in `project.yml`.
-   All four targets carry the same values.
+   They are set once, under `settings`, for all four targets. The build
+   number must be higher than every build already on TestFlight or GitHub.
 2. Confirm `./scripts/build.sh` and `./scripts/build-ios.sh` pass.
 3. Confirm the production models are available with a real dictation on both
    providers (Gemini and OpenAI).
@@ -106,6 +110,9 @@ The script performs this sequence:
 7. Builds `build/release/VoiceiQ-<version>.dmg` with `scripts/make-dmg.sh`.
 8. Signs, notarizes, staples, and Gatekeeper-checks the DMG.
 
+Step 4 also checks that Sparkle's `Autoupdate`, `Updater.app` and framework
+carry the Developer ID team; the "Sign Sparkle helpers" build phase signs them.
+
 Both `VoiceiQ-<version>.zip` and `VoiceiQ-<version>.dmg` are shareable as they
 are: the app inside each carries a stapled notarization ticket, so testers can
 open it after the usual first-launch confirmation without an internet check.
@@ -141,7 +148,14 @@ Do not distribute an artifact if any command fails. There is no unsigned or unno
 
 1. Complete the product reliability checklist in `docs/design/product-reliability.md`.
 2. Smoke-test onboarding, API-key storage, permissions, dictation, history, and the DMG install flow on a clean macOS account.
-3. Publish the verified DMG and release notes.
+3. Push the version change; the release workflow publishes the GitHub
+   release with the ZIP, DMG and Sparkle appcast. By hand:
+   `scripts/publish-github-release.sh` (dry run first with `DRY_RUN=1`). See
+   [UPDATES.md](UPDATES.md).
+
+Notarization uses the App Store Connect API key when `ASC_KEY_ID`,
+`ASC_ISSUER_ID` and `ASC_PRIVATE_KEY_PATH` are set (CI), otherwise the
+`APPLE_ID` variables.
 
 ## iPhone (TestFlight)
 
@@ -154,24 +168,28 @@ distribution, so a processed build reaches its testers without another step.
 ./scripts/release-ios.sh                 # upload with asc (default)
 UPLOAD=xcode ./scripts/release-ios.sh    # upload with Xcode's signed-in account
 UPLOAD=none ./scripts/release-ios.sh     # everything except the upload
-BUILD=14 ./scripts/release-ios.sh        # force a build number
+TEST_NOTES_FILE=notes.txt ./scripts/release-ios.sh   # set TestFlight What to Test
 ```
+
+asc signs in with the `ASC_KEY_ID`, `ASC_ISSUER_ID` and `ASC_PRIVATE_KEY_*`
+variables when they are set (CI), otherwise with the stored profile `voiceiq`.
 
 The script performs this sequence:
 
 1. Checks xcodegen, the Apple Distribution identity, the three App Store
    profiles and, for `UPLOAD=asc`, that the asc profile can see the app.
 2. Runs the `VoiceIQCore` tests.
-3. Picks the build number: `BUILD`, otherwise the larger of
-   `CURRENT_PROJECT_VERSION` and asc's next free build number.
+3. Uses `CURRENT_PROJECT_VERSION` as the build number, the same as the Mac
+   app's, and stops if TestFlight already has that build.
 4. Runs `scripts/archive-ios.sh`, which regenerates the project, archives
    Release to `build/ios/VoiceiQ.xcarchive` and exports
    `build/ios/export/VoiceiQ.ipa`.
 5. Verifies every bundle's signature, checks for the shared App Group, and
    rejects `get-task-allow`.
 6. Uploads with `asc publish testflight --upload-only --wait` and lists the
-   TestFlight groups. With `UPLOAD=xcode` it runs `xcodebuild -exportArchive`
-   with the `upload` destination instead.
+   TestFlight groups, then sets What to Test from `TEST_NOTES_FILE`. With
+   `UPLOAD=xcode` it runs `xcodebuild -exportArchive` with the `upload`
+   destination instead.
 
 ### One-time setup on a release Mac
 

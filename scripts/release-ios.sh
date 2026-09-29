@@ -1,30 +1,21 @@
 #!/bin/bash
-# Copyright 2026 Google LLC
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     https://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 # Test, archive, sign, upload, and distribute the iPhone app to TestFlight.
 #
 #   scripts/release-ios.sh                 # upload with asc (scripts/setup-asc.sh once)
 #   UPLOAD=xcode scripts/release-ios.sh    # upload with the Xcode account instead
-#   BUILD=14 scripts/release-ios.sh        # force a build number
 #   UPLOAD=none scripts/release-ios.sh     # everything except the upload
+#   TEST_NOTES_FILE=notes.txt scripts/release-ios.sh   # TestFlight "What to Test"
 #   SKIP_TESTS=1 scripts/release-ios.sh
 #
+# The build number is CURRENT_PROJECT_VERSION, shared with the Mac app; the
+# script stops if TestFlight already has it. asc signs in with the ASC_KEY_ID,
+# ASC_ISSUER_ID and ASC_PRIVATE_KEY_* variables when set (CI), otherwise with
+# the stored profile "voiceiq".
+#
 # Steps: preflight → scripts/test.sh → build number → scripts/archive-ios.sh →
-# verify signatures → upload → wait for processing. The "VoiceiQ Internal"
-# TestFlight group has automatic distribution and picks the build up.
-# See docs/RELEASING.md "iPhone (TestFlight)".
+# verify signatures → upload → wait for processing → What to Test. The
+# "VoiceiQ Internal" TestFlight group has automatic distribution and picks the
+# build up. See docs/RELEASING.md "iPhone (TestFlight)".
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -32,7 +23,11 @@ cd "$(dirname "$0")/.."
 APP_ID=6816685189
 TEAM_ID=G8K3545FJ2
 GROUP="VoiceiQ Internal"
-ASC_PROFILE="${ASC_PROFILE:-voiceiq}"
+if [[ -n "${ASC_KEY_ID:-}" ]]; then
+  asc_auth=()
+else
+  asc_auth=(--profile "${ASC_PROFILE:-voiceiq}")
+fi
 UPLOAD="${UPLOAD:-asc}"
 ARCHIVE=build/ios/VoiceiQ.xcarchive
 IPA=build/ios/export/VoiceiQ.ipa
@@ -47,14 +42,16 @@ if [[ -f "$signing_keychain" && -f "$HOME/.voiceiq-signing/keychain.pass" ]]; th
   security unlock-keychain -p "$(cat "$HOME/.voiceiq-signing/keychain.pass")" "$signing_keychain"
 fi
 command -v xcodegen >/dev/null || fail "xcodegen is missing: brew install xcodegen"
-security find-identity -v -p codesigning | grep -q "Apple Distribution: .*($TEAM_ID)" \
+# Captured before matching: with pipefail, `grep -q` exiting early can fail the
+# pipeline even when it matched.
+[[ "$(security find-identity -v -p codesigning)" == *"Apple Distribution: "*"($TEAM_ID)"* ]] \
   || fail "no 'Apple Distribution' identity for $TEAM_ID in the keychain (docs/RELEASING.md)"
 profiles_dir="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
 for name in "VoiceiQ iOS App Store" "VoiceiQ Keyboard App Store" "VoiceiQ Live Activity App Store"; do
   found=0
   for file in "$profiles_dir"/*.mobileprovision; do
     [[ -e "$file" ]] || continue
-    if security cms -D -i "$file" 2>/dev/null | plutil -extract Name raw -o - - 2>/dev/null | grep -qx "$name"; then
+    if [[ "$(security cms -D -i "$file" 2>/dev/null | plutil -extract Name raw -o - - 2>/dev/null)" == "$name" ]]; then
       found=1; break
     fi
   done
@@ -63,8 +60,8 @@ done
 case "$UPLOAD" in
   asc)
     command -v asc >/dev/null || fail "asc is missing: brew install asc, then scripts/setup-asc.sh"
-    asc --profile "$ASC_PROFILE" apps view --id "$APP_ID" --output json >/dev/null 2>&1 \
-      || fail "asc profile '$ASC_PROFILE' cannot reach app $APP_ID; run scripts/setup-asc.sh or use UPLOAD=xcode"
+    asc ${asc_auth[@]+"${asc_auth[@]}"} apps view --id "$APP_ID" --output json >/dev/null 2>&1 \
+      || fail "asc cannot reach app $APP_ID; run scripts/setup-asc.sh or use UPLOAD=xcode"
     ;;
   xcode|none) ;;
   *) fail "UPLOAD must be asc, xcode or none" ;;
@@ -75,16 +72,14 @@ if [[ -z "${SKIP_TESTS:-}" ]]; then
   scripts/test.sh
 fi
 
-project_build=$(awk '/CURRENT_PROJECT_VERSION:/ {gsub(/"/, "", $2); print $2; exit}' project.yml)
-if [[ -z "${BUILD:-}" ]]; then
-  BUILD=$project_build
-  if [[ "$UPLOAD" != xcode ]] && asc --profile "$ASC_PROFILE" apps view --id "$APP_ID" --output json >/dev/null 2>&1; then
-    next=$(asc --profile "$ASC_PROFILE" builds next-build-number --app "$APP_ID" --platform IOS --output json \
-      | python3 -c 'import json,sys; print(json.load(sys.stdin)["nextBuildNumber"])')
-    (( next > BUILD )) && BUILD=$next
-  fi
+VERSION=$(awk '/MARKETING_VERSION:/ {gsub(/"/, "", $2); print $2; exit}' project.yml)
+BUILD=$(awk '/CURRENT_PROJECT_VERSION:/ {gsub(/"/, "", $2); print $2; exit}' project.yml)
+if [[ "$UPLOAD" == asc ]]; then
+  next=$(asc ${asc_auth[@]+"${asc_auth[@]}"} builds next-build-number --app "$APP_ID" --platform IOS --output json \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["nextBuildNumber"])')
+  (( BUILD >= next )) || fail "TestFlight already has build $((next - 1)); raise CURRENT_PROJECT_VERSION in project.yml above it"
 fi
-echo "▸ Build number $BUILD"
+echo "▸ Version $VERSION ($BUILD)"
 
 echo "▸ Archiving"
 BUILD="$BUILD" scripts/archive-ios.sh
@@ -109,13 +104,13 @@ done
 # a dry run leaves nothing behind.
 clear_reservations() {
   command -v asc >/dev/null || return 0
-  asc --profile "$ASC_PROFILE" builds uploads list --app "$APP_ID" --output json 2>/dev/null \
+  asc ${asc_auth[@]+"${asc_auth[@]}"} builds uploads list --app "$APP_ID" --output json 2>/dev/null \
     | python3 -c 'import json,sys
 for u in json.load(sys.stdin).get("data", []):
     a = u["attributes"]
     if a.get("cfBundleVersion") == sys.argv[1] and a.get("state", {}).get("state") == "AWAITING_UPLOAD":
         print(u["id"])' "$BUILD" \
-    | while read -r id; do asc --profile "$ASC_PROFILE" builds uploads delete --id "$id" --confirm >/dev/null; done
+    | while read -r id; do asc ${asc_auth[@]+"${asc_auth[@]}"} builds uploads delete --id "$id" --confirm >/dev/null; done
 }
 
 if [[ "$UPLOAD" == none ]]; then
@@ -129,9 +124,13 @@ if [[ "$UPLOAD" == asc ]]; then
   clear_reservations
   # "VoiceiQ Internal" has automatic distribution, so a processed build joins
   # it without an explicit add.
-  asc --profile "$ASC_PROFILE" publish testflight --app "$APP_ID" --ipa "$IPA" \
+  asc ${asc_auth[@]+"${asc_auth[@]}"} publish testflight --app "$APP_ID" --ipa "$IPA" \
     --upload-only --wait --timeout 60m --output table
-  asc --profile "$ASC_PROFILE" testflight groups list --app "$APP_ID" --output table
+  if [[ -n "${TEST_NOTES_FILE:-}" ]]; then
+    asc ${asc_auth[@]+"${asc_auth[@]}"} builds test-notes create --app "$APP_ID" --build-number "$BUILD" \
+      --platform IOS --version "$VERSION" --locale en-US --whats-new "$(cat "$TEST_NOTES_FILE")" --output table
+  fi
+  asc ${asc_auth[@]+"${asc_auth[@]}"} testflight groups list --app "$APP_ID" --output table
 else
   # Xcode's signed-in account uploads the archive. Run this from the logged-in
   # desktop session: signing needs the unlocked login keychain.
@@ -152,4 +151,4 @@ PLIST
   echo "Uploaded. \"$GROUP\" has automatic distribution, so the build reaches it after processing."
 fi
 
-echo "✓ VoiceiQ iOS $(awk '/MARKETING_VERSION:/ {gsub(/"/, "", $2); print $2; exit}' project.yml) ($BUILD) is on TestFlight"
+echo "✓ VoiceiQ iOS $VERSION ($BUILD) is on TestFlight"

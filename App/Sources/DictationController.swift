@@ -1,17 +1,3 @@
-// Copyright 2026 Google LLC
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     https://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 import AppKit
 import ApplicationServices
 import AVFoundation
@@ -35,6 +21,7 @@ final class DictationController {
     private let learner = EditLearner()
     private let meetings: MeetingEngine
     private lazy var meetingHUD = MeetingHUDController(meetings: meetings, hud: hud)
+    private let updatePill = UpdatePillController()
     private var recoveryScanner: RecoveryScanner?
     private var retryQueue: RetryQueue?
     private var mainWindow: MainWindowController?
@@ -195,6 +182,17 @@ final class DictationController {
         meetingHUD.bind()
         meetings.autoDetect = SettingsStore().meetingDetectionEnabled
 
+        updatePill.setPill = { [weak self] state in self?.setPill(state) }
+        updatePill.currentPill = { [weak self] in self?.hud.model.state ?? .hidden }
+        updatePill.restingPill = { [weak self] in
+            self.map { $0.restingPill(for: $0.coordinator.state) } ?? .idleDot
+        }
+        updatePill.sessionIsActive = { [weak self] in self?.isInUse ?? false }
+        updatePill.notice = { [weak self] message in
+            self?.showBackgroundNotice(message, for: 4.0, sound: nil)
+        }
+        updatePill.bind()
+
         // A prewarmed graph is bound to the device it was built for — rebuild it
         // the moment the input moves, so the first dictation on new AirPods is
         // as fast as the last one on the old mic.
@@ -275,6 +273,7 @@ final class DictationController {
             // until permissions are granted — and the migrating cohort is exactly
             // the cohort that gets re-prompted.
             announceSmartRestoredIfNeeded()
+            updatePill.announceIfJustUpdated()
             // Idle time, not insert time: Sauce's one-time keyboard-layout
             // lookup otherwise lands between transcript-ready and ⌘V.
             Task { @MainActor in PasteInserter.warmKeyboardLayout() }
@@ -775,6 +774,23 @@ final class DictationController {
                 retryQueue?.scheduleDrain(after: TimeoutPolicy.rateLimitWait)
             }
             showError(coordinator.modeFailureMessage ?? Self.copy(for: failure))
+        }
+    }
+
+    /// Anything an update relaunch would cut short: a dictation or mode session,
+    /// a meeting (detected, recording, or making notes), or an answer on screen.
+    private var isInUse: Bool {
+        switch coordinator.state {
+        case .idle, .done, .cancelled, .failed: break
+        default: return true
+        }
+        switch meetings.phase {
+        case .idle, .failed: break
+        default: return true
+        }
+        switch hud.model.state {
+        case .answer, .meetingPrompt: return true
+        default: return shortcutMode != nil
         }
     }
 

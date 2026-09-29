@@ -265,11 +265,14 @@ Transcript text is logged as `private` and never appears in those logs.
 | Command | `./scripts/release.sh` | `./scripts/release-ios.sh` |
 | Signing | Developer ID Application | Apple Distribution + three App Store profiles |
 | Output | Notarized, stapled DMG and ZIP in `build/release/` | Build on TestFlight ("VoiceiQ Internal") |
+| Publish | `./scripts/publish-github-release.sh`: GitHub Release with the Sparkle appcast | Automatic to the internal group |
 | Credentials | `APPLE_ID`, app-specific password, team ID | asc API key (`scripts/setup-asc.sh`, once) or a signed-in Xcode |
 
-Both scripts run the `VoiceIQCore` tests first and refuse to publish anything
-whose signature or entitlements fail verification. Bump `MARKETING_VERSION`
-and `CURRENT_PROJECT_VERSION` in `project.yml` before a release. The full
+Pushing a new `MARKETING_VERSION` (and a higher `CURRENT_PROJECT_VERSION`) in
+`project.yml` to `main` runs both scripts in GitHub Actions and publishes both
+apps with AI-written release notes ([docs/UPDATES.md](docs/UPDATES.md)). Both
+scripts run the `VoiceIQCore` tests first and refuse to publish anything whose
+signature or entitlements fail verification. The full
 process, one-time setup and checks are in
 [docs/RELEASING.md](docs/RELEASING.md).
 

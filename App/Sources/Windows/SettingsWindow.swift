@@ -1,17 +1,3 @@
-// Copyright 2026 Google LLC
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     https://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 import AppKit
 import Combine
 import ServiceManagement
@@ -600,8 +586,28 @@ struct AboutPane: View {
                     .font(VoiceIQUI.TypeScale.body())
                     .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
             }
+            UpdateControls()
+                .padding(.top, VoiceIQUI.Spacing.m)
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct UpdateControls: View {
+    @ObservedObject private var updater = AppUpdater.shared
+
+    var body: some View {
+        VStack(spacing: VoiceIQUI.Spacing.m) {
+            Button("Check for Updates…") { updater.checkForUpdates() }
+                .disabled(!updater.canCheckForUpdates)
+            VStack(alignment: .leading, spacing: 6) {
+                Toggle("Check for updates automatically", isOn: $updater.automaticallyChecksForUpdates)
+                Toggle("Download and install updates automatically", isOn: $updater.automaticallyDownloadsUpdates)
+                    .disabled(!updater.automaticallyChecksForUpdates)
+            }
+            .toggleStyle(.checkbox)
+            .font(VoiceIQUI.TypeScale.body())
+        }
     }
 }

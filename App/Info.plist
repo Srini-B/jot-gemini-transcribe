@@ -45,5 +45,15 @@
 	<string>Copyright 2026 Google LLC. Apache License 2.0. This is not an officially supported Google product.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>VoiceiQ records audio while you hold the dictation key, so it can transcribe what you say.</string>
+	<key>SUAutomaticallyUpdate</key>
+	<true/>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>$(VOICEIQ_UPDATE_FEED_URL)</string>
+	<key>SUPublicEDKey</key>
+	<string>PesOpOtZiCszJi5Y2I91aH+mhMXMxLKgp527NH6oVao=</string>
+	<key>SUScheduledCheckInterval</key>
+	<integer>21600</integer>
 </dict>
 </plist>

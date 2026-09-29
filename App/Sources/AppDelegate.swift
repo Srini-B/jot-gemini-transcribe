@@ -1,23 +1,11 @@
-// Copyright 2026 Google LLC
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     https://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 import AppKit
+import Combine
 import VoiceIQCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItemController: StatusItemController?
     private var dictationController: DictationController?
+    private var availableUpdateObservation: AnyCancellable?
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         // Single instance, always: two copies means two event taps, two pills,
@@ -68,8 +56,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onPasteLast: { [weak controller] in controller?.pasteLastTranscript() },
             onOpenSettings: { [weak controller] in controller?.openSettings() },
             onStartHandsFree: { [weak controller] in controller?.startHandsFree() },
-            onOpenAbout: { [weak controller] in controller?.openSettings(section: "about") }
+            onOpenAbout: { [weak controller] in controller?.openSettings(section: "about") },
+            onCheckForUpdates: { AppUpdater.shared.checkForUpdates() }
         )
+        AppUpdater.shared.start()
+        availableUpdateObservation = AppUpdater.shared.$availableUpdate.sink { [weak self] update in
+            self?.statusItemController?.setAvailableUpdate(update)
+        }
         controller.onStatusChange = { [weak self] status in
             self?.statusItemController?.setStatusLine(status)
         }
