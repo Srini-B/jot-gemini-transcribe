@@ -1,17 +1,3 @@
-// Copyright 2026 Google LLC
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     https://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 #if os(macOS)
 import AppKit
 import ApplicationServices
@@ -116,7 +102,7 @@ public enum AXInserter {
         var pid: pid_t = 0
         guard AXUIElementGetPid(element, &pid) == .success,
               targetPID == nil || targetPID == pid,
-              stringValue(of: element) != nil else { return nil }
+              fieldText(of: element) != nil else { return nil }
         return FieldSnapshot(element: element, pid: pid, bundleID: bundleID)
     }
 
@@ -153,6 +139,21 @@ public enum AXInserter {
             return nil
         }
         return valueRef as? String
+    }
+
+    /// The field's text for auto-learn. WhatsApp's message box reports no
+    /// value at all when it is empty (kAXErrorNoValue) rather than "", which
+    /// read as an unreadable field, so a new message was never tracked. A
+    /// field with no value that says it holds zero characters reads as "".
+    nonisolated static func fieldText(of element: AXUIElement) -> String? {
+        var valueRef: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &valueRef)
+        if result == .success { return valueRef as? String }
+        var countRef: CFTypeRef?
+        guard result == .noValue,
+              AXUIElementCopyAttributeValue(element, kAXNumberOfCharactersAttribute as CFString, &countRef) == .success,
+              (countRef as? Int) == 0 else { return nil }
+        return ""
     }
 
     /// Chromium builds its a11y tree lazily; AXManualAccessibility asks for it
