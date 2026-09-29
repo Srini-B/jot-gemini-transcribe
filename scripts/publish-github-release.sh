@@ -95,12 +95,18 @@ gh release create "$TAG" "$ZIP" "$DMG" "$STAGE/appcast.xml" \
   --notes-file "$NOTES" \
   --latest
 
-echo "▸ Checking the live feed"
-for attempt in 1 2 3 4 5 6; do
+# GitHub's latest/download redirect can take several minutes to point at a
+# new release (0.5.5 took over a minute), so wait up to 10 minutes.
+FEED_WAIT_SECONDS=${FEED_WAIT_SECONDS:-600}
+echo "▸ Checking the live feed (up to ${FEED_WAIT_SECONDS}s)"
+started=$SECONDS
+deadline=$((started + FEED_WAIT_SECONDS))
+while :; do
   if [[ "$(curl -fsSL "$FEED_URL" || true)" == *"<sparkle:version>$BUILD<"* ]]; then
-    echo "✓ $FEED_URL now offers $VERSION ($BUILD)"
+    echo "✓ $FEED_URL now offers $VERSION ($BUILD) after $((SECONDS - started))s"
     exit 0
   fi
-  sleep 10
+  (( SECONDS >= deadline )) && break
+  sleep 15
 done
-fail "$FEED_URL does not offer build $BUILD yet; check the release's assets."
+fail "$FEED_URL does not offer build $BUILD after ${FEED_WAIT_SECONDS}s; check the release's assets."
