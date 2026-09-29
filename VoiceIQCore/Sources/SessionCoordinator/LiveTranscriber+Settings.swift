@@ -42,6 +42,20 @@ extension LiveTranscriber {
         let session: LiveTranscriptionSession
         let liveModel: String
         let route = settings.activeRoute
+        if settings.transcriptionSource == .elevenLabs {
+            // Any route: the socket is ElevenLabs', whoever writes afterwards.
+            guard let key = KeychainStore.loadElevenLabsKey(), !key.isEmpty else { return nil }
+            let dialect = ElevenLabsLiveDialect(keyterms: dictionary.sanitizedVocabulary(),
+                                                noVerbatim: settings.smartTranscriptionEnabled)
+            return LiveTranscriber(
+                session: LiveTranscriptionSession(
+                    transport: WebSocketTransport.elevenLabs(url: dialect.socketURL, apiKey: { key }),
+                    dialect: dialect
+                ),
+                modelID: dialect.model,
+                replacementRules: { DictionaryStore().replacementRules() }
+            )
+        }
         guard route.supportsLiveTranscription else { return nil }
         switch route.provider {
         case .gemini:

@@ -65,6 +65,7 @@ public actor GeminiClient {
     let openRouterKey: @Sendable () -> String?
     let vercelKey: @Sendable () -> String?
     let openAIKey: @Sendable () -> String?
+    let elevenLabsKey: @Sendable () -> String?
     /// Read per call, like `provider`, so a model override applies at once.
     let openAIConfig: @Sendable () -> OpenAIConfig
     /// Read per call, so flipping the provider or gateway in Settings takes
@@ -76,6 +77,7 @@ public actor GeminiClient {
         openRouterKey: @escaping @Sendable () -> String? = { nil },
         vercelKey: @escaping @Sendable () -> String? = { nil },
         openAIKey: @escaping @Sendable () -> String? = { nil },
+        elevenLabsKey: @escaping @Sendable () -> String? = { nil },
         openAIConfig: @escaping @Sendable () -> OpenAIConfig = { OpenAIConfig() },
         route: @escaping @Sendable () -> ModelRoute = { ModelRoute(provider: .gemini, gateway: .direct) }
     ) {
@@ -89,6 +91,7 @@ public actor GeminiClient {
         self.openRouterKey = openRouterKey
         self.vercelKey = vercelKey
         self.openAIKey = openAIKey
+        self.elevenLabsKey = elevenLabsKey
         self.openAIConfig = openAIConfig
         self.route = route
     }
@@ -331,6 +334,9 @@ public actor GeminiClient {
             case .gemini: TokenUsage.fromGenerateContent(data) ?? TokenUsage.fromInteraction(data)
             case .openAI: TokenUsage.fromOpenAIDuration(data, model: modelLabel) ?? TokenUsage.fromOpenAI(data)
             case .openRouter, .vercel: TokenUsage.fromOpenAI(data) ?? TokenUsage.fromVercelTranscription(data)
+            // No usage block, and the price depends on the request's options:
+            // `elevenLabsTranscribe` books it.
+            case .elevenLabs: nil
             }
             if let usage {
                 UsageMeter.record(stage: stage, model: modelLabel, usage: usage)
@@ -379,8 +385,10 @@ public actor GeminiClient {
                 throw TranscriptionError.rateLimitedDaily
             }
             throw TranscriptionError.rateLimitedTransient(retryAfter: retryAfter)
-        case 400:
-            // Permanent: malformed request — retrying is pointless.
+        case 400,
+             422 where via == .elevenLabs:
+            // Permanent: malformed request — retrying is pointless. ElevenLabs
+            // reports schema validation as 422.
             let message = Self.errorMessage(from: data) ?? "http_\(http.statusCode)"
             Log.transcription.error("GeminiClient: \(http.statusCode) — \(message, privacy: .private)")
             throw TranscriptionError.badRequest(message)
@@ -558,6 +566,10 @@ public actor GeminiClient {
             if let key = openAIKey() {
                 request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
             }
+        case .elevenLabs:
+            if let key = elevenLabsKey() {
+                request.setValue(key, forHTTPHeaderField: "xi-api-key")
+            }
         }
     }
 
@@ -608,7 +620,7 @@ public actor GeminiClient {
         } else {
             object = nil
         }
-        guard let error = object?["error"] as? [String: Any] else { return nil }
+        guard let error = object?["error"] as? [String: Any] else { return elevenLabsErrorDetail(from: data).message }
         return error["message"] as? String
     }
 }

@@ -156,7 +156,7 @@ struct DictationPane: View {
                 if settings.usesLegacyTranscribeEndpoint {
                     Text("Live transcription is unavailable while the legacy transcription endpoint is on in Advanced.")
                 } else if !settings.liveTranscriptionSupported {
-                    Text("Live transcription needs the provider's own API key; it is unavailable through a gateway.")
+                    Text("Live transcription needs the provider's own API key or ElevenLabs transcription; it is unavailable through a gateway.")
                 } else {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Live streams your voice as you speak instead of uploading at the end. On Gemini it uses a separate model with a small daily request quota on free keys. If the connection stumbles it falls back to the normal upload, so nothing is lost. Loud rooms judges your voice against the actual room noise instead of a fixed level.")

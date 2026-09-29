@@ -185,10 +185,15 @@ private struct StatsRow: View {
     let stats: HistoryStore.Stats
 
     var body: some View {
-        HStack(spacing: Theme.Spacing.m) {
-            tile(stats.totalWords.formatted(.number.notation(.compactName)), "Words")
-            tile(stats.totalDictations.formatted(), "Dictations")
-            tile(stats.averageWPM > 0 ? "\(stats.averageWPM)" : "–", "Words / min")
+        Grid(horizontalSpacing: Theme.Spacing.m, verticalSpacing: Theme.Spacing.m) {
+            GridRow {
+                tile(stats.totalWords.formatted(.number.notation(.compactName)), "Words")
+                tile(stats.totalDictations.formatted(), "Dictations")
+            }
+            GridRow {
+                tile(stats.averageWPM > 0 ? "\(stats.averageWPM)" : "–", "Words / min")
+                tile(stats.audioLabel, "Audio")
+            }
         }
     }
 

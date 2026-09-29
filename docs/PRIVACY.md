@@ -6,8 +6,11 @@ Your voice goes from your Mac directly to the model provider you chose in
 Settings → Advanced, using your own API key: Google's Gemini API or OpenAI's API.
 If you choose a gateway instead (OpenRouter or Vercel AI Gateway), requests go
 to that gateway with your gateway key, and it forwards them to the provider.
-There is no VoiceiQ server, no account, no analytics, no telemetry. Everything
-else stays on your Mac. The code is open — verify all of this.
+If you add an ElevenLabs key and pick ElevenLabs as the transcription source,
+dictation audio goes to ElevenLabs (`api.elevenlabs.io`) with your ElevenLabs
+key instead, and only the transcript goes on to the provider for the writing
+rules. There is no VoiceiQ server, no account, no analytics, no telemetry.
+Everything else stays on your Mac. The code is open — verify all of this.
 
 "The provider" below means whichever of these the active route sends to:
 `generativelanguage.googleapis.com` (Gemini), `api.openai.com` (OpenAI),
@@ -25,6 +28,10 @@ on your Mac.
    the only network host this app talks to unless you add a TinyFish key
    (item 5). With live transcription on, the audio streams to the provider over
    a WebSocket while you speak (the provider's own API only).
+   With ElevenLabs as the transcription source, this audio (batch or live)
+   goes to ElevenLabs instead, along with up to 100 dictionary terms as
+   `keyterms` (50 when live), and the provider never receives it: the
+   writing-rules request (item 3) carries no audio in that case.
 2. **Your dictionary terms**, alongside that audio. The transcription model uses
    them to bias what it hears, which is why names and jargon come out spelled
    right as you speak rather than being corrected afterwards. Only the correct
@@ -77,7 +84,7 @@ on your Mac.
    sends only your dictation, as a normal dictation does.
 8. **Your API keys**, each only in the request header to its own service: the
    Gemini key to Google, the OpenAI key to OpenAI, a gateway key to that
-   gateway. They are stored in the macOS Keychain, never in files or
+   gateway, the ElevenLabs key to ElevenLabs. They are stored in the macOS Keychain, never in files or
    preferences.
 
 The auto-learn feature ("Learn from your edits") never sends anything. It

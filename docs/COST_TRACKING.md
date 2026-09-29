@@ -46,6 +46,18 @@ at the `gpt-live-transcribe` rate. Chat models (GPT-6 Luna, and
 `gpt-4o-transcribe-diarize`, which bills tokens) use the OpenAI-shaped
 `usage` block (`TokenUsage.fromOpenAI`).
 
+ElevenLabs Scribe returns no usage block, so `GeminiClient.elevenLabsTranscribe`
+books each batch call itself (`post` skips it for `.elevenLabs`): the
+response's `audio_duration_secs`, or the chunk's length when that field is
+missing, at `scribe_v2`'s $0.22 an hour, plus
+`PriceBook.elevenLabsKeytermsPerMinute` ($0.05 an hour) when dictionary terms
+were sent as `keyterms`. The realtime socket (`ElevenLabsLiveDialect`) books the
+seconds it sent at `scribe_v2_realtime`'s $0.39 an hour; ElevenLabs does not
+publish a realtime keyterm surcharge, so none is added. Prices are from
+elevenlabs.io/pricing/api (copied 2026-09-28) and are the same on every plan;
+hours included in a subscription are not subtracted, so the pane shows list
+price.
+
 ## Attribution
 
 `UsageMeter.scope` is a task-local `UsageScope(activity, sessionID)`. It is set
@@ -83,12 +95,14 @@ carries no cost.
 ## UI
 
 `CostPane` shows one provider at a time. It opens on the provider selected in
-Settings → Advanced, and a Gemini/OpenAI toggle switches to the other; every
-read filters `usage` rows by model ID (`ModelProvider.modelPrefixes`: `gemini`
-and `google/` for Gemini, `gpt`, `whisper` and `openai/` for OpenAI). It shows
+Settings → Advanced, and a Gemini/OpenAI/ElevenLabs toggle (`CostSource`)
+switches to the others; every read filters `usage` rows by model ID
+(`CostSource.modelPrefixes`: `gemini` and `google/` for Gemini, `gpt`, `whisper`
+and `openai/` for OpenAI, `scribe` and `elevenlabs/` for ElevenLabs). It shows
 today, this week, this month, and all time totals; a period picker drives the
 by-action and by-model tables and the recent-calls list. The footer names the
-price source (`ModelRoute.pricingNote`): the active gateway for the selected
-provider, the provider's pricing page for the other.
+price source (`CostSource.pricingNote`): the active gateway for the selected
+provider, the provider's pricing page for the other, and ElevenLabs' list
+prices on its tab. The iPhone's Cost page has the same three-way toggle.
 `HistoryPane` shows the summed session cost on each row and the detail sheet
 lists each call with its model and token counts.

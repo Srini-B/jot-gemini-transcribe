@@ -302,11 +302,24 @@ public final class HistoryStore: @unchecked Sendable {
         public var totalWords: Int
         public var totalDictations: Int
         public var averageWPM: Int
+        /// Recorded audio across the same dictations. Transcription is billed
+        /// by audio time, so this is the figure to hold against a price per hour.
+        public var totalAudioSeconds: Double
 
-        public init(totalWords: Int, totalDictations: Int, averageWPM: Int) {
+        public init(totalWords: Int, totalDictations: Int, averageWPM: Int, totalAudioSeconds: Double = 0) {
             self.totalWords = totalWords
             self.totalDictations = totalDictations
             self.averageWPM = averageWPM
+            self.totalAudioSeconds = totalAudioSeconds
+        }
+
+        /// "42 min" under an hour, then hours: "3.2 h", "148 h".
+        public var audioLabel: String {
+            let seconds = totalAudioSeconds
+            if seconds < 60 { return seconds > 0 ? "\(Int(seconds.rounded())) s" : "–" }
+            if seconds < 3_600 { return "\(Int((seconds / 60).rounded())) min" }
+            let hours = seconds / 3_600
+            return hours < 100 ? String(format: "%.1f h", hours) : "\(Int(hours.rounded())) h"
         }
     }
 
@@ -331,7 +344,7 @@ public final class HistoryStore: @unchecked Sendable {
             }
             // WPM only over rows that actually have a duration.
             let wpm = speech > 10 ? Int(Double(timedWords) / (speech / 60)) : 0
-            return Stats(totalWords: words, totalDictations: rows.count, averageWPM: wpm)
+            return Stats(totalWords: words, totalDictations: rows.count, averageWPM: wpm, totalAudioSeconds: speech)
         }) ?? Stats(totalWords: 0, totalDictations: 0, averageWPM: 0)
     }
 }

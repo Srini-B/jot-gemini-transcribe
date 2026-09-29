@@ -63,6 +63,7 @@ final class AppModel: ObservableObject {
             openRouterKey: { KeychainStore.loadOpenRouterKey() },
             vercelKey: { KeychainStore.loadVercelKey() },
             openAIKey: { KeychainStore.loadOpenAIKey() },
+            elevenLabsKey: { KeychainStore.loadElevenLabsKey() },
             openAIConfig: { SettingsStore().openAIConfig },
             route: { SettingsStore().activeRoute }
         )

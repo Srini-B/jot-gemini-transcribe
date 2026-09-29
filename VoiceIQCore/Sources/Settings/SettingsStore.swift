@@ -124,6 +124,21 @@ public struct SettingsStore: Sendable {
         Self.set(gateway.rawValue, forKey: "modelGateway")
     }
 
+    /// Speech-to-text chosen in Settings. Only matters when its key exists.
+    public var preferredTranscriptionSource: TranscriptionSource {
+        TranscriptionSource(rawValue: Self.defaults.string(forKey: "transcriptionSource") ?? "") ?? .provider
+    }
+
+    public func setPreferredTranscriptionSource(_ source: TranscriptionSource) {
+        Self.set(source.rawValue, forKey: "transcriptionSource")
+    }
+
+    /// Who transcribes the next dictation. ElevenLabs only while its key is
+    /// stored, so removing the key falls back to the provider's own model.
+    public var transcriptionSource: TranscriptionSource {
+        preferredTranscriptionSource == .elevenLabs && KeychainStore.loadElevenLabsKey() != nil ? .elevenLabs : .provider
+    }
+
     /// The route that serves calls right now; see `ModelRoute.resolve`.
     public var activeRoute: ModelRoute {
         let provider = preferredProvider
@@ -374,8 +389,11 @@ public struct SettingsStore: Sendable {
         liveTranscription && !usesLegacyTranscribeEndpoint && liveTranscriptionSupported
     }
 
-    /// Only over a provider's own API; see `ModelRoute.supportsLiveTranscription`.
-    public var liveTranscriptionSupported: Bool { activeRoute.supportsLiveTranscription }
+    /// With ElevenLabs on any route; otherwise only over a provider's own API
+    /// (see `ModelRoute.supportsLiveTranscription`).
+    public var liveTranscriptionSupported: Bool {
+        transcriptionSource == .elevenLabs || activeRoute.supportsLiveTranscription
+    }
 
     // Raw override values for the Settings UI — panes must not duplicate the
     // defaults keys (a rename would silently desync display from effect).

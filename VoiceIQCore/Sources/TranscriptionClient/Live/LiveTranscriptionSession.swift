@@ -122,7 +122,7 @@ public actor LiveTranscriptionSession {
     /// credential is refused — the caller falls back to the batch path.
     public func start(setupTimeout: TimeInterval = 5.0) async throws {
         try await transport.connect()
-        try await transport.send(dialect.setupFrame())
+        if let setup = dialect.setupFrame() { try await transport.send(setup) }
 
         // Wait for setupComplete before streaming. Audio arriving meanwhile is
         // already accumulating in the ring, so nothing is lost by waiting.
@@ -188,7 +188,7 @@ public actor LiveTranscriptionSession {
                     try await transport.send(dialect.audioFrame(chunk))
                     ring.markAccepted(chunk.count)
                     bytesSinceActivityStart += chunk.count
-                    if !isEnding, Self.shouldRollActivity(bytesSinceStart: bytesSinceActivityStart, chunk: chunk) {
+                    if !isEnding, Self.shouldRollActivity(bytesSinceStart: bytesSinceActivityStart, chunk: chunk, limits: dialect.activityRoll) {
                         // Chunks already drained from the ring keep flowing
                         // into the new turn; nothing is dropped.
                         try await rollActivity()
@@ -252,15 +252,16 @@ public actor LiveTranscriptionSession {
                     case .partial(let text):
                         latestPartial = text
                         acceptedAtLastTranscript = ring.acceptedBytes
-                        partialSink.yield(text)
+                        partialSink.yield(displayText)
                     case .partialDelta(let text):
                         latestPartial += text
                         acceptedAtLastTranscript = ring.acceptedBytes
-                        partialSink.yield(latestPartial.trimmingCharacters(in: .whitespaces))
+                        partialSink.yield(displayText)
                     case .final(let text):
                         finals.append(text)
                         latestPartial = ""
                         acceptedAtLastTranscript = ring.acceptedBytes
+                        partialSink.yield(displayText)
                     case .goAway:
                         recordFailure("server sent goAway")
                         return
@@ -297,6 +298,12 @@ public actor LiveTranscriptionSession {
         }.joined(separator: "+")
     }
 
+    /// The closed turns and the open one's hypothesis, so the pill keeps the
+    /// earlier words when a turn rolls over.
+    private var displayText: String {
+        (finals + [latestPartial.trimmingCharacters(in: .whitespaces)]).filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
     private func recordFailure(_ why: String) {
         if failure == nil { failure = why }
     }
@@ -320,10 +327,10 @@ public actor LiveTranscriptionSession {
     /// Below this RMS (int16 scale) a 100 ms frame is treated as a pause.
     static let quietFrameRMS = 400.0
 
-    static func shouldRollActivity(bytesSinceStart: Int, chunk: Data) -> Bool {
+    static func shouldRollActivity(bytesSinceStart: Int, chunk: Data, limits: (roll: Int, hardLimit: Int)) -> Bool {
         let seconds = bytesSinceStart / PCMRing.bytesPerSecond
-        if seconds >= activityHardLimitSeconds { return true }
-        guard seconds >= activityRollSeconds else { return false }
+        if seconds >= limits.hardLimit { return true }
+        guard seconds >= limits.roll else { return false }
         return rms(chunk) < quietFrameRMS
     }
 

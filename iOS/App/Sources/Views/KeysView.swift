@@ -30,13 +30,16 @@ struct KeysView: View {
     }
 }
 
-/// The provider (Gemini or OpenAI) and its key, the optional TinyFish key,
+/// The provider (Gemini or OpenAI) and its key, the transcription choice once
+/// an ElevenLabs key is stored, the optional ElevenLabs and TinyFish keys,
 /// and the gateways under a collapsed Experimental section, as on the Mac.
 /// Gateway keys serve both providers, so they are entered once.
 struct ModelKeysForm: View {
     @State private var provider = SettingsStore().preferredProvider
     @State private var gateway = SettingsStore().activeRoute.gateway
     @State private var available = KeychainStore.gatewaysWithKeys(for: SettingsStore().preferredProvider)
+    @State private var transcriptionSource = SettingsStore().preferredTranscriptionSource
+    @State private var hasElevenLabsKey = KeychainStore.loadElevenLabsKey() != nil
     /// Collapsed on every visit, like the Mac's Experimental group.
     @State private var experimentalExpanded = false
 
@@ -48,7 +51,7 @@ struct ModelKeysForm: View {
                 Image(systemName: "info.circle.fill")
                     .foregroundStyle(Theme.Colors.accent)
                     .font(.system(size: 17))
-                Text("Pick **Gemini** or **OpenAI** and add that provider's key. The TinyFish key is optional.")
+                Text("Pick **Gemini** or **OpenAI** and add that provider's key. The ElevenLabs and TinyFish keys are optional.")
                     .font(Theme.Fonts.subheadline())
                     .foregroundStyle(Theme.Colors.inkSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -72,8 +75,20 @@ struct ModelKeysForm: View {
                     .id(providerSlot)
             }
 
+            if hasElevenLabsKey {
+                VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+                    GroupLabel(text: "Transcription")
+                    Picker("Transcription", selection: $transcriptionSource) {
+                        ForEach(TranscriptionSource.allCases) { Text($0.displayName(for: provider)).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: transcriptionSource) { _, value in SettingsStore().setPreferredTranscriptionSource(value) }
+                }
+            }
+
             VStack(alignment: .leading, spacing: Theme.Spacing.m) {
                 GroupLabel(text: "Optional")
+                KeyCard(slot: .elevenLabs, onChange: reload)
                 KeyCard(slot: .tinyFish, onChange: reload)
             }
 
@@ -129,6 +144,8 @@ struct ModelKeysForm: View {
         provider = settings.preferredProvider
         available = KeychainStore.gatewaysWithKeys(for: provider)
         gateway = settings.activeRoute.gateway
+        hasElevenLabsKey = KeychainStore.loadElevenLabsKey() != nil
+        transcriptionSource = settings.preferredTranscriptionSource
     }
 }
 
@@ -272,7 +289,7 @@ private struct TrailingIconLabelStyle: LabelStyle {
 
 /// A place a key can be stored, with what it is for.
 enum KeySlot: Hashable, CaseIterable {
-    case gemini, openAI, openRouter, vercel, tinyFish
+    case gemini, openAI, openRouter, vercel, tinyFish, elevenLabs
 
     var title: String {
         switch self {
@@ -281,6 +298,7 @@ enum KeySlot: Hashable, CaseIterable {
         case .vercel: return "Vercel AI Gateway"
         case .openAI: return "OpenAI"
         case .tinyFish: return "TinyFish"
+        case .elevenLabs: return "ElevenLabs"
         }
     }
 
@@ -291,6 +309,7 @@ enum KeySlot: Hashable, CaseIterable {
         case .vercel: return "triangle.fill"
         case .openAI: return "circle.hexagongrid"
         case .tinyFish: return "globe"
+        case .elevenLabs: return "waveform"
         }
     }
 
@@ -306,6 +325,8 @@ enum KeySlot: Hashable, CaseIterable {
             return "OpenAI's API. Stored in your iPhone's Keychain and only ever sent to OpenAI."
         case .tinyFish:
             return "Lets Ask Anything look up current information on the web. Stored in your iPhone's Keychain and only ever sent to TinyFish."
+        case .elevenLabs:
+            return "Lets ElevenLabs Scribe transcribe your dictation instead of the provider's speech model; the provider still applies the writing rules. Stored in your iPhone's Keychain and only ever sent to ElevenLabs."
         }
     }
 
@@ -316,6 +337,7 @@ enum KeySlot: Hashable, CaseIterable {
         case .vercel: return URL(string: "https://vercel.com/ai-gateway")!
         case .openAI: return URL(string: "https://platform.openai.com/api-keys")!
         case .tinyFish: return URL(string: "https://agent.tinyfish.ai/api-keys")!
+        case .elevenLabs: return URL(string: "https://elevenlabs.io/app/settings/api-keys")!
         }
     }
 
@@ -326,6 +348,7 @@ enum KeySlot: Hashable, CaseIterable {
         case .vercel: return KeychainStore.loadVercelKey()
         case .openAI: return KeychainStore.loadOpenAIKey()
         case .tinyFish: return KeychainStore.loadTinyFishKey()
+        case .elevenLabs: return KeychainStore.loadElevenLabsKey()
         }
     }
 
@@ -336,6 +359,7 @@ enum KeySlot: Hashable, CaseIterable {
         case .vercel: return KeychainStore.saveVercelKey(key)
         case .openAI: return KeychainStore.saveOpenAIKey(key)
         case .tinyFish: return KeychainStore.saveTinyFishKey(key)
+        case .elevenLabs: return KeychainStore.saveElevenLabsKey(key)
         }
     }
 
@@ -346,6 +370,7 @@ enum KeySlot: Hashable, CaseIterable {
         case .vercel: _ = KeychainStore.deleteVercelKey(notify: true)
         case .openAI: _ = KeychainStore.deleteOpenAIKey(notify: true)
         case .tinyFish: _ = KeychainStore.deleteTinyFishKey(notify: true)
+        case .elevenLabs: _ = KeychainStore.deleteElevenLabsKey(notify: true)
         }
     }
 
@@ -362,6 +387,8 @@ enum KeySlot: Hashable, CaseIterable {
             check = await GeminiClient(apiKey: { nil }, vercelKey: { key }).validateVercelKey()
         case .openAI:
             check = await GeminiClient(apiKey: { nil }, openAIKey: { key }).validateOpenAIKey()
+        case .elevenLabs:
+            check = await GeminiClient(apiKey: { nil }, elevenLabsKey: { key }).validateElevenLabsKey()
         case .tinyFish:
             switch await TinyFishClient(apiKey: { key }).validateKey() {
             case .valid: return .accepted(offline: false)

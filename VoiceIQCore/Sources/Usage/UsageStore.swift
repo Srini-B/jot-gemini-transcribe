@@ -178,27 +178,27 @@ public final class UsageStore: @unchecked Sendable {
         public static let zero = Total(costUSD: 0, calls: 0, tokensIn: 0, tokensOut: 0, isApproximate: false)
     }
 
-    /// `provider` limits every read to that provider's models (see
-    /// `ModelProvider.modelPrefixes`); nil reads everything.
-    public func total(since start: Date? = nil, provider: ModelProvider? = nil) -> Total {
-        totals(groupedBy: nil, since: start, provider: provider).first?.total ?? .zero
+    /// `source` limits every read to that source's models (see
+    /// `CostSource.modelPrefixes`); nil reads everything.
+    public func total(since start: Date? = nil, source: CostSource? = nil) -> Total {
+        totals(groupedBy: nil, since: start, source: source).first?.total ?? .zero
     }
 
-    public func totalsByActivity(since start: Date? = nil, provider: ModelProvider? = nil) -> [(key: String, total: Total)] {
-        totals(groupedBy: "activity", since: start, provider: provider)
+    public func totalsByActivity(since start: Date? = nil, source: CostSource? = nil) -> [(key: String, total: Total)] {
+        totals(groupedBy: "activity", since: start, source: source)
     }
 
-    public func totalsByModel(since start: Date? = nil, provider: ModelProvider? = nil) -> [(key: String, total: Total)] {
-        totals(groupedBy: "model", since: start, provider: provider)
+    public func totalsByModel(since start: Date? = nil, source: CostSource? = nil) -> [(key: String, total: Total)] {
+        totals(groupedBy: "model", since: start, source: source)
     }
 
-    private static func providerFilter(_ provider: ModelProvider) -> (sql: String, arguments: [String]) {
-        let prefixes = provider.modelPrefixes
+    private static func sourceFilter(_ source: CostSource) -> (sql: String, arguments: [String]) {
+        let prefixes = source.modelPrefixes
         return ("(" + prefixes.map { _ in "LOWER(model) LIKE ?" }.joined(separator: " OR ") + ")",
                 prefixes.map { $0 + "%" })
     }
 
-    private func totals(groupedBy column: String?, since start: Date?, provider: ModelProvider?) -> [(key: String, total: Total)] {
+    private func totals(groupedBy column: String?, since start: Date?, source: CostSource?) -> [(key: String, total: Total)] {
         let keyExpression = column ?? "''"
         var sql = """
             SELECT \(keyExpression) AS key,
@@ -215,8 +215,8 @@ public final class UsageStore: @unchecked Sendable {
             conditions.append("at >= ?")
             arguments += [start]
         }
-        if let provider {
-            let filter = Self.providerFilter(provider)
+        if let source {
+            let filter = Self.sourceFilter(source)
             conditions.append(filter.sql)
             arguments += StatementArguments(filter.arguments)
         }
@@ -264,11 +264,11 @@ public final class UsageStore: @unchecked Sendable {
         }) ?? []
     }
 
-    public func recent(limit: Int = 50, provider: ModelProvider? = nil) -> [UsageRecord] {
+    public func recent(limit: Int = 50, source: CostSource? = nil) -> [UsageRecord] {
         (try? queue.read { db in
             var request = UsageRecord.order(Column("at").desc)
-            if let provider {
-                let filter = Self.providerFilter(provider)
+            if let source {
+                let filter = Self.sourceFilter(source)
                 request = request.filter(sql: filter.sql, arguments: StatementArguments(filter.arguments))
             }
             return try request.limit(limit).fetchAll(db)

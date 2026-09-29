@@ -75,6 +75,7 @@ struct HistoryPane: View {
                 stat(value: "\(stats.totalWords)", label: "words dictated")
                 stat(value: "\(stats.totalDictations)", label: "dictations")
                 stat(value: stats.averageWPM > 0 ? "\(stats.averageWPM)" : "—", label: "avg WPM")
+                stat(value: stats.totalAudioSeconds > 0 ? stats.audioLabel : "—", label: "of audio")
                 Spacer()
                 HStack(spacing: 3) {
                     ForEach(0..<4, id: \.self) { index in

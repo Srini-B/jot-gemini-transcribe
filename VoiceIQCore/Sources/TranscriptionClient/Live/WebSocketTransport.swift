@@ -58,6 +58,16 @@ public final class WebSocketTransport: LiveTransport, @unchecked Sendable {
         }
     }
 
+    /// ElevenLabs Scribe v2 Realtime. The key goes in the `xi-api-key` header
+    /// on the upgrade request; the dialect's URL carries the configuration.
+    public static func elevenLabs(url: URL, apiKey: @escaping @Sendable () -> String) -> WebSocketTransport {
+        WebSocketTransport(sendsText: true) {
+            var request = URLRequest(url: url)
+            request.setValue(apiKey(), forHTTPHeaderField: "xi-api-key")
+            return request
+        }
+    }
+
     public init(sendsText: Bool, request: @escaping @Sendable () -> URLRequest) {
         self.makeRequest = request
         self.sendsText = sendsText

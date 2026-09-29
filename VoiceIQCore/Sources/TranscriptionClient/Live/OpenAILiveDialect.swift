@@ -40,7 +40,7 @@ public struct OpenAILiveDialect: LiveDialect {
         self.keywords = GeminiClient.openAIKeywords(keywords)
     }
 
-    public func setupFrame() -> Data {
+    public func setupFrame() -> Data? {
         var transcription: [String: Any] = ["model": model, "delay": delay.rawValue]
         if !keywords.isEmpty { transcription["keywords"] = keywords }
         return Self.json([

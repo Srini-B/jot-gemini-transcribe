@@ -61,6 +61,23 @@ public enum ModelProvider: String, CaseIterable, Sendable, Codable, Identifiable
     }
 }
 
+/// Who turns dictation audio into text: the selected provider's own speech
+/// model, or ElevenLabs Scribe v2 (batch) and Scribe v2 Realtime (live). The
+/// writing rules always run on the selected provider's writing model.
+public enum TranscriptionSource: String, CaseIterable, Sendable, Identifiable {
+    case provider
+    case elevenLabs
+
+    public var id: String { rawValue }
+
+    public func displayName(for provider: ModelProvider) -> String {
+        switch self {
+        case .provider: return provider.displayName
+        case .elevenLabs: return "ElevenLabs"
+        }
+    }
+}
+
 /// How calls reach the provider: its own API, or a gateway. OpenRouter and
 /// Vercel AI Gateway serve both providers' models with one key each, so a
 /// gateway key is entered once whichever provider is selected.
@@ -91,6 +108,8 @@ public enum ModelEndpoint: String, Sendable {
     case openAI
     case openRouter
     case vercel
+    /// Speech-to-text only; never a route, chosen by `TranscriptionSource`.
+    case elevenLabs
 
     /// Who receives the request, for privacy copy.
     public var hostName: String {
@@ -99,6 +118,7 @@ public enum ModelEndpoint: String, Sendable {
         case .openAI: return "OpenAI"
         case .openRouter: return "OpenRouter"
         case .vercel: return "Vercel"
+        case .elevenLabs: return "ElevenLabs"
         }
     }
 }

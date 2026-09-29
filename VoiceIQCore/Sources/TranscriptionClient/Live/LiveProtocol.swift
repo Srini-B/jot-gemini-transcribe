@@ -58,7 +58,11 @@ public struct LiveSetup: Equatable, Sendable {
 public protocol LiveDialect: Sendable {
     /// For usage records.
     var model: String { get }
-    func setupFrame() -> Data
+    /// Nil when the socket URL carries the whole configuration.
+    func setupFrame() -> Data?
+    /// When a long turn is closed and the next opened, in seconds of audio:
+    /// at the first quiet frame after `roll`, and at `hardLimit` regardless.
+    var activityRoll: (roll: Int, hardLimit: Int) { get }
     /// `pcm` is the app's 16 kHz mono Int16; a dialect resamples if its API
     /// needs another rate.
     func audioFrame(_ pcm: Data) -> Data
@@ -75,13 +79,19 @@ public protocol LiveDialect: Sendable {
     func usage(reported: TokenUsage?, audioSeconds: Double, outputCharacters: Int) -> TokenUsage
 }
 
+extension LiveDialect {
+    public var activityRoll: (roll: Int, hardLimit: Int) {
+        (LiveTranscriptionSession.activityRollSeconds, LiveTranscriptionSession.activityHardLimitSeconds)
+    }
+}
+
 /// Gemini's Live API, through the `LiveProtocol` frames below.
 public struct GeminiLiveDialect: LiveDialect {
     public let setup: LiveSetup
     public init(setup: LiveSetup) { self.setup = setup }
 
     public var model: String { setup.model }
-    public func setupFrame() -> Data { LiveProtocol.setupFrame(setup) }
+    public func setupFrame() -> Data? { LiveProtocol.setupFrame(setup) }
     public func audioFrame(_ pcm: Data) -> Data { LiveProtocol.audioFrame(pcm) }
     public func activityStartFrame() -> Data? { LiveProtocol.activityStartFrame() }
     public func activityEndFrame() -> Data { LiveProtocol.activityEndFrame() }

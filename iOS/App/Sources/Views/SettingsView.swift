@@ -150,7 +150,7 @@ struct DictationSettingsView: View {
                 if settings.usesLegacyTranscribeEndpoint {
                     Text("Live transcription is unavailable while the previous transcription endpoint is on in Advanced.")
                 } else if !settings.liveTranscriptionSupported {
-                    Text("Live transcription needs the provider's own API key; it is unavailable through a gateway.")
+                    Text("Live transcription needs the provider's own API key or ElevenLabs transcription; it is unavailable through a gateway.")
                 } else if let summary = LiveStats().summary {
                     Text(summary)
                 }
@@ -321,13 +321,16 @@ private struct ReturnAppDetail: View {
 struct PrivacyView: View {
     @State private var retentionDays = SettingsStore().audioRetentionDays
     @State private var route = SettingsStore().activeRoute
+    @State private var source = SettingsStore().transcriptionSource
 
     private var owner: String { route.provider == .gemini ? "Google" : "OpenAI" }
 
     /// Where requests go on the active route: the provider, or a gateway that
-    /// forwards them to the provider.
+    /// forwards them to the provider. With ElevenLabs transcribing, dictation
+    /// audio goes only to ElevenLabs.
     private var audioDestination: String {
-        route.gateway == .direct ? "\(owner), with your key" : "\(route.endpoint.hostName), then \(owner)"
+        if source == .elevenLabs { return "ElevenLabs, with your key" }
+        return route.gateway == .direct ? "\(owner), with your key" : "\(route.endpoint.hostName), then \(owner)"
     }
 
     var body: some View {
@@ -353,7 +356,10 @@ struct PrivacyView: View {
             } header: { SettingsSectionHeader("What leaves your iPhone") }
         }
         .settingsPage(title: "Privacy")
-        .onAppear { route = SettingsStore().activeRoute }
+        .onAppear {
+            route = SettingsStore().activeRoute
+            source = SettingsStore().transcriptionSource
+        }
     }
 }
 

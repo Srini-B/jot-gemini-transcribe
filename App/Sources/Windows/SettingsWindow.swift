@@ -259,19 +259,23 @@ struct PrivacyPane: View {
     let onDeleteAllHistory: () -> Void
     private let settings = SettingsStore()
     @State private var route = SettingsStore().activeRoute
+    private let source = SettingsStore().transcriptionSource
 
     private var owner: String { route.provider == .gemini ? "Google" : "OpenAI" }
 
     /// Where each request goes on the active route: the provider itself, or
     /// a gateway (with the gateway's key) that forwards it to the provider.
+    /// With ElevenLabs transcribing, dictation audio goes only to ElevenLabs.
     private var audioDestination: String {
-        route.gateway == .direct
+        if source == .elevenLabs { return "Sent to ElevenLabs with your key" }
+        return route.gateway == .direct
             ? "Sent to \(owner) with your key"
             : "Sent to \(route.endpoint.hostName) with your key, then to \(owner)"
     }
 
     private var recipients: String {
-        route.gateway == .direct ? owner : "\(route.endpoint.hostName) and \(owner)"
+        let model = route.gateway == .direct ? owner : "\(route.endpoint.hostName), \(owner)"
+        return source == .elevenLabs ? "\(model) and ElevenLabs" : model.replacingOccurrences(of: ", ", with: " and ")
     }
     @State private var retentionDays = SettingsStore().audioRetentionDays
     @State private var confirmingDelete = false
@@ -394,6 +398,8 @@ struct AdvancedPane: View {
                 GatewayKeySection(.openAI)
                 OpenAIModelsSection()
             }
+
+            TranscriptionSourceSection(provider: provider)
 
             TinyFishKeySection()
 

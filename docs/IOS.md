@@ -176,8 +176,9 @@ the setup card shows "Open it once" and "Not confirmed", and the Try it card
 lists how to switch to the VoiceiQ keyboard with the globe key. Onboarding saves its page in `MobileSettings.onboardingStep`,
 so a trip to Settings resumes on the same page.
 
-Onboarding has four pages: welcome, API keys (every provider plus TinyFish on
-one page, with a provider picker once two or more keys are saved), permissions
+Onboarding has four pages: welcome, API keys (every provider plus the optional
+ElevenLabs and TinyFish keys on one page, with a provider picker once two or
+more keys are saved and a Transcription picker once an ElevenLabs key is), permissions
 (microphone and keyboard together), and a Try it field.
 
 ### Design system
@@ -256,7 +257,8 @@ runs. Everything needs Full Access.
 | Pill | Keyboard status plus Dynamic Island |
 | AX and paste insertion | `textDocumentProxy.insertText` |
 | Ask Anything, Translate, Paste last | Keyboard modes and Paste last |
-| Provider (Gemini or OpenAI), gateways under Experimental, TinyFish | Same, in Settings › Provider & Keys and the iOS Keychain |
+| Provider (Gemini or OpenAI), ElevenLabs transcription, gateways under Experimental, TinyFish | Same, in Settings › Provider & Keys and the iOS Keychain |
+| History stats: words, dictations, WPM, audio time | Home's stats grid |
 | Dictionary with search, CSV and Auto-learned | Same, synced through iCloud, plus adding a selection or a copied word from the keyboard |
 | Writing rules, smart transcription, live, noise handling | Same settings |
 | History, retry, crash recovery, retention | Same |

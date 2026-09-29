@@ -16,8 +16,8 @@ import SwiftUI
 import VoiceIQCore
 
 /// Cost Analysis: what the model calls behind each action cost, for one
-/// provider at a time. It opens on the provider selected in Settings; the
-/// toggle shows the other one's calls. Period totals up top, then a breakdown
+/// source at a time (Gemini, OpenAI, or ElevenLabs transcription). It opens on
+/// the provider selected in Settings; the toggle shows the others' calls. Period totals up top, then a breakdown
 /// by action and by model for the chosen period, then the most recent calls.
 struct CostPane: View {
     let store: UsageStore
@@ -46,7 +46,7 @@ struct CostPane: View {
     }
 
     @State private var period: Period = .month
-    @State private var provider = SettingsStore().preferredProvider
+    @State private var source = CostSource(SettingsStore().preferredProvider)
     /// Simple view: period totals and cost per action. Detailed adds tokens,
     /// the per-model table, and the recent-call list.
     @AppStorage("costPaneDetailed") private var detailed = false
@@ -62,13 +62,13 @@ struct CostPane: View {
             VStack(alignment: .leading, spacing: VoiceIQUI.Spacing.l) {
                 HStack(alignment: .top) {
                     summary
-                    Picker("Provider", selection: $provider) {
-                        ForEach(ModelProvider.allCases) { Text($0.displayName).tag($0) }
+                    Picker("Source", selection: $source) {
+                        ForEach(CostSource.allCases) { Text($0.displayName).tag($0) }
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
                     .fixedSize()
-                    .onChange(of: provider) { _, _ in reload() }
+                    .onChange(of: source) { _, _ in reload() }
                 }
                 HStack(spacing: VoiceIQUI.Spacing.m) {
                     Picker("Period", selection: $period) {
@@ -102,22 +102,22 @@ struct CostPane: View {
 
     // MARK: - Sections
 
-    /// Names the shown provider's price source: the active gateway's for the
-    /// selected provider, the provider's own pricing page for the other.
+    /// Names where the shown source's prices come from.
     private var footer: String {
-        let active = SettingsStore().activeRoute
-        let note = ModelRoute(provider: provider, gateway: provider == active.provider ? active.gateway : .direct).pricingNote
+        let note = source.pricingNote(activeRoute: SettingsStore().activeRoute)
         return detailed ? note + " ≈ marks estimated tokens or an unpriced model." : note
     }
 
     private var summary: some View {
-        HStack(spacing: VoiceIQUI.Spacing.xl) {
+        HStack(spacing: VoiceIQUI.Spacing.l) {
             ForEach(Period.allCases) { p in
                 let total = totals[p] ?? .zero
                 VStack(alignment: .leading, spacing: 1) {
                     Text(Self.money(total.costUSD, approximate: total.isApproximate))
                         .font(VoiceIQUI.TypeScale.title(grad: grad))
                         .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                     Text(p.title)
                         .font(VoiceIQUI.TypeScale.labelSmall(grad: grad))
                         .foregroundStyle(.secondary)
@@ -201,15 +201,15 @@ struct CostPane: View {
 
     private func reload() {
         var next: [Period: UsageStore.Total] = [:]
-        for p in Period.allCases { next[p] = store.total(since: p.start, provider: provider) }
+        for p in Period.allCases { next[p] = store.total(since: p.start, source: source) }
         totals = next
-        recent = store.recent(limit: 30, provider: provider)
+        recent = store.recent(limit: 30, source: source)
         reloadBreakdown()
     }
 
     private func reloadBreakdown() {
-        byActivity = store.totalsByActivity(since: period.start, provider: provider)
-        byModel = store.totalsByModel(since: period.start, provider: provider)
+        byActivity = store.totalsByActivity(since: period.start, source: source)
+        byModel = store.totalsByModel(since: period.start, source: source)
     }
 
     // MARK: - Formatting

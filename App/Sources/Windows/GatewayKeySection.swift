@@ -58,6 +58,19 @@ struct GatewayKeySection: View {
             keyURL: URL(string: "https://platform.openai.com/api-keys")!,
             footer: "Stored in your Mac's Keychain and only ever sent to OpenAI."
         )
+
+        static let elevenLabs = Gateway(
+            name: "ElevenLabs",
+            secret: .elevenLabs,
+            isGateway: false,
+            load: KeychainStore.loadElevenLabsKey,
+            save: KeychainStore.saveElevenLabsKey,
+            delete: { KeychainStore.deleteElevenLabsKey(notify: true) },
+            validate: { await $0.validateElevenLabsKey() },
+            client: { key in GeminiClient(apiKey: { nil }, elevenLabsKey: { key }) },
+            keyURL: URL(string: "https://elevenlabs.io/app/settings/api-keys")!,
+            footer: "Optional. Lets ElevenLabs Scribe transcribe your dictation instead of the provider's speech model; the provider still applies the writing rules. Stored in your Mac's Keychain and only ever sent to ElevenLabs."
+        )
     }
 
     let gateway: Gateway
@@ -125,7 +138,7 @@ struct GatewayKeySection: View {
     private var secret: KeychainStore.Secret { gateway.secret }
 
     private var footer: String {
-        guard hasStoredKey, gateway.isGateway else { return gateway.footer }
+        guard hasStoredKey, gateway.isGateway, SettingsStore().transcriptionSource == .provider else { return gateway.footer }
         return gateway.footer + " Live transcription is unavailable while \(gateway.name) is the active gateway."
     }
 
@@ -206,6 +219,35 @@ struct OpenAIModelsSection: View {
         .onChange(of: text.wrappedValue) { _, value in
             let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
             save(trimmed.isEmpty ? nil : trimmed)
+        }
+    }
+}
+
+/// Settings → Advanced: who transcribes, the provider's speech model or
+/// ElevenLabs Scribe, and the ElevenLabs key. The choice appears once a key is
+/// stored; without one the provider transcribes whatever was picked.
+struct TranscriptionSourceSection: View {
+    let provider: ModelProvider
+    private let settings = SettingsStore()
+    @State private var source = SettingsStore().preferredTranscriptionSource
+    @State private var hasKey = KeychainStore.loadElevenLabsKey() != nil
+
+    var body: some View {
+        Group {
+            if hasKey {
+                Section {
+                    Picker("Transcription", selection: $source) {
+                        ForEach(TranscriptionSource.allCases) { Text($0.displayName(for: provider)).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: source) { _, value in settings.setPreferredTranscriptionSource(value) }
+                }
+            }
+            GatewayKeySection(.elevenLabs)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .gtSettingDidChange).receive(on: RunLoop.main)) { note in
+            guard note.object as? String == KeychainStore.Secret.elevenLabs.settingKey else { return }
+            hasKey = KeychainStore.loadElevenLabsKey() != nil
         }
     }
 }

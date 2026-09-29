@@ -59,6 +59,7 @@ final class DictationController {
             openRouterKey: { KeychainStore.loadOpenRouterKey() },
             vercelKey: { KeychainStore.loadVercelKey() },
             openAIKey: { KeychainStore.loadOpenAIKey() },
+            elevenLabsKey: { KeychainStore.loadElevenLabsKey() },
             openAIConfig: { SettingsStore().openAIConfig },
             route: { SettingsStore().activeRoute }
         )
@@ -967,8 +968,10 @@ final class DictationController {
 
     // MARK: - Copy
 
-    /// The service the active route sends to: the provider, or the gateway.
+    /// The service the recording goes to: ElevenLabs when it transcribes,
+    /// otherwise the active route's provider or gateway.
     private static var providerName: String {
+        if SettingsStore().transcriptionSource == .elevenLabs { return "ElevenLabs" }
         let route = SettingsStore().activeRoute
         return route.gateway == .direct ? route.provider.displayName : route.gateway.displayName(for: route.provider)
     }

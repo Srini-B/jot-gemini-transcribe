@@ -15,7 +15,8 @@
 import SwiftUI
 import VoiceIQCore
 
-/// Cost, as on the Mac: one provider at a time, opening on the selected one.
+/// Cost, as on the Mac: one source at a time (Gemini, OpenAI, or ElevenLabs
+/// transcription), opening on the selected provider.
 /// Period totals, cost per action, and in Detailed the per-model table and
 /// the most recent calls.
 struct UsageView: View {
@@ -42,7 +43,7 @@ struct UsageView: View {
         }
     }
 
-    @State private var provider = SettingsStore().preferredProvider
+    @State private var source = CostSource(SettingsStore().preferredProvider)
     @State private var period: Period = .month
     @AppStorage("costPaneDetailed") private var detailed = false
     @State private var total = UsageStore.Total.zero
@@ -54,8 +55,8 @@ struct UsageView: View {
         List {
             Section {
                 VStack(alignment: .leading, spacing: Theme.Spacing.m) {
-                    Picker("Provider", selection: $provider) {
-                        ForEach(ModelProvider.allCases) { Text($0.displayName).tag($0) }
+                    Picker("Source", selection: $source) {
+                        ForEach(CostSource.allCases) { Text($0.displayName).tag($0) }
                     }
                     .pickerStyle(.segmented)
                     Picker("Period", selection: $period) {
@@ -113,17 +114,15 @@ struct UsageView: View {
         }
         .settingsPage(title: "Cost")
         .onAppear(perform: reload)
-        .onChange(of: provider) { _, _ in reload() }
+        .onChange(of: source) { _, _ in reload() }
         .onChange(of: period) { _, _ in reload() }
         .onReceive(NotificationCenter.default.publisher(for: .gtUsageDidChange)
             .debounce(for: .milliseconds(250), scheduler: RunLoop.main)) { _ in reload() }
     }
 
-    /// The shown provider's price source: the active gateway's for the
-    /// selected provider, the provider's own pricing page for the other.
+    /// Where the shown source's prices come from.
     private var footer: String {
-        let active = SettingsStore().activeRoute
-        let note = ModelRoute(provider: provider, gateway: provider == active.provider ? active.gateway : .direct).pricingNote
+        let note = source.pricingNote(activeRoute: SettingsStore().activeRoute)
         return detailed ? note + " ≈ marks estimated tokens or an unpriced model." : note
     }
 
@@ -144,10 +143,10 @@ struct UsageView: View {
 
     private func reload() {
         guard let store = UsageMeter.store else { return }
-        total = store.total(since: period.start, provider: provider)
-        byActivity = store.totalsByActivity(since: period.start, provider: provider)
-        byModel = store.totalsByModel(since: period.start, provider: provider)
-        recent = store.recent(limit: 30, provider: provider)
+        total = store.total(since: period.start, source: source)
+        byActivity = store.totalsByActivity(since: period.start, source: source)
+        byModel = store.totalsByModel(since: period.start, source: source)
+        recent = store.recent(limit: 30, source: source)
     }
 
     /// Costs are fractions of a cent per dictation: four decimals under a
