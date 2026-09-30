@@ -173,7 +173,31 @@ Returning from Settings with Full Access turned on shows it as granted without
 restarting the app, once the keyboard has opened: iOS gives the app no way to
 read the Full Access switch, so until the VoiceiQ keyboard has run with it,
 the setup card shows "Open it once" and "Not confirmed", and the Try it card
-lists how to switch to the VoiceiQ keyboard with the globe key. Onboarding saves its page in `MobileSettings.onboardingStep`,
+lists how to switch to the VoiceiQ keyboard with the globe key.
+
+Permissions can be taken back after onboarding (2026-09-30):
+
+- Microphone switched off in Settings: iOS ends the app, and the next launch
+  shows the Microphone line unchecked in Finish setup and "Set up" on
+  Settings. A keyboard tap that opens the app (`startFromKeyboard`) no longer
+  opens a session that cannot record and sends the user back to the host
+  app: with no API key or no microphone it stays in VoiceiQ with a banner and,
+  for the microphone, the Keyboard & Permissions sheet (Settings button when
+  denied; when not yet asked it asks). Start meeting does the same. The
+  Action button's intent throws `ActionButtonRefusal` with the reason
+  ("Allow the microphone in VoiceiQ"), because nothing else is on screen to
+  show it. A tap in the keyboard while a warm session runs still gets the
+  keyboard notice, as before.
+- Keyboard removed from Settings › Keyboards: `SetupStatus.current()` clears
+  `keyboardSeenAt`, so a keyboard added back reads "Open it once" until it
+  runs with Full Access again, instead of "Ready".
+- Full Access switched off: the keyboard shows "Allow Full Access", which
+  opens `voiceiq://keyboard/setup`. That link is sent only by a keyboard
+  without Full Access, so the app clears `keyboardSeenAt` on it before showing
+  the setup sheet. The keyboard cannot report this through the App Group,
+  which needs Full Access.
+
+Onboarding saves its page in `MobileSettings.onboardingStep`,
 so a trip to Settings resumes on the same page.
 
 Onboarding has four pages: welcome, API keys (every provider plus the optional

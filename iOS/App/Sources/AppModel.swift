@@ -257,13 +257,37 @@ final class AppModel: ObservableObject {
     }
 
     private func startBlocker() -> String? {
-        if !KeychainStore.hasModelKey { return "Add an API key in VoiceiQ" }
-        if AVAudioApplication.shared.recordPermission != .granted { return "Allow the microphone in VoiceiQ" }
+        if let missing = setupBlocker() { return missing }
         if meetings.isRecording { return "A meeting is recording" }
         switch coordinator.state {
         case .idle, .done, .cancelled, .failed: return nil
         case .recording, .warming: return nil
         default: return "Still working on the last one"
+        }
+    }
+
+    /// What no dictation can start without. Either can be taken away after
+    /// onboarding: the key deleted, or the microphone switched off in Settings
+    /// (iOS then ends the app, so this is read fresh on the next launch).
+    private func setupBlocker() -> String? {
+        if !KeychainStore.hasModelKey { return "Add an API key in VoiceiQ" }
+        if AVAudioApplication.shared.recordPermission != .granted { return "Allow the microphone in VoiceiQ" }
+        return nil
+    }
+
+    /// Keeps the user in the app, on the screen that fixes the problem,
+    /// instead of opening a session that cannot record and sending them back.
+    private func showSetupProblem() {
+        switch AVAudioApplication.shared.recordPermission {
+        case .granted:
+            banner = "Add an API key to dictate"
+        case .undetermined:
+            banner = "Allow the microphone to dictate"
+            setup.requestMicrophone()
+            NotificationCenter.default.post(name: .voiceIQShowKeyboardSetup, object: nil)
+        default:
+            banner = "Microphone access is off. Turn it on in Settings to dictate."
+            NotificationCenter.default.post(name: .voiceIQShowKeyboardSetup, object: nil)
         }
     }
 
@@ -274,6 +298,11 @@ final class AppModel: ObservableObject {
         case .start(let id, let host):
             startFromKeyboard(commandID: id, host: host)
         case .setup:
+            // The keyboard opens this only when it runs without Full Access,
+            // which it cannot report through the App Group itself. The earlier
+            // "seen with Full Access" proof no longer holds.
+            SharedStore.shared.keyboardSeenAt = nil
+            setup.refresh()
             banner = nil
             NotificationCenter.default.post(name: .voiceIQShowKeyboardSetup, object: nil)
         case nil:
@@ -287,6 +316,11 @@ final class AppModel: ObservableObject {
     private func startFromKeyboard(commandID: UUID, host: String?) {
         SessionDiagnostics.note("keyboard start through the app (session active: \(session.isActive), host: \(host ?? "unknown"))")
         needsForeground = false
+        if let problem = setupBlocker() {
+            SessionDiagnostics.note("keyboard start refused: \(problem)")
+            showSetupProblem()
+            return
+        }
         if !session.isActive {
             do {
                 try session.begin()
@@ -314,34 +348,37 @@ final class AppModel: ObservableObject {
     /// for whatever app is in front. Runs in the background inside the
     /// audio-recording intent, so the session and its Live Activity can start
     /// here without opening VoiceiQ. The keyboard follows the shared snapshot.
-    func toggleFromActionButton() async {
+    /// Returns why nothing started, for the intent to show; nothing else
+    /// would, since no keyboard or Live Activity is on screen.
+    func toggleFromActionButton() async -> String? {
         switch coordinator.state {
         case .recording, .warming:
             SessionDiagnostics.note("action button: stop")
             coordinator.handle(.finalize)
-            return
+            return nil
         default:
             break
         }
         if let problem = startBlocker() {
             SessionDiagnostics.note("action button: blocked (\(problem))")
             session.post(notice: problem)
-            return
+            return problem
         }
         do {
             try session.begin(fromActionButton: true)
         } catch {
             SessionDiagnostics.note("action button: session did not start (\(error))")
             session.post(notice: "Couldn't start the microphone")
-            return
+            return "Couldn't start the microphone"
         }
         SessionDiagnostics.note("action button: start")
         target.host = nil
         currentMode = .dictate
         session.mode = .dictate
         guard coordinator.handle(.begin, mode: .dictate) else {
-            session.post(notice: coordinator.coachingHint ?? "Still working on the last one")
-            return
+            let notice = coordinator.coachingHint ?? "Still working on the last one"
+            session.post(notice: notice)
+            return notice
         }
         coordinator.handle(.lockIn)
         // The intent returns once recording is underway; iOS needs the Live
@@ -350,6 +387,7 @@ final class AppModel: ObservableObject {
             if case .recording = coordinator.state { break }
             try? await Task.sleep(for: .milliseconds(50))
         }
+        return nil
     }
 
     // MARK: - Session controls in the app
@@ -370,6 +408,10 @@ final class AppModel: ObservableObject {
     }
 
     func startMeeting() {
+        guard AVAudioApplication.shared.recordPermission == .granted else {
+            showSetupProblem()
+            return
+        }
         if !session.isActive { startSession() }
         guard session.isActive else { return }
         if case .recording = coordinator.state { coordinator.handle(.finalize) }

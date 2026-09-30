@@ -59,7 +59,14 @@ public struct StopDictationIntent: LiveActivityIntent {
 /// `LiveActivityIntent`), launching the app in the background if needed.
 @MainActor
 public enum ActionButtonBridge {
-    public static var toggle: (@MainActor () async -> Void)?
+    /// Returns why no dictation started, or nil.
+    public static var toggle: (@MainActor () async -> String?)?
+}
+
+/// A reason the Action button could not start, shown by the system.
+public struct ActionButtonRefusal: Error, CustomLocalizedStringResourceConvertible {
+    public let message: String
+    public var localizedStringResource: LocalizedStringResource { "\(message)" }
 }
 
 /// The Control Center control (and the Action button, when the user assigns
@@ -80,7 +87,9 @@ public struct ToggleDictationIntent: AudioRecordingIntent, LiveActivityIntent {
         for _ in 0..<30 where ActionButtonBridge.toggle == nil {
             try? await Task.sleep(for: .milliseconds(100))
         }
-        await ActionButtonBridge.toggle?()
+        if let refusal = await ActionButtonBridge.toggle?() {
+            throw ActionButtonRefusal(message: refusal)
+        }
         return .result()
     }
 }

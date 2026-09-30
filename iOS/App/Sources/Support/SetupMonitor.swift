@@ -20,6 +20,11 @@ struct SetupStatus: Equatable {
 
     static func current() -> SetupStatus {
         SharedStore.shared.reloadFromDisk()
+        // Removing the keyboard voids the Full Access proof: added back, it
+        // has to run once with Full Access again before it counts as ready.
+        if !MobileSettings.keyboardAdded, SharedStore.shared.keyboardSeenAt != nil {
+            SharedStore.shared.keyboardSeenAt = nil
+        }
         let record = AVAudioApplication.shared.recordPermission
         return SetupStatus(
             hasKey: KeychainStore.hasModelKey,
