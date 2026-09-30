@@ -66,7 +66,7 @@ struct GatewayKeySection: View {
             validate: { await $0.validateElevenLabsKey() },
             client: { key in GeminiClient(apiKey: { nil }, elevenLabsKey: { key }) },
             keyURL: URL(string: "https://elevenlabs.io/app/settings/api-keys")!,
-            footer: "Optional. Lets ElevenLabs Scribe transcribe your dictation instead of the provider's speech model; the provider still applies the writing rules. Stored in your Mac's Keychain and only ever sent to ElevenLabs."
+            footer: "Optional. Lets ElevenLabs Scribe transcribe your dictation and meetings instead of the provider's speech model; the provider still applies the writing rules. Stored in your Mac's Keychain and only ever sent to ElevenLabs."
         )
     }
 

@@ -46,6 +46,18 @@ public enum ElevenLabs {
         return terms
     }
 
+    /// The spoken words of a diarized response; spacing and audio events are dropped.
+    static func diarizedWords(_ json: [String: Any]) -> [DiarizedWord] {
+        let words = json["words"] as? [[String: Any]] ?? []
+        return words.compactMap { word in
+            guard (word["type"] as? String ?? "word") == "word",
+                  let text = (word["text"] as? String)?.trimmingCharacters(in: .whitespaces), !text.isEmpty else { return nil }
+            return DiarizedWord(text: text, speaker: word["speaker_id"] as? String,
+                                start: (word["start"] as? NSNumber)?.doubleValue,
+                                end: (word["end"] as? NSNumber)?.doubleValue)
+        }
+    }
+
     /// What a batch transcription costs: the list price for its audio plus
     /// the keyterm add-on when terms were sent.
     static func batchUsage(seconds: Double, withKeyterms: Bool) -> TokenUsage? {
@@ -82,6 +94,29 @@ extension GeminiClient {
             UsageMeter.record(stage: .transcribe, model: ElevenLabs.batchModel, usage: usage)
         }
         return (json["text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Speaker-labelled, word-timed transcript of one meeting window from
+    /// Scribe v2. Labels (`speaker_0`, …) are per request, like Gemini's
+    /// native diarizer, so the caller links them through anchor clips.
+    func elevenLabsDiarize(audio: Data, audioSeconds: Double, deadline: TimeInterval) async throws -> [DiarizedWord] {
+        var form = MultipartForm()
+        form.field("model_id", ElevenLabs.batchModel)
+        form.file("file", filename: "audio.flac", mimeType: "audio/flac", data: audio)
+        form.field("tag_audio_events", "false")
+        form.field("timestamps_granularity", "word")
+        form.field("diarize", "true")
+        let data = try await post(path: "speech-to-text", body: form.body, endpoint: ElevenLabs.apiBase,
+                                  deadline: deadline, modelLabel: ElevenLabs.batchModel, stage: .meetingTranscribe,
+                                  via: .elevenLabs, extraHeaders: ["Content-Type": form.contentType])
+        guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            throw TranscriptionError.network("unparseable_response")
+        }
+        let seconds = (json["audio_duration_secs"] as? NSNumber)?.doubleValue ?? audioSeconds
+        if let usage = ElevenLabs.batchUsage(seconds: seconds, withKeyterms: false) {
+            UsageMeter.record(stage: .meetingTranscribe, model: ElevenLabs.batchModel, usage: usage)
+        }
+        return ElevenLabs.diarizedWords(json)
     }
 
     /// `GET /v1/user`: 200 for a usable key. A key scoped to speech-to-text

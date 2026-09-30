@@ -312,7 +312,7 @@ enum KeySlot: Hashable, CaseIterable {
         case .tinyFish:
             return "Lets Ask Anything look up current information on the web. Stored in your iPhone's Keychain and only ever sent to TinyFish."
         case .elevenLabs:
-            return "Lets ElevenLabs Scribe transcribe your dictation instead of the provider's speech model; the provider still applies the writing rules. Stored in your iPhone's Keychain and only ever sent to ElevenLabs."
+            return "Lets ElevenLabs Scribe transcribe your dictation and meetings instead of the provider's speech model; the provider still applies the writing rules. Stored in your iPhone's Keychain and only ever sent to ElevenLabs."
         }
     }
 

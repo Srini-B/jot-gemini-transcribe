@@ -22,8 +22,11 @@ import Foundation
     private let config: () -> GeminiConfig
     private let transcribeModel: String?
     private let summaryModel: String
-    /// Routes to try in order; see `ModelRoute.meetingOrder`.
+    /// Routes to try in order; see `ModelRoute.meetingOrder`. The notes
+    /// always run here; the transcript does unless ElevenLabs is chosen.
     private let providers: @Sendable () -> [ModelRoute]
+    /// The transcription source picked in Settings, shared with dictation.
+    private let transcriptionSource: @Sendable () -> TranscriptionSource
     private lazy var detector = CallDetector()
     private var mic: MicTap?, system: SystemAudioTap?
     private var currentFolder: URL?, currentMeta: MeetingMeta?
@@ -32,9 +35,11 @@ import Foundation
 
     public init(client: GeminiClient, store: MeetingStore = MeetingStore(), config: @escaping () -> GeminiConfig,
                 transcribeModel: String? = nil, summaryModel: String = "gemini-3.8-flash",
-                providers: @escaping @Sendable () -> [ModelRoute] = { [ModelRoute(provider: .gemini, gateway: .direct)] }) {
+                providers: @escaping @Sendable () -> [ModelRoute] = { [ModelRoute(provider: .gemini, gateway: .direct)] },
+                transcriptionSource: @escaping @Sendable () -> TranscriptionSource = { .provider }) {
         self.client = client; self.store = store; self.config = config
         self.transcribeModel = transcribeModel; self.summaryModel = summaryModel; self.providers = providers
+        self.transcriptionSource = transcriptionSource
         detector.onChange = { [weak self] source in self?.detected(source) }
         failInterruptedRecordings()
     }
@@ -150,7 +155,7 @@ import Foundation
             meta.status = .transcribing; try store.save(meta: meta)
             let transcriber = MeetingTranscriber(client: client,
                                                  models: .init(transcribe: transcribeModel ?? cfg.transcribeModel, flash: summaryModel),
-                                                 endpoint: cfg.endpoint, providers: providers)
+                                                 endpoint: cfg.endpoint, routes: speechRoutes)
             let transcript = try await transcriber.transcribe(folder: folder)
             let words = transcript.reduce(0) { $0 + $1.text.split(whereSeparator: \.isWhitespace).count }
             guard words >= Self.minimumSummarizableWords else {
@@ -167,8 +172,16 @@ import Foundation
 
     /// The recording stays; the meeting is marked failed with a reason the
     /// Meetings list shows, and Retry runs it again with the keys stored then.
+    private var speechRoutes: @Sendable () -> [MeetingTranscriber.SpeechRoute] {
+        { [providers, transcriptionSource] in
+            MeetingTranscriber.SpeechRoute.order(source: transcriptionSource(), providers: providers())
+        }
+    }
+
     private func saveFailure(id: MeetingID, meta: inout MeetingMeta, error: Error) {
-        let reason = MeetingFailure.reason(for: error, routes: providers())
+        var tried: [String] = []
+        for name in speechRoutes().map(\.displayName) + providers().map(\.displayName) where !tried.contains(name) { tried.append(name) }
+        let reason = MeetingFailure.reason(for: error, tried: tried.joined(separator: ", "))
         Log.meeting.error("meeting \(id.uuid.uuidString, privacy: .public) failed: \(String(describing: error), privacy: .public)")
         meta.status = .failed(reason); try? store.save(meta: meta)
         processing.remove(id)
@@ -240,8 +253,7 @@ public enum MeetingFailure: Error, Equatable {
 
     static let fixHint = "The recording is saved. Press Retry after fixing this."
 
-    static func reason(for error: Error, routes: [ModelRoute]) -> String {
-        let tried = routes.map(\.displayName).joined(separator: ", ")
+    static func reason(for error: Error, tried: String) -> String {
         switch error {
         case MeetingFailure.noRoute:
             return "No key can transcribe meetings. Add a Gemini, OpenAI, OpenRouter or Vercel AI Gateway key in Settings → Advanced. The recording is saved; press Retry once a key is added."

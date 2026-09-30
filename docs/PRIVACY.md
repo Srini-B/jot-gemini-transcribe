@@ -7,9 +7,9 @@ Settings → Advanced, using your own API key: Google's Gemini API or OpenAI's A
 If you choose a gateway instead (OpenRouter or Vercel AI Gateway), requests go
 to that gateway with your gateway key, and it forwards them to the provider.
 If you add an ElevenLabs key and pick ElevenLabs as the transcription source,
-dictation audio goes to ElevenLabs (`api.elevenlabs.io`) with your ElevenLabs
-key instead, and only the transcript goes on to the provider for the writing
-rules. There is no VoiceiQ server, no account, no analytics, no telemetry.
+dictation and meeting audio goes to ElevenLabs (`api.elevenlabs.io`) with your
+ElevenLabs key instead, and only the transcript goes on to the provider for the
+writing rules and meeting notes. There is no VoiceiQ server, no account, no analytics, no telemetry.
 Everything else stays on your Mac. The code is open — verify all of this.
 
 "The provider" below means whichever of these the active route sends to:
@@ -19,8 +19,9 @@ dictation; nothing is sent to the others. Meetings are the one exception: they
 need a model that labels speakers, so with OpenAI selected through a gateway a
 meeting goes to OpenAI with your OpenAI key, or to Gemini when there is no
 OpenAI key, and a meeting whose provider fails moves on to the other provider
-you have a key for. With no usable key, nothing is sent and the recording stays
-on your Mac.
+you have a key for. With ElevenLabs as the transcription source, meeting audio
+goes only to ElevenLabs and the provider receives the transcript for the notes.
+With no usable key, nothing is sent and the recording stays on your Mac.
 
 ## What leaves your machine (the complete list)
 

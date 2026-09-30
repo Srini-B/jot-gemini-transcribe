@@ -47,9 +47,10 @@ public enum ModelProvider: String, CaseIterable, Sendable, Codable, Identifiable
     }
 }
 
-/// Who turns dictation audio into text: the selected provider's own speech
-/// model, or ElevenLabs Scribe v2 (batch) and Scribe v2 Realtime (live). The
-/// writing rules always run on the selected provider's writing model.
+/// Who turns dictation and meeting audio into text: the selected provider's
+/// own speech model, or ElevenLabs Scribe v2 (batch and meetings) and Scribe
+/// v2 Realtime (live). The writing rules and meeting notes always run on the
+/// selected provider's writing model.
 public enum TranscriptionSource: String, CaseIterable, Sendable, Identifiable {
     case provider
     case elevenLabs
