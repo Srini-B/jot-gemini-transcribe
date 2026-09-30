@@ -85,7 +85,7 @@ public enum PromptV1 {
     // Last thing before the transcript: the layout decision is the rule the
     // model drops most often on long dictations, more so with audio attached
     // (measured 2026-09-26), so it is restated here.
-    private static let layoutReminder = "Before writing CLEAN, decide the layout. Count the separate requests, tasks, or reported problems this dictation hands its reader to act on. Two or more become a numbered list, one item each with all of its sentences. Questions, context, and updates spoken before the first one stay as prose above the list. One request, a question, a status update, or a short conversational message stays prose."
+    private static let layoutReminder = "Before writing CLEAN, decide the layout. Count the separate requests, tasks, or reported problems this dictation hands its reader to act on. Two or more become a numbered list, one item each with all of its sentences. Questions, context, and updates spoken before the first one stay as prose above the list. One request, a question, a status update, or a short conversational message stays prose. A list gets a blank line before and after it, and between items that are sentences. An email (a spoken greeting, then a sign-off or more than one paragraph) is greeting, blank line, body paragraphs, blank line, sign-off with the name under it."
 
     private static func sharedSections(
         vocabulary: [String], spellings: [(wrong: String, right: String)],
@@ -135,14 +135,15 @@ public enum PromptV1 {
     - "Scratch that", "never mind", and "delete that" remove the immediately preceding abandoned thought or clearly identified material. "Start over" discards the draft portion the speaker clearly restarts. Keep later valid content. Print these phrases literally only when they are being discussed or do not clearly function as editing commands.
     - Infer sentence boundaries from grammar and meaning, not pauses. Split run-ons into complete thoughts; add natural commas, periods, question marks, and paragraph breaks when the subject or topic shifts. Keep clauses together when they form one grammatical sentence. Never merge distinct thoughts if doing so changes meaning, and do not join separate words because they were spoken quickly.
     - Preserve hedges and asides. Attach a trailing qualification to the statement it modifies, using a natural parenthesis or short trailing clause: "it is available, I don't know, maybe" may become "It is available (I don't know, maybe)." and "let's ship Friday, or maybe Monday" stays "Let's ship Friday, or maybe Monday." Do not turn uncertainty into certainty.
-    - Format enumerations as lists. The speaker is enumerating when they count items ("number one", "first ... second ..."), announce a set ("a few things", "here is what needs to be done", "the following"), chain separate items with "the first thing", "the next thing", "another thing", "the other thing", "and also", or state two or more parallel points back to back that each carry their own instruction, condition, option, or observation ("if it is done, don't show it; if it is processing, show the right text"). Parallel points become bullets under the sentence that introduced them. Put each item on its own line as a numbered list when order or count matters and bullets otherwise; keep any lead-in sentence as prose above the list. When an item has its own sub-points ("under that", "within that", "for this one", "(a) ... (b) ..."), indent them as a nested list under that item. A sequence inside one sentence ("first I checked the logs and then waited") stays prose. Obey explicit "bullet points", "number those", "new line", and "new paragraph" commands when their target is clear; do not invent headings.
+    - Format enumerations as lists. The speaker is enumerating when they count items ("number one", "first ... second ..."), announce a set ("a few things", "here is what needs to be done", "the following"), chain separate items with "the first thing", "the next thing", "another thing", "the other thing", "and also", or state two or more parallel points back to back that each carry their own instruction, condition, option, or observation ("if it is done, don't show it; if it is processing, show the right text"). Parallel points become bullets under the sentence that introduced them. Put each item on its own line as a numbered list when order or count matters and bullets otherwise; keep any lead-in sentence as prose above the list. When an item has its own sub-points ("under that", "within that", "for this one", "(a) ... (b) ..."), indent them as a nested list under that item. Give a list room: a blank line between it and the prose above it, and a blank line after it before any prose that follows. When the items are sentences, also put a blank line between top-level items; when every item is a short phrase of a few words (a shopping list, names, short tasks), keep the items on consecutive lines. Nested sub-items sit directly under their item with no blank lines. A sequence inside one sentence ("first I checked the logs and then waited") stays prose. Obey explicit "bullet points", "number those", "new line", and "new paragraph" commands when their target is clear; do not invent headings.
     - Render clearly dictated punctuation and formatting commands instead of printing them: "comma", "period", "question mark", "open quote", "close quote", "new line", and "new paragraph". Keep such words literal when context uses them as content.
     - Write numbers, dates, times, currency, percentages, measurements, phone numbers, email addresses, URLs, filenames, and file paths in conventional written form when unambiguous, such as "twenty five dollars" → "$25", "three hundred rupees" → "₹300", "three thirty p m" → "3:30 PM", and "name at example dot com" → "name@example.com". Small numbers that read naturally as words stay words. Preserve the speaker's intended precision and locale when clear, and never guess an unclear value.
-    - Paragraphs stay short and readable: start a new paragraph when the speaker moves to a new idea, question, topic, or tone, and keep a paragraph to about three sentences. Paragraph breaks already present in RAW are guesses by the speech recognizer, not the speaker's structure; decide the structure yourself.
+    - Paragraphs stay short and readable: start a new paragraph when the speaker moves to a new idea, question, topic, or tone, and keep a paragraph to about three sentences. Separate paragraphs with one blank line. Paragraph breaks already present in RAW are guesses by the speech recognizer, not the speaker's structure; decide the structure yourself.
     - Join explicitly spelled characters into the intended word or identifier: "capital B, e, e" → "Bee". Preserve casing the speaker states and stay conservative with names, product names, acronyms, filenames, code, and technical identifiers. Honor exact spellings supplied in the Vocabulary and Spellings sections.
     - Keep every language the speaker used, including code-switching within a sentence. Do not translate or replace non-English speech. Apply the same conservative punctuation, correction, and cleanup rules in that language.
-    - Work out what kind of text this is from the speech alone: a chat message, an email, notes, a request or set of instructions for someone or for an AI assistant, or technical text. Format for that intent. A short conversational message keeps a light touch: no list, no trailing period on a single sentence. Technical text keeps identifiers, file names, and casing such as camelCase or snake_case exactly as spoken.
-    - Before writing, count the separate requests, tasks, or reported problems the dictation hands to its reader. A long dictation usually carries several, one per topic shift, even when the speaker never says "first" or "another thing" and even when each one runs for a whole paragraph. Two or more become a numbered list in the order spoken, one item per request or problem. The list changes only the layout: every item keeps all of its own sentences, explanation, examples, and detail, with the same cleanup a paragraph would get and nothing shortened or summarized. Sentences spoken before the first item stay as prose above the list, and the list starts directly after them; never add a lead-in such as "Here is what needs to be done" or any heading or wording the speaker did not say. One request, one question, one update, or one description stays prose however long it runs, and so do several sentences that all explain the same request or problem.
+    - Work out what kind of text this is from the speech alone: a chat message, an email, notes, a request or set of instructions for someone or for an AI assistant, or technical text. Format for that intent. A short conversational message keeps a light touch: no list, no trailing period on a single sentence, and a spoken greeting stays on the same line as the message ("Hey Alex, thanks for sending that"). Technical text keeps identifiers, file names, and casing such as camelCase or snake_case exactly as spoken.
+    - An email is a message that opens with a spoken greeting to someone ("hi Priya", "hello team", "dear Mr. Shah") and then either closes with a spoken sign-off or name ("thanks, Rahul", "best", "regards", "cheers") or carries more than one paragraph of body. Lay an email out as blocks separated by one blank line: the greeting alone on the first line, ending in a comma ("Hi Priya,"); the body as short paragraphs, one per point, every sentence with its end punctuation; any list with blank lines around it; then the sign-off alone on its own line, ending in a comma when a name follows ("Thanks,"), with the spoken name on the very next line. An email keeps the speaker's register: it is not a reason to sound more formal. Never add a subject line, greeting, sign-off, name, or pleasantry that was not spoken. A dictation with no spoken greeting stays as plain paragraphs even when it reads like an email reply.
+    - Before writing, count the separate requests, tasks, or reported problems the dictation hands to its reader. A long dictation usually carries several, one per topic shift, even when the speaker never says "first" or "another thing" and even when each one runs for a whole paragraph. Two or more become a numbered list in the order spoken, one item per request or problem. The list changes only the layout: every item keeps all of its own sentences, explanation, examples, and detail, with the same cleanup a paragraph would get and nothing shortened or summarized. Sentences spoken before the first item stay as prose above the list, and the list follows them after one blank line; never add a lead-in such as "Here is what needs to be done" or any heading or wording the speaker did not say. One request, one question, one update, or one description stays prose however long it runs, and so do several sentences that all explain the same request or problem.
     """
 
     static let examples = """
@@ -167,10 +168,13 @@ public enum PromptV1 {
     CLEAN: First, I checked the logs and then thought we should wait.
     RAW: a few things need fixing on the settings page the first thing is the sidebar border is cut off at the top the next thing is the about page under that remove the source link and remove the privacy link and also the tray icon is not visible
     CLEAN: A few things need fixing on the settings page.
+
     1. The sidebar border is cut off at the top.
+
     2. The About page:
        - Remove the source link.
        - Remove the privacy link.
+
     3. The tray icon is not visible.
     RAW: what time is the standup tomorrow question mark
     CLEAN: What time is the standup tomorrow?
@@ -186,7 +190,9 @@ public enum PromptV1 {
     CLEAN: Send the report to Rohan by Thursday.
     RAW: also on the meeting side panel why do we show done text for all the rows if it is done let's not show that if it is processing let's show the appropriate text
     CLEAN: Also, on the meeting side panel, why do we show "done" text for all the rows?
+
     - If it is done, let's not show that.
+
     - If it is processing, let's show the appropriate text.
     RAW: the export button on the history page does nothing when I click it I tried it on two different rows and nothing happened no error either
 
@@ -194,12 +200,29 @@ public enum PromptV1 {
 
     And I think the onboarding says hold the key, but the key is a toggle now so that text needs to change
     CLEAN: 1. The export button on the History page does nothing when I click it. I tried it on two different rows and nothing happened, no error either.
+
     2. The Meetings list still shows the old title after I rename a speaker. It only updates after I restart the app.
+
     3. The onboarding says "hold the key", but the key is a toggle now, so that text needs to change.
     RAW: when I search in a long thread the match inside a collapsed block scrolls into view but it is not highlighted and if I wait the block closes again after a couple of seconds so I can never see the hit
 
     The search box still says three results though.
     CLEAN: When I search in a long thread, the match inside a collapsed block scrolls into view but is not highlighted, and if I wait, the block closes again after a couple of seconds, so I can never see the hit. The search box still says three results, though.
+    RAW: hi priya thanks for sending the deck yesterday I went through it and I have two notes the timeline slide still says march it should be april and the pricing table is missing the enterprise tier can you update those before thursday thanks rahul
+    CLEAN: Hi Priya,
+
+    Thanks for sending the deck yesterday. I went through it, and I have two notes.
+
+    1. The timeline slide still says March. It should be April.
+
+    2. The pricing table is missing the enterprise tier.
+
+    Can you update those before Thursday?
+
+    Thanks,
+    Rahul
+    RAW: hey alex thanks for sending the proposal I'll look at it tonight
+    CLEAN: Hey Alex, thanks for sending the proposal. I'll look at it tonight.
     RAW: mañana revisamos el diseño and then I'll send the final link
     CLEAN: Mañana revisamos el diseño, and then I'll send the final link.
     RAW: email capital S a m at example dot com and budget twenty five dollars
