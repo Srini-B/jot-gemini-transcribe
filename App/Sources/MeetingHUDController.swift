@@ -105,22 +105,11 @@ final class MeetingHUDController {
         switch phase {
         case let .recording(_, since):
             if !dictationIsActive() { setPill(.meetingRecording(since: since)) }
-        case .processing:
-            // Same bars the dictation pill shows while it works; the notes
-            // take a while, so the "still working" copy comes on straight away.
-            if !dictationIsActive() {
-                setPill(.processing)
-                hud.model.slow = true
-            }
         case .idle, .failed:
-            if !dictationIsActive() {
-                switch hud.model.state {
-                case .meetingRecording, .processing:
-                    hud.model.slow = false
-                    setPill(restingPill())
-                default:
-                    break
-                }
+            // Notes are made in the background; the pill is free at once and
+            // shows the check only when they are saved.
+            if !dictationIsActive(), case .meetingRecording = hud.model.state {
+                setPill(restingPill())
             }
         case .callDetected:
             break

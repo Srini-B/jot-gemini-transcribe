@@ -2,7 +2,11 @@ import Combine
 import Foundation
 
 @MainActor public final class MeetingEngine: ObservableObject {
+    /// The recorder: offering, recording, or free. Notes are made apart from
+    /// it, so a stopped meeting never holds the recorder while it is written up.
     @Published public private(set) var phase: MeetingPhase = .idle
+    /// Meetings whose transcript and notes are being made in the background.
+    @Published public private(set) var processing: Set<MeetingID> = []
     public var onNotice: ((String) -> Void)?
     /// The notes for a stopped recording are saved. The caller shows the same
     /// success mark a finished dictation gets.
@@ -53,7 +57,6 @@ import Foundation
         switch phase {
         case .recording: stopRecording()
         case .idle, .callDetected, .failed: startRecording(source: detectedSource)
-        case .processing: onNotice?("Meeting notes are still being made")
         }
     }
 
@@ -70,7 +73,7 @@ import Foundation
     }
 
     public func startRecording(source: CallSource? = nil) {
-        switch phase { case .idle, .callDetected, .failed: break; default: return }
+        if case .recording = phase { return }
         let id = MeetingID(), now = Date(), meta = MeetingMeta(id: id, startedAt: now, source: source)
         do {
             let folder = try store.create(meta: meta)
@@ -93,9 +96,10 @@ import Foundation
     public func stopRecording() {
         guard case let .recording(id, _) = phase, let folder = currentFolder, var meta = currentMeta else { return }
         let micDuration = mic?.stop() ?? 0, systemDuration = system?.stop() ?? 0
-        mic = nil; system = nil; phase = .processing(id)
+        mic = nil; system = nil; currentFolder = nil; currentMeta = nil
         meta.endedAt = Date(); meta.durationSeconds = max(micDuration, systemDuration); meta.status = .transcribing
-        currentMeta = meta; try? store.save(meta: meta)
+        try? store.save(meta: meta)
+        processing.insert(id); phase = .idle
         Task { await UsageMeter.$scope.withValue(UsageScope(activity: .meeting, sessionID: id.uuid.uuidString)) {
             await process(id: id, folder: folder, meta: meta)
         } }
@@ -103,9 +107,8 @@ import Foundation
 
     /// Transcribes again from the audio (finished windows are reused) and writes new notes.
     public func retry(id: MeetingID) {
-        switch phase { case .idle, .failed, .callDetected: break; default: return }
-        guard let folder = store.folder(for: id), let meta = store.list().first(where: { $0.id == id }) else { return }
-        phase = .processing(id)
+        guard !isBusy(id), let folder = store.folder(for: id), let meta = store.list().first(where: { $0.id == id }) else { return }
+        processing.insert(id)
         Task { await UsageMeter.$scope.withValue(UsageScope(activity: .meeting, sessionID: id.uuid.uuidString)) {
             await process(id: id, folder: folder, meta: meta)
         } }
@@ -113,10 +116,9 @@ import Foundation
 
     /// New notes from the saved transcript, using the speaker names typed since.
     public func regenerateNotes(id: MeetingID) {
-        switch phase { case .idle, .failed, .callDetected: break; default: return }
-        guard var meta = store.list().first(where: { $0.id == id }),
+        guard !isBusy(id), var meta = store.list().first(where: { $0.id == id }),
               let transcript = try? store.loadTranscript(id: id), !transcript.isEmpty else { return }
-        phase = .processing(id)
+        processing.insert(id)
         Task { await UsageMeter.$scope.withValue(UsageScope(activity: .meeting, sessionID: id.uuid.uuidString)) {
             do {
                 meta.status = .summarizing; try store.save(meta: meta)
@@ -125,6 +127,12 @@ import Foundation
                 try finish(id: id, meta: &meta, transcript: transcript, notes: notes)
             } catch { saveFailure(id: id, meta: &meta, error: error) }
         } }
+    }
+
+    /// Recording, or already being written up.
+    public func isBusy(_ id: MeetingID) -> Bool {
+        if case .recording(id, _) = phase { return true }
+        return processing.contains(id)
     }
 
     private func process(id: MeetingID, folder: URL, meta original: MeetingMeta) async {
@@ -163,7 +171,7 @@ import Foundation
         let reason = MeetingFailure.reason(for: error, routes: providers())
         Log.meeting.error("meeting \(id.uuid.uuidString, privacy: .public) failed: \(String(describing: error), privacy: .public)")
         meta.status = .failed(reason); try? store.save(meta: meta)
-        phase = .failed(id, reason); currentFolder = nil; currentMeta = nil
+        processing.remove(id)
         onNotice?(error as? MeetingFailure == .noRoute ? "Meeting saved without a transcript — add a key, then Retry in Meetings"
                                                        : "Meeting transcript failed — see Meetings")
     }
@@ -199,7 +207,7 @@ import Foundation
         try store.save(transcript: transcript, id: id)
         try store.save(notes: notes, id: id)
         meta.title = notes.title; meta.status = .done; try store.save(meta: meta)
-        phase = .idle; currentFolder = nil; currentMeta = nil; onNotesReady?()
+        processing.remove(id); onNotesReady?()
     }
 
     /// Detection only ever offers. A recording in progress is never stopped by

@@ -32,6 +32,7 @@ struct MeetingsView: View {
             .navigationTitle("Meetings")
             .onAppear(perform: reload)
             .onReceive(model.meetings.$phase) { _ in reload() }
+            .onReceive(model.meetings.$processing) { _ in reload() }
         }
     }
 
@@ -54,7 +55,6 @@ private struct RecorderCard: View {
         Card(padding: Theme.Spacing.xl) {
             switch meetings.phase {
             case let .recording(_, since): recording(since: since)
-            case .processing: processing
             default: idle
             }
         }
@@ -107,15 +107,6 @@ private struct RecorderCard: View {
         .onAppear {
             withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { pulse = true }
         }
-    }
-
-    private var processing: some View {
-        VStack(spacing: Theme.Spacing.m) {
-            ProgressView().tint(Theme.Colors.accent)
-            Text("Writing notes").font(Theme.Fonts.headline()).foregroundStyle(Theme.Colors.ink)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, Theme.Spacing.l)
     }
 }
 
@@ -184,12 +175,12 @@ private struct MeetingDetail: View {
                     Button("Notes") { model.meetings.regenerateNotes(id: meta.id) }.disabled(transcript.isEmpty)
                     Button("Transcript and notes") { model.meetings.retry(id: meta.id) }
                 } label: { Label("Redo", systemImage: "arrow.clockwise") }
-                    .disabled(model.meetings.phase != .idle)
+                    .disabled(model.meetings.isBusy(meta.id))
             }
             if let markdown { ShareLink(item: markdown) }
         }
         .onAppear(perform: load)
-        .onReceive(model.meetings.$phase) { phase in if phase == .idle { load() } }
+        .onReceive(model.meetings.$processing) { busy in if !busy.contains(meta.id) { load() } }
     }
 
     @ViewBuilder private func notesContent(_ notes: MeetingNotes) -> some View {

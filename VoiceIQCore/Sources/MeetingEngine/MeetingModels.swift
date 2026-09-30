@@ -9,7 +9,6 @@ public enum MeetingPhase: Equatable, Sendable {
     case idle
     case callDetected(CallSource)
     case recording(MeetingID, since: Date)
-    case processing(MeetingID)
     case failed(MeetingID, String)
 }
 

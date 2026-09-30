@@ -36,6 +36,7 @@ struct MeetingsPane: View {
         .onAppear(perform: reload)
         .onChange(of: selection) { _, _ in loadSelection() }
         .onChange(of: engine.phase) { _, _ in reload() }
+        .onChange(of: engine.processing) { _, _ in reload() }
     }
 
     private var toolbar: some View {
@@ -46,14 +47,14 @@ struct MeetingsPane: View {
             Spacer()
             if let meeting = selected, case .failed = meeting.status {
                 Button("Retry", systemImage: "arrow.clockwise") { engine.retry(id: meeting.id) }
-                    .disabled(engine.phase != .idle)
+                    .disabled(engine.isBusy(meeting.id))
             } else if let meeting = selected, meeting.status == .done {
                 Menu {
                     Button("Notes") { engine.regenerateNotes(id: meeting.id) }.disabled(transcript.isEmpty)
                     Button("Transcript and notes") { engine.retry(id: meeting.id) }
                 } label: { Label("Redo", systemImage: "arrow.clockwise") }
                     .fixedSize()
-                    .disabled(engine.phase != .idle)
+                    .disabled(engine.isBusy(meeting.id))
             }
             Button("Export", systemImage: "square.and.arrow.up") { export() }.disabled(selection == nil)
             Button("Delete", systemImage: "trash", role: .destructive) { remove() }.disabled(selection == nil)

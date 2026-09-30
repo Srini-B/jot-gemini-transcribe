@@ -165,6 +165,12 @@ final class DictationController {
         }
         meetings.onNotesReady = { [weak self] in
             guard let self else { return }
+            // Notes finish in the background, so they can land while another
+            // offer or answer is on the pill; the check must not replace it.
+            switch self.hud.model.state {
+            case .meetingPrompt, .answer, .updateReady: return
+            default: break
+            }
             switch self.coordinator.state {
             case .idle, .done, .cancelled, .failed: self.showSuccessBadge(words: nil)
             default: break
@@ -789,6 +795,7 @@ final class DictationController {
         case .idle, .done, .cancelled, .failed: break
         default: return true
         }
+        guard meetings.processing.isEmpty else { return true }
         switch meetings.phase {
         case .idle, .failed: break
         default: return true

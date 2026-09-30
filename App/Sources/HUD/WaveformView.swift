@@ -1,9 +1,9 @@
 import SwiftUI
 
 /// The 5-bar amplitude-reactive waveform (Gemini Live "condensed into a tiny pill").
-/// Live state: Google Blue bars with fast-attack/slow-release smoothing and a calm
-/// idle undulation. Processing state: bars freeze into a silhouette and run the
-/// four-color traveling sweep — the only place the brand quad animates.
+/// Both states run the four-color traveling sweep. Live state: bars follow the
+/// voice with fast-attack/slow-release smoothing and a calm idle undulation.
+/// Processing state: bars freeze into a gentle chase.
 struct WaveformView: View {
     /// Read inside the Canvas at each timeline tick, so level changes never
     /// invalidate the SwiftUI view tree.
@@ -70,13 +70,8 @@ struct WaveformView: View {
                 height: height
             )
             let path = Path(roundedRect: rect, cornerRadius: Self.barWidth / 2)
-            if processing {
-                // Four-color traveling gradient across the frozen silhouette.
-                let hue = (Double(index) / 5.0 + sweep).truncatingRemainder(dividingBy: 1.0)
-                context.fill(path, with: .color(quadColor(at: hue)))
-            } else {
-                context.fill(path, with: .color(VoiceIQUI.Colors.gBlue))
-            }
+            let hue = (Double(index) / 5.0 + sweep).truncatingRemainder(dividingBy: 1.0)
+            context.fill(path, with: .color(quadColor(at: hue)))
         }
     }
 
@@ -111,7 +106,7 @@ struct WaveformView: View {
             HStack(spacing: Self.gap) {
                 ForEach(0..<5, id: \.self) { index in
                     RoundedRectangle(cornerRadius: Self.barWidth / 2)
-                        .fill(processing ? VoiceIQUI.Colors.brandQuad[index % 4] : VoiceIQUI.Colors.gBlue)
+                        .fill(VoiceIQUI.Colors.brandQuad[index % 4])
                         .frame(
                             width: Self.barWidth,
                             height: Self.minHeight + Self.weights[index] * 14
