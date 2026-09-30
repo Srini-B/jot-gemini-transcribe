@@ -56,6 +56,8 @@ public final class EditLearner {
 
     private let dictionary: DictionaryStore
     private var fields: [FieldKey: TrackedField] = [:]
+    /// The fields still being polled, for `captureBeforeReturn` on the tap thread.
+    private nonisolated let watched = WatchedFields()
     public var onLearned: (([DictionaryEntry]) -> Void)?
 
     public init(dictionary: DictionaryStore = DictionaryStore()) {
@@ -109,6 +111,7 @@ public final class EditLearner {
         tracked.pollTask?.cancel()
         tracked.pollTask = pollingTask(for: key)
         fields[key] = tracked
+        watched.set(key, field)
         Log.learning.debug("Tracking edit candidates for pid \(field.pid)")
     }
 
@@ -121,7 +124,10 @@ public final class EditLearner {
             while !Task.isCancelled {
                 guard let self, let field = self.fields[key] else { return }
                 let elapsed = Date().timeIntervalSince(field.lastInsertionAt)
-                guard elapsed < 600 else { return }
+                guard elapsed < 600 else {
+                    self.watched.set(key, nil)
+                    return
+                }
                 let interval: TimeInterval = elapsed < 20 ? 1 : 5
                 try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
                 guard !Task.isCancelled else { return }
@@ -131,25 +137,44 @@ public final class EditLearner {
         }
     }
 
-    private func harvest(key: FieldKey) async {
-        guard var tracked = fields[key], !tracked.harvesting else { return }
+    /// Called on the event-tap thread while a Return key-down is held back from
+    /// the frontmost app, so the field is read before a chat app sends and
+    /// clears it. Return means the user is done editing, so the value is
+    /// diffed at once instead of after `settleSeconds`.
+    public nonisolated func captureBeforeReturn(frontmostPID: pid_t) {
+        let captured = watched.fields(pid: frontmostPID).compactMap { key, snapshot in
+            snapshot.quickValue().map { (key, $0) }
+        }
+        guard !captured.isEmpty else { return }
+        Task { @MainActor [weak self] in
+            for (key, value) in captured {
+                await self?.harvest(key: key, captured: value)
+            }
+        }
+    }
+
+    /// With `captured`, diffs that value as settled. A capture runs even while
+    /// a poll is in flight: that poll may be reading the field after the app
+    /// has already sent and cleared it.
+    private func harvest(key: FieldKey, captured: String? = nil) async {
+        guard var tracked = fields[key], captured != nil || !tracked.harvesting else { return }
         let now = Date()
         tracked.insertions.removeAll { now.timeIntervalSince($0.insertedAt) > 7_200 }
         guard !tracked.insertions.isEmpty else {
             forget(key)
             return
         }
-        tracked.harvesting = true
+        if captured == nil { tracked.harvesting = true }
         fields[key] = tracked
 
         let snapshot = tracked.snapshot
         let insertions = tracked.insertions.map { ($0.id, $0.text) }
         let previousHash = tracked.lastValueHash
         let settled = tracked.pendingSince.map { now.timeIntervalSince($0) >= Self.settleSeconds } == true
-        let settledHash = settled ? tracked.pendingHash : nil
+        let settledHash = captured?.hashValue ?? (settled ? tracked.pendingHash : nil)
         let result = await Task.detached(priority: .utility) {
             Self.compute(
-                snapshot: snapshot,
+                value: captured ?? snapshot.currentValue(),
                 insertions: insertions,
                 previousHash: previousHash,
                 settledHash: settledHash
@@ -157,7 +182,7 @@ public final class EditLearner {
         }.value
 
         guard var current = fields[key] else { return }
-        current.harvesting = false
+        if captured == nil { current.harvesting = false }
         switch result {
         case .fieldGone:
             forget(key)
@@ -194,15 +219,16 @@ public final class EditLearner {
     private func forget(_ key: FieldKey) {
         fields[key]?.pollTask?.cancel()
         fields.removeValue(forKey: key)
+        watched.set(key, nil)
     }
 
     private nonisolated static func compute(
-        snapshot: FieldSnapshot,
+        value: String?,
         insertions: [(UUID, String)],
         previousHash: Int?,
         settledHash: Int?
     ) -> Harvest {
-        guard let current = snapshot.currentValue(), current.count <= maximumFieldLength else { return .fieldGone }
+        guard let current = value, current.count <= maximumFieldLength else { return .fieldGone }
         let valueHash = current.hashValue
         if valueHash == previousHash { return .unchanged }
         guard valueHash == settledHash else { return .editing(valueHash: valueHash) }

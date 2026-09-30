@@ -16,9 +16,36 @@ public struct FieldSnapshot: @unchecked Sendable {
     public func currentValue() -> String? {
         AXInserter.fieldText(of: element)
     }
+
+    /// `currentValue()` for a caller that holds the user's keystroke while it
+    /// reads: a hung app costs 0.2 s, not the 6 s AX default that would get
+    /// the event tap disabled.
+    func quickValue() -> String? {
+        AXUIElementSetMessagingTimeout(element, 0.2)
+        defer { AXUIElementSetMessagingTimeout(element, 0) }
+        return currentValue()
+    }
 }
 
-struct FieldKey: Hashable {
+/// The fields `EditLearner` tracks, readable from the event-tap thread.
+final class WatchedFields: @unchecked Sendable {
+    private let lock = NSLock()
+    private var fields: [FieldKey: FieldSnapshot] = [:]
+
+    func set(_ key: FieldKey, _ snapshot: FieldSnapshot?) {
+        lock.lock()
+        fields[key] = snapshot
+        lock.unlock()
+    }
+
+    func fields(pid: pid_t) -> [(FieldKey, FieldSnapshot)] {
+        lock.lock()
+        defer { lock.unlock() }
+        return fields.filter { $0.key.pid == pid }.map { ($0.key, $0.value) }
+    }
+}
+
+struct FieldKey: Hashable, @unchecked Sendable {
     let pid: pid_t
     private let element: AXUIElement
 

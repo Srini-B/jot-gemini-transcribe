@@ -108,6 +108,12 @@ final class DictationController {
         engine.onIntent = { intent in
             continuation.yield(intent)
         }
+        // Return often sends and clears the field (chat, email), so an edit
+        // made just before it is read now rather than after the settle wait.
+        engine.onReturnKeyDown = { [learner] in
+            guard let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier else { return }
+            learner.captureBeforeReturn(frontmostPID: pid)
+        }
         Task { @MainActor [weak self] in
             for await intent in intentStream {
                 guard let self else { break }

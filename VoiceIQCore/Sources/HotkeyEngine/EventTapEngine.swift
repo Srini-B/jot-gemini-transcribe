@@ -28,6 +28,10 @@ public final class EventTapEngine {
     public var onIntent: ((HotkeyIntent) -> Void)?
     /// Called when the tap had to be revived (telemetry for the #1 field failure).
     public var onTapRevived: (() -> Void)?
+    /// Called on the tap thread for each Return or Enter key-down, before the
+    /// frontmost app receives it: the event waits until this returns, so keep
+    /// it well under the tap's timeout.
+    public var onReturnKeyDown: (() -> Void)?
 
     private var trigger: DictationTrigger
     private let lock = NSLock()
@@ -207,6 +211,9 @@ public final class EventTapEngine {
             // re-fire gestures (audit #14).
             guard event.getIntegerValueField(.keyboardEventAutorepeat) == 0 else {
                 return Unmanaged.passUnretained(event)
+            }
+            if keyCode == 36 || keyCode == 76 { // Return, keypad Enter
+                onReturnKeyDown?()
             }
             // A shortcut being recorded is the row's to consume, Esc included.
             guard !ShortcutCapture.isActive else { return Unmanaged.passUnretained(event) }
