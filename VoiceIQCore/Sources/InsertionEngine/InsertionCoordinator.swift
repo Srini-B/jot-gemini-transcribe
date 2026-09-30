@@ -4,8 +4,9 @@ import Foundation
 
 /// The 3-tier ladder with the two guards that fix Wispr's most-reported bugs:
 ///
-///   guard 1: frontmost app changed since dictation started → NEVER paste blind
-///            (text goes to the clipboard; the HUD offers it — F17)
+///   guard 1: frontmost app changed since dictation started, or focus moved to
+///            another text field of it → NEVER paste blind (text goes to the
+///            clipboard; the HUD offers it — F17)
 ///   guard 2: secure input active → refuse entirely, no clipboard leak (F18)
 ///
 ///   tier 1: AX kAXSelectedTextAttribute with read-back verification
@@ -36,7 +37,8 @@ public struct InsertionCoordinator: TextInserting {
         }
 
         // Tier 1: AX direct insertion.
-        switch await AXInserter.insert(text, targetPID: context.targetPID, bundleID: context.targetAppBundleID) {
+        switch await AXInserter.insert(text, targetPID: context.targetPID, bundleID: context.targetAppBundleID,
+                                       startField: context.focusedField?.element) {
         case .landed:
             Log.insertion.info("inserted via AX")
             return .inserted

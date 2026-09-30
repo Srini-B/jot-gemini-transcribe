@@ -15,15 +15,18 @@ enum AudioChunker {
     static let searchWindowSeconds: Double = 8
     static let hopSeconds: Double = 0.1
 
-    static func ranges(cafURL: URL) throws -> [Range<AVAudioFramePosition>] {
+    /// The frames to send, without leading and trailing silence, split into
+    /// request-sized ranges; `fileFrames` is the whole recording's length.
+    static func ranges(cafURL: URL) throws -> (ranges: [Range<AVAudioFramePosition>], fileFrames: AVAudioFramePosition) {
         let file = try AVAudioFile(forReading: cafURL, commonFormat: .pcmFormatInt16, interleaved: true)
         let rate = file.processingFormat.sampleRate
-        let total = file.length
+        let speech = speechRange(in: file)
+        let total = speech.upperBound
         let maxFrames = AVAudioFramePosition(rate * maxChunkSeconds)
-        guard total > maxFrames else { return [0..<total] }
+        guard speech.count > maxFrames else { return ([speech], file.length) }
 
         var ranges: [Range<AVAudioFramePosition>] = []
-        var start: AVAudioFramePosition = 0
+        var start = speech.lowerBound
         while start < total {
             let nominal = start + maxFrames
             guard nominal < total else {
@@ -34,7 +37,62 @@ enum AudioChunker {
             ranges.append(start..<cut)
             start = cut
         }
-        return ranges
+        return (ranges, file.length)
+    }
+
+    // Silence trimming, after Parrot's `SilenceTrimmer` (humanitas-labs/parrot,
+    // MIT): 10 ms frames, a frame is voiced when its RMS clears both an absolute
+    // floor and 5% (−26 dB) of the loud level, and a margin of real audio stays
+    // on each side for soft onsets and trailing consonants.
+    static let trimFrameSeconds = 0.01
+    static let trimFloor = 0.003 * 32_768
+    static let trimRelativeLevel = 0.05
+    static let trimLeadSeconds = 0.25
+    static let trimTrailSeconds = 0.35
+    /// The loud level is the one at least this many frames (50 ms) reach, not
+    /// the single loudest frame, so a key click cannot raise the bar over
+    /// quiet speech. Parrot uses the loudest frame.
+    static let trimLoudFrames = 5
+
+    /// The recording without its leading and trailing silence, margins kept.
+    /// The whole file when nothing clears the bar or the file can't be read,
+    /// so trimming can cost a few seconds of silence sent, never a word.
+    static func speechRange(in file: AVAudioFile) -> Range<AVAudioFramePosition> {
+        let whole: Range<AVAudioFramePosition> = 0..<file.length
+        let rate = file.processingFormat.sampleRate
+        let frameLength = Int(rate * trimFrameSeconds)
+        let channels = Int(file.processingFormat.channelCount)
+        let blockFrames = AVAudioFrameCount(frameLength * 100)
+        guard frameLength > 0,
+              let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: blockFrames)
+        else { return whole }
+
+        var levels: [Double] = []
+        levels.reserveCapacity(Int(file.length) / frameLength + 1)
+        file.framePosition = 0
+        while file.framePosition < file.length {
+            let count = min(blockFrames, AVAudioFrameCount(file.length - file.framePosition))
+            do { try file.read(into: buffer, frameCount: count) } catch { return whole }
+            guard buffer.frameLength > 0, let samples = buffer.int16ChannelData?[0] else { break }
+            var offset = 0
+            while offset + frameLength <= Int(buffer.frameLength) {
+                var sum = 0.0
+                for i in offset..<(offset + frameLength) {
+                    let s = Double(samples[i * channels])
+                    sum += s * s
+                }
+                levels.append((sum / Double(frameLength)).squareRoot())
+                offset += frameLength
+            }
+        }
+        guard levels.count > trimLoudFrames else { return whole }
+        let loud = levels.sorted(by: >)[trimLoudFrames - 1]
+        let threshold = max(trimFloor, loud * trimRelativeLevel)
+        guard let first = levels.firstIndex(where: { $0 >= threshold }),
+              let last = levels.lastIndex(where: { $0 >= threshold }) else { return whole }
+        let start = max(0, AVAudioFramePosition(first * frameLength) - AVAudioFramePosition(rate * trimLeadSeconds))
+        let end = min(file.length, AVAudioFramePosition((last + 1) * frameLength) + AVAudioFramePosition(rate * trimTrailSeconds))
+        return start < end ? start..<end : whole
     }
 
     /// The start of the lowest-RMS hop inside `[boundary - window, boundary]`.

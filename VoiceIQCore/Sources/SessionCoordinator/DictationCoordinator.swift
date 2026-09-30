@@ -456,7 +456,12 @@ public final class DictationCoordinator: ObservableObject {
         guard case .recording = state else { return }
         Log.audio.error("audio engine died mid-recording (\(message, privacy: .public)) — finalizing with what we have")
         updateMeta { $0.errorCode = "engine_died" }
-        coachingHint = "\(message) — dictating what was captured"
+        // A mic that never delivered anything finalizes with zero frames, and
+        // that failure has its own message; "dictating what was captured"
+        // would promise text that does not exist.
+        if message != AudioCaptureEngine.noAudioMessage {
+            coachingHint = "\(message) — dictating what was captured"
+        }
         finalizeSession()
     }
 

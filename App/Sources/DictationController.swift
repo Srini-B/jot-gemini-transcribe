@@ -72,10 +72,15 @@ final class DictationController {
                 AccessibilityWaker.wakeIfNeeded(
                     bundleID: app?.bundleIdentifier, pid: app?.processIdentifier
                 )
+                let field = FocusedFieldCapture()
+                if let pid = app?.processIdentifier {
+                    Task.detached(priority: .userInitiated) { field.set(AXInserter.focusedTextField(pid: pid)) }
+                }
                 return DictationContext(
                     targetAppBundleID: app?.bundleIdentifier,
                     targetAppName: app?.localizedName,
-                    targetPID: app?.processIdentifier
+                    targetPID: app?.processIdentifier,
+                    focusedField: field
                 )
             },
             makeLiveSession: LiveTranscriber.makeFromSettings

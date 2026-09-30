@@ -63,11 +63,25 @@ public enum DictationMode: Equatable, Sendable {
     case translate(target: String)
 }
 
+/// The text field that had focus when dictation started. An Accessibility
+/// query can stall on a busy app, so it is filled in off the main thread a
+/// moment after the session starts. Empty when the app could not say or
+/// focus was not in a field text can be typed into.
+public final class FocusedFieldCapture: @unchecked Sendable, Equatable {
+    private let lock = NSLock()
+    private var captured: AnyObject?
+    public init() {}
+    public var element: AnyObject? { lock.withLock { captured } }
+    public func set(_ element: AnyObject?) { lock.withLock { captured = element } }
+    public static func == (lhs: FocusedFieldCapture, rhs: FocusedFieldCapture) -> Bool { lhs === rhs }
+}
+
 /// Snapshot of where the user was dictating, captured at hotkey-down.
 public struct DictationContext: Equatable, Sendable {
     public var targetAppBundleID: String?
     public var targetAppName: String?
     public var targetPID: pid_t?
+    public var focusedField: FocusedFieldCapture?
     public var mode: DictationMode
     public var selectedTextIsSettable: Bool
     public var screenshots: [Data]
@@ -80,6 +94,7 @@ public struct DictationContext: Equatable, Sendable {
         targetAppBundleID: String? = nil,
         targetAppName: String? = nil,
         targetPID: pid_t? = nil,
+        focusedField: FocusedFieldCapture? = nil,
         mode: DictationMode = .dictate,
         selectedTextIsSettable: Bool = false,
         screenshots: [Data] = []
@@ -87,6 +102,7 @@ public struct DictationContext: Equatable, Sendable {
         self.targetAppBundleID = targetAppBundleID
         self.targetAppName = targetAppName
         self.targetPID = targetPID
+        self.focusedField = focusedField
         self.mode = mode
         self.selectedTextIsSettable = selectedTextIsSettable
         self.screenshots = screenshots

@@ -37,6 +37,8 @@ public final class AudioCaptureEngine: AudioCapturing {
     /// Bluetooth route (measured), which is exactly the window where the first
     /// words are lost, so it must never happen on the critical path.
     private var prewarmedDevice: AudioDeviceID?
+    /// The input format the prepared graph's tap was installed with.
+    private var prewarmedFormat: AudioDeviceQuery.InputFormat?
     private var isPrewarmed = false
     /// Parked while stop() waits for the HAL's in-flight buffer to land.
     private var tailWaiter: CheckedContinuation<Void, Never>?
@@ -78,6 +80,13 @@ public final class AudioCaptureEngine: AudioCapturing {
     /// mic — which is why any watchdog built on it must be per-transport.
     private var startedClock: DispatchTime?
     private var firstBufferLogged = false
+    /// Bumped by every start(); a watchdog armed for an earlier session sees a
+    /// different value and does nothing.
+    private var startGeneration = 0
+    private var noBufferRebuilds = 0
+
+    /// `onEngineDied` message when the microphone never delivered audio.
+    public static let noAudioMessage = "Mic didn't start"
 
     public init() {}
 
@@ -91,6 +100,7 @@ public final class AudioCaptureEngine: AudioCapturing {
             try buildEngine(reason: "prewarm", start: false)
             isPrewarmed = true
             prewarmedDevice = AudioDeviceQuery.defaultInputDevice()
+            prewarmedFormat = engine.map { AudioDeviceQuery.InputFormat($0.inputNode.outputFormat(forBus: 0)) }
         } catch {
             // Prewarm is an optimization, never a failure mode — the session's
             // own start() will build fresh and report any real problem.
@@ -119,19 +129,32 @@ public final class AudioCaptureEngine: AudioCapturing {
         meteringDidRun = false
         writtenPeakDidRun = false
         firstBufferLogged = false
+        startGeneration += 1
+        noBufferRebuilds = 0
+        let generation = startGeneration
         stateLock.unlock()
         startedClock = startClock
 
         writer = try CAFWriter(url: url, format: targetFormat)
         sessionDevice = AudioDeviceQuery.defaultInputDevice()
         rebuildCount = 0
-        // Reuse the prepared graph unless the input device moved under us.
+        // Reuse the prepared graph unless the input device moved under us or
+        // now runs in a different format. A graph built while the device was
+        // changing format starts without error and never delivers a buffer:
+        // reproduced 2026-09-30 after restarting coreaudiod, a graph built at
+        // 44.1 kHz/2 ch against a device back at 48 kHz/8 ch a second later.
+        let currentFormat = sessionDevice.flatMap(AudioDeviceQuery.inputFormat(of:))
+        if isPrewarmed, prewarmedDevice == sessionDevice, let currentFormat, let prewarmedFormat, currentFormat != prewarmedFormat {
+            Log.audio.info("prepared graph is \(prewarmedFormat.description, privacy: .public) but the input is \(currentFormat.description, privacy: .public) — building a fresh one")
+            tearDownEngine()
+        }
         if isPrewarmed, let engine, prewarmedDevice == sessionDevice {
             isPrewarmed = false
             do {
                 try engine.start()
                 observeConfigurationChanges(of: engine)
                 Log.audio.info("AudioCaptureEngine: engine running (warm start)")
+                armFirstBufferWatchdog(generation: generation)
                 return
             } catch {
                 Log.audio.info("warm start failed — rebuilding: \(String(describing: error), privacy: .public)")
@@ -140,10 +163,14 @@ public final class AudioCaptureEngine: AudioCapturing {
         }
         isPrewarmed = false
         try buildAndStartEngine(reason: "start")
+        armFirstBufferWatchdog(generation: generation)
     }
 
     public func stop() async -> AudioCaptureResult {
-        let alreadyStopped = withStateLock { stopped }
+        let alreadyStopped = withStateLock { () -> Bool in
+            startGeneration += 1 // disarms the first-buffer watchdog
+            return stopped
+        }
 
         if let configObserver {
             NotificationCenter.default.removeObserver(configObserver)
@@ -230,6 +257,56 @@ public final class AudioCaptureEngine: AudioCapturing {
         tailWaiter = nil
         stateLock.unlock()
         waiter?.resume()
+    }
+
+    // MARK: - First-buffer watchdog
+
+    /// How long a started engine may go without delivering a buffer before it
+    /// is rebuilt. A graph can start without error and never deliver one:
+    /// reproduced 2026-09-30 by restarting coreaudiod 3 s before start (zero
+    /// frames, no error, no level, in 2 of 8 takes). Before this, the user spoke
+    /// into it until key-up and only then saw "Mic didn't start in time".
+    /// Measured first buffers: 298 ms on USB EarPods, about 100 ms on a
+    /// virtual device; Bluetooth renegotiates into headset mode first, so it
+    /// gets longer.
+    static func firstBufferDeadline(transport: String) -> TimeInterval {
+        transport.hasPrefix("bluetooth") ? 3.0 : 1.0
+    }
+    /// Rebuilds before giving up and telling the coordinator.
+    static let maxNoBufferRebuilds = 1
+
+    private func armFirstBufferWatchdog(generation: Int) {
+        let deadline = Self.firstBufferDeadline(transport: AudioDeviceQuery.transportDescription())
+        queue.asyncAfter(deadline: .now() + deadline) { [weak self] in
+            self?.checkFirstBuffer(generation: generation, waited: deadline)
+        }
+    }
+
+    /// Runs on the write queue, like the configuration-change rebuild.
+    private func checkFirstBuffer(generation: Int, waited: TimeInterval) {
+        stateLock.lock()
+        let current = generation == startGeneration && !stopped
+        let delivered = firstBufferLogged
+        let rebuilds = noBufferRebuilds
+        if current, !delivered { noBufferRebuilds += 1 }
+        stateLock.unlock()
+        guard current, !delivered else { return }
+
+        guard rebuilds < Self.maxNoBufferRebuilds else {
+            Log.audio.error("no audio from the microphone after a rebuild — failing the dictation now, not at key-up")
+            onEngineDied?(Self.noAudioMessage)
+            return
+        }
+        Log.audio.error("no audio \(waited, format: .fixed(precision: 1))s after start on \(AudioInputDevices.currentDefaultName() ?? "unknown", privacy: .public) [\(AudioDeviceQuery.transportDescription(), privacy: .public)] — rebuilding the capture graph")
+        do {
+            sessionDevice = AudioDeviceQuery.defaultInputDevice()
+            try buildAndStartEngine(reason: "no-buffers")
+            onDeviceChange?("Mic restarted — say that again")
+            armFirstBufferWatchdog(generation: generation)
+        } catch {
+            Log.audio.error("AudioCaptureEngine: rebuild after no audio failed: \(error)")
+            onEngineDied?(Self.noAudioMessage)
+        }
     }
 
     // MARK: - Engine plumbing
@@ -343,6 +420,7 @@ public final class AudioCaptureEngine: AudioCapturing {
         converter = nil
         isPrewarmed = false
         prewarmedDevice = nil
+        prewarmedFormat = nil
     }
 
     private func handleConfigurationChange() {
@@ -567,89 +645,3 @@ public final class AudioCaptureEngine: AudioCapturing {
         case deviceChanging(String)
     }
 }
-
-// MARK: - CoreAudio device helpers
-
-#if os(macOS)
-enum AudioDeviceQuery {
-    static func defaultInputDevice() -> AudioDeviceID? {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultInputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var deviceID = AudioDeviceID(0)
-        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
-        let status = AudioObjectGetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceID
-        )
-        return (status == noErr && deviceID != 0) ? deviceID : nil
-    }
-
-    /// How the default input is attached — built-in, Bluetooth, USB, aggregate.
-    /// Logged because it is the single biggest predictor of capture-start latency
-    /// (a Bluetooth HFP renegotiation is an order of magnitude slower than the
-    /// built-in mic), so any deadline built on first-buffer timing must be a
-    /// function of this, never a constant.
-    static func transportDescription() -> String {
-        guard let device = defaultInputDevice() else { return "no-device" }
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyTransportType,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var transport: UInt32 = 0
-        var size = UInt32(MemoryLayout<UInt32>.size)
-        guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, &transport) == noErr else {
-            return "unknown"
-        }
-        switch transport {
-        case kAudioDeviceTransportTypeBuiltIn: return "built-in"
-        case kAudioDeviceTransportTypeBluetooth: return "bluetooth"
-        case kAudioDeviceTransportTypeBluetoothLE: return "bluetooth-le"
-        case kAudioDeviceTransportTypeUSB: return "usb"
-        case kAudioDeviceTransportTypeAggregate: return "aggregate"
-        case kAudioDeviceTransportTypeVirtual: return "virtual"
-        case kAudioDeviceTransportTypeContinuityCaptureWired,
-             kAudioDeviceTransportTypeContinuityCaptureWireless: return "continuity"
-        case kAudioDeviceTransportTypeDisplayPort, kAudioDeviceTransportTypeHDMI: return "display"
-        case kAudioDeviceTransportTypeThunderbolt: return "thunderbolt"
-        case kAudioDeviceTransportTypeAirPlay: return "airplay"
-        default: return "other"
-        }
-    }
-
-    // NOTE: device *pinning* (kAudioOutputUnitProperty_CurrentDevice or
-    // AUAudioUnit.setDeviceID on the input node) was probed on macOS 26 and leaves
-    // the engine running with a silent tap — do not reintroduce it on AVAudioEngine.
-}
-#else
-/// iOS has no HAL device IDs: the audio session's route is the device. A
-/// route change still has to read as "the mic switched", so the current input
-/// port's UID stands in for the device ID.
-typealias AudioDeviceID = Int
-
-enum AudioDeviceQuery {
-    static func defaultInputDevice() -> AudioDeviceID? {
-        AVAudioSession.sharedInstance().currentRoute.inputs.first?.uid.hashValue
-    }
-
-    static func transportDescription() -> String {
-        guard let port = AVAudioSession.sharedInstance().currentRoute.inputs.first else { return "no-device" }
-        switch port.portType {
-        case .builtInMic: return "built-in"
-        case .bluetoothHFP, .bluetoothLE: return "bluetooth"
-        case .headsetMic: return "headset"
-        case .usbAudio: return "usb"
-        case .carAudio: return "car"
-        default: return port.portType.rawValue
-        }
-    }
-}
-
-enum AudioInputDevices {
-    static func currentDefaultName() -> String? {
-        AVAudioSession.sharedInstance().currentRoute.inputs.first?.portName
-    }
-}
-#endif

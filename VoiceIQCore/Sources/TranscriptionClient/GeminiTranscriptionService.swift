@@ -56,8 +56,9 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
         let names = modelNames(source)
 
         // One request per chunk. A short dictation is one chunk, so this is the
-        // old single-request path for everything under ten minutes.
-        let ranges = try AudioChunker.ranges(cafURL: audioURL)
+        // old single-request path for everything under ten minutes. Leading and
+        // trailing silence is left out of every request.
+        let (ranges, fileFrames) = try AudioChunker.ranges(cafURL: audioURL)
 
         // A dictation with writing rules on goes to the flash model in one
         // call, which hears the audio and writes the cleaned text. Anything
@@ -88,7 +89,7 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
                 continue
             }
             let flacData = try encodeChunk(audioURL: audioURL, range: range, index: index)
-            let seconds = durationSeconds * Double(range.count) / Double(max(1, ranges.reduce(0) { $0 + $1.count }))
+            let seconds = durationSeconds * Double(range.count) / Double(max(1, fileFrames))
             let deadline = TimeoutPolicy.overallDeadline(audioDuration: seconds)
             if ranges.count == 1, context.mode == .dictate, policy.cleanupPass, source == .provider {
                 let client = client
@@ -272,7 +273,9 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
             // With ElevenLabs transcribing, the recording goes only to ElevenLabs.
             guard settings.activeRoute.provider.writingModelHearsAudio, settings.transcriptionSource == .provider else { return nil }
             let flacURL = url.deletingLastPathComponent().appendingPathComponent("audio-polish.flac")
-            guard let encoded = try? FLACEncoder.encode(cafURL: url, flacURL: flacURL) else { return nil }
+            let speech = (try? AVAudioFile(forReading: url, commonFormat: .pcmFormatInt16, interleaved: true))
+                .map(AudioChunker.speechRange(in:))
+            guard let encoded = try? FLACEncoder.encode(cafURL: url, flacURL: flacURL, frameRange: speech) else { return nil }
             defer { try? FileManager.default.removeItem(at: encoded.url) }
             guard encoded.byteCount <= Self.maxPolishAudioBytes else { return nil }
             return try? Data(contentsOf: encoded.url)

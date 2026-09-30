@@ -15,12 +15,33 @@ public enum AXInserter {
         case landed
         /// AX couldn't do it here — the paste tier is still appropriate.
         case notPossible
-        /// PROVEN focus theft: the focused element belongs to a different app.
-        /// A blind ⌘V would paste the transcript into the thief.
+        /// PROVEN focus theft: the focused element belongs to a different app,
+        /// or is a different field of the same app than the one dictation
+        /// started in. A blind ⌘V would paste the transcript into the thief.
         case focusElsewhere
     }
 
-    public static func insert(_ text: String, targetPID: pid_t?, bundleID: String?) async -> Result {
+    /// The target app's focused element when text can be typed into it (its
+    /// selected text is settable, the same test the insert below needs), else
+    /// nil. Called off the main thread at session start. A Chromium or
+    /// Electron app may not have built its accessibility tree yet and answer
+    /// nil or a non-text element; that counts as "can't tell", so the insert
+    /// compares nothing (Parrot's rule, humanitas-labs/parrot, MIT).
+    public nonisolated static func focusedTextField(pid: pid_t) -> AXUIElement? {
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.25)
+        var focusedRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
+              let focused = focusedRef, CFGetTypeID(focused) == AXUIElementGetTypeID() else { return nil }
+        let element = unsafeDowncast(focused as AnyObject, to: AXUIElement.self)
+        AXUIElementSetMessagingTimeout(element, 0.25)
+        var settable = DarwinBoolean(false)
+        guard AXUIElementIsAttributeSettable(element, kAXSelectedTextAttribute as CFString, &settable) == .success,
+              settable.boolValue else { return nil }
+        return element
+    }
+
+    public static func insert(_ text: String, targetPID: pid_t?, bundleID: String?, startField: AnyObject? = nil) async -> Result {
         if let bundleID, AppQuirks.forcePaste.contains(bundleID) {
             return .notPossible
         }
@@ -49,6 +70,12 @@ public enum AXInserter {
                 Log.insertion.info("AXInserter: focused element belongs to a different app — chip, never blind paste")
                 return .focusElsewhere
             }
+        }
+        // Same app, different text field: the user clicked elsewhere while
+        // the words were being written up.
+        if let startField, !CFEqual(startField as CFTypeRef, element) {
+            Log.insertion.info("AXInserter: focus moved to another field since dictation started — chip, never blind paste")
+            return .focusElsewhere
         }
 
         // Never write into secure fields.
@@ -119,18 +146,33 @@ public enum AXInserter {
 
     /// Adds one space when the transcript would otherwise run into the character
     /// before the cursor ("button.Please"). Nothing is added at the start of the
-    /// field, after whitespace or an opening bracket, or when the transcript
-    /// itself starts with whitespace or closing punctuation.
+    /// field, after whitespace, an opening bracket or quote, or the `@`/`#`
+    /// that starts a handle or tag, when the transcript itself starts with
+    /// whitespace or closing punctuation, or next to Chinese, Japanese or Thai,
+    /// which put no spaces between words. Character sets follow Parrot's
+    /// `Spacing` (humanitas-labs/parrot, MIT).
     nonisolated static func joined(_ text: String, before: String, cursor: Int?) -> String {
         guard let cursor, cursor > 0, cursor <= before.utf16.count,
               let first = text.unicodeScalars.first else { return text }
         let utf16 = Array(before.utf16)
         guard let previous = Unicode.Scalar(utf16[cursor - 1]) else { return text }
-        let openers: Set<Character> = ["(", "[", "{", "\"", "'", "“", "‘", "/"]
-        let closers: Set<Character> = [",", ".", ";", ":", "!", "?", ")", "]", "}"]
+        let openers: Set<Character> = ["(", "[", "{", "<", "\"", "'", "“", "‘", "«", "‹", "¿", "¡", "/", "@", "#"]
+        let closers: Set<Character> = [",", ".", ";", ":", "!", "?", ")", "]", "}", "…", "%", "”", "’", "»", "›"]
         if CharacterSet.whitespacesAndNewlines.contains(previous) || openers.contains(Character(previous)) { return text }
         if CharacterSet.whitespacesAndNewlines.contains(first) || closers.contains(Character(first)) { return text }
+        if isSpaceless(previous) || isSpaceless(first) { return text }
         return " " + text
+    }
+
+    /// Thai, and the Chinese and Japanese scripts and their punctuation.
+    nonisolated static func isSpaceless(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar.value {
+        case 0x0E00...0x0E7F, 0x3000...0x303F, 0x3040...0x30FF, 0x3400...0x4DBF,
+             0x4E00...0x9FFF, 0xFF00...0xFFEF, 0x20000...0x2FA1F:
+            return true
+        default:
+            return false
+        }
     }
 
     nonisolated static func stringValue(of element: AXUIElement) -> String? {
