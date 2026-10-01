@@ -16,7 +16,8 @@ final class MainWindowController: NSWindowController {
         store: HistoryStore?,
         meetings: MeetingEngine,
         onRetry: @escaping (DictationRecord) -> Void,
-        onDeleteAllHistory: @escaping () -> Void
+        onDeleteAllHistory: @escaping () -> Void,
+        agentRuns: AgentRunStore
     ) {
         model = MainWindowModel()
         let window = NSWindow(
@@ -39,7 +40,8 @@ final class MainWindowController: NSWindowController {
             store: store,
             meetings: meetings,
             onRetry: onRetry,
-            onDeleteAllHistory: onDeleteAllHistory
+            onDeleteAllHistory: onDeleteAllHistory,
+            agentRuns: agentRuns
         ))
     }
 
@@ -54,7 +56,7 @@ final class MainWindowController: NSWindowController {
 }
 
 enum MainSection: String, CaseIterable, Identifiable {
-    case history, meetings, dictionary, cost
+    case history, meetings, agent, dictionary, cost
     case dictation, privacy, advanced
     case about
     var id: String { rawValue }
@@ -63,6 +65,7 @@ enum MainSection: String, CaseIterable, Identifiable {
         switch self {
         case .history: return "History"
         case .meetings: return "Meetings"
+        case .agent: return "Agent"
         case .dictionary: return "Dictionary"
         case .cost: return "Cost Analysis"
         case .dictation: return "Dictation"
@@ -76,6 +79,7 @@ enum MainSection: String, CaseIterable, Identifiable {
         switch self {
         case .history: return "clock.arrow.circlepath"
         case .meetings: return "person.2.wave.2.fill"
+        case .agent: return "sparkles"
         case .dictionary: return "character.book.closed.fill"
         case .cost: return "dollarsign.circle.fill"
         case .dictation: return "waveform"
@@ -89,6 +93,7 @@ enum MainSection: String, CaseIterable, Identifiable {
         switch self {
         case .history: return VoiceIQUI.Colors.gBlue
         case .meetings: return Color(nsColor: .systemPurple)
+        case .agent: return Color(nsColor: .systemYellow)
         case .dictionary: return Color(nsColor: .systemOrange)
         case .cost: return Color(nsColor: .systemMint)
         case .dictation: return Color(nsColor: .systemTeal)
@@ -98,7 +103,7 @@ enum MainSection: String, CaseIterable, Identifiable {
         }
     }
 
-    static let dataSections: [MainSection] = [.history, .meetings, .dictionary, .cost]
+    static let dataSections: [MainSection] = [.history, .meetings, .agent, .dictionary, .cost]
     static let settingsSections: [MainSection] = [.dictation, .privacy, .advanced, .about]
 }
 
@@ -114,6 +119,7 @@ private struct MainView: View {
     let meetings: MeetingEngine
     let onRetry: (DictationRecord) -> Void
     let onDeleteAllHistory: () -> Void
+    let agentRuns: AgentRunStore
 
     var body: some View {
         HStack(spacing: 0) {
@@ -179,6 +185,8 @@ private struct MainView: View {
                 }
             case .meetings:
                 MeetingsPane(engine: meetings, store: meetings.store)
+            case .agent:
+                AgentRunsPane(store: agentRuns)
             case .dictionary:
                 DictionaryView()
             case .cost:

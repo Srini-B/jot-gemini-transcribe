@@ -61,6 +61,21 @@ public enum DictationMode: Equatable, Sendable {
     case dictate
     case askAnything(selectedText: String?)
     case translate(target: String)
+    /// A spoken command for the agent. The transcript is handed to the
+    /// agent loop instead of being inserted or answered here.
+    case agent
+
+    /// Modes whose result goes to `onAnswerReady` instead of insertion.
+    public var handsTranscriptToCaller: Bool {
+        switch self {
+        case .askAnything, .agent: return true
+        case .dictate, .translate: return false
+        }
+    }
+
+    /// Modes whose recording and transcript stay in History. Agent commands
+    /// live in the agent run instead.
+    public var keepsRecording: Bool { self != .agent }
 }
 
 /// The text field that had focus when dictation started. An Accessibility

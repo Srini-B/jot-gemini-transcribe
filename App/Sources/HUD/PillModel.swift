@@ -12,6 +12,8 @@ enum PillState: Equatable {
     /// Neutral informational chip (coaching hint, copied-to-clipboard, offline…).
     case notice(String)
     case answer(String)
+    /// The agent session panel. Its content lives in `PillModel.agent`.
+    case agent
     /// Error styling: errorContainer surface + "saved to History" framing.
     case error(String)
     /// A call was noticed; the pill offers to record it. The string names the app or site.
@@ -47,4 +49,6 @@ final class PillModel: ObservableObject {
     /// the anchor points at instead of floating in the panel's middle.
     @Published var anchor: Double = SettingsStore().pillAnchor
     let level = LevelSource()
+    /// The agent session shown while `state == .agent`.
+    let agent = AgentPanelModel()
 }

@@ -143,6 +143,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case "start-hands-free": self?.dictationController?.startHandsFree()
             case "stop": self?.dictationController?.coordinator.handle(.finalize)
             #if DEBUG
+            // voiceiq://agent — the agent shortcut; voiceiq://agent/<command> —
+            // opens the agent panel and runs the command as if it were spoken,
+            // so the loop can be exercised without a microphone. Debug only.
+            case "agent":
+                let command = url.pathComponents.dropFirst().joined(separator: "/")
+                self?.dictationController?.debugAgent(command: command.isEmpty ? nil : command)
             // voiceiq://set/<key>/<true|false> — flips a boolean setting through
             // the REAL SettingsStore setter (and its change notification), so the
             // live-update path can be exercised headlessly. Debug builds only.

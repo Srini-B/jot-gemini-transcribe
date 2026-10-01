@@ -711,11 +711,12 @@ public final class DictationCoordinator: ObservableObject {
         }
         apply(.transcriptReady)
 
-        if case .askAnything = session?.context.mode {
+        if session?.context.mode.handsTranscriptToCaller == true {
             lastResult = outcome.cleanedTranscript
             onAnswerReady?(outcome.cleanedTranscript)
             updateMeta { $0.status = .inserted; $0.pipelineSeconds = Date().timeIntervalSince(startedAt) }
             apply(.inserted)
+            discardUnlessKept()
             session = nil
             return
         }
@@ -748,6 +749,7 @@ public final class DictationCoordinator: ObservableObject {
             }
             updateMeta { $0.status = .failed; $0.errorCode = "mode_transform" }
             apply(.transcriptFailed(.network))
+            discardUnlessKept()
             session = nil
             return
         }
@@ -854,7 +856,8 @@ public final class DictationCoordinator: ObservableObject {
         // and destroys a recording of ANY length (production pass 2, P0).
         let duration = result?.durationSeconds ?? session?.meta.audioDurationSeconds ?? 0
         let hasTranscript = session?.meta.rawTranscript != nil
-        if hasTranscript || duration >= Self.cancelKeepThreshold {
+        let keeps = session?.context.mode.keepsRecording ?? true
+        if keeps, hasTranscript || duration >= Self.cancelKeepThreshold {
             // Long cancels stay recoverable — History shows them with Retry.
             updateMeta {
                 $0.status = .cancelled
@@ -875,6 +878,12 @@ public final class DictationCoordinator: ObservableObject {
         guard var session else { return }
         session.context.screenshots = images
         self.session = session
+    }
+
+    /// Agent commands leave no History row; the agent run keeps the text.
+    private func discardUnlessKept() {
+        guard session?.context.mode.keepsRecording == false else { return }
+        discardSessionArtifacts()
     }
 
     /// Removes the session folder and asks the app to drop its History row.

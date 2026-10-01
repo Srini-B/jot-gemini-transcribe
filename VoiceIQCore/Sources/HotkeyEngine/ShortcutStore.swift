@@ -5,6 +5,7 @@ public enum ShortcutAction: String, CaseIterable, Sendable {
     case askAnything
     case translate
     case meetingToggle
+    case agent
 
     public var displayName: String {
         switch self {
@@ -12,6 +13,7 @@ public enum ShortcutAction: String, CaseIterable, Sendable {
         case .askAnything: return "Ask Anything"
         case .translate: return "Translate"
         case .meetingToggle: return "Meeting recording"
+        case .agent: return "Agent"
         }
     }
 }
@@ -58,6 +60,8 @@ public final class ShortcutStore: @unchecked Sendable {
             return KeyShortcut(keyCode: 17, modifiers: [.control, .option])
         case .meetingToggle:
             return KeyShortcut(keyCode: 46, modifiers: [.option])
+        case .agent:
+            return KeyShortcut(keyCode: 5, modifiers: [.control, .option])
         }
     }
 

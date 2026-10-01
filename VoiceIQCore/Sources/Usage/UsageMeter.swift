@@ -17,6 +17,7 @@ public struct UsageScope: Equatable, Sendable {
         case .dictate: self.init(activity: .dictation, sessionID: sessionID)
         case .askAnything: self.init(activity: .askAnything, sessionID: sessionID)
         case .translate: self.init(activity: .translate, sessionID: sessionID)
+        case .agent: self.init(activity: .agent, sessionID: sessionID)
         }
     }
 }

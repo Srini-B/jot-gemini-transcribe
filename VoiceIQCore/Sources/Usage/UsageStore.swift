@@ -3,7 +3,7 @@ import GRDB
 
 /// What the user was doing when a model call happened.
 public enum UsageActivity: String, Codable, CaseIterable, Sendable {
-    case dictation, askAnything, translate, meeting, other
+    case dictation, askAnything, translate, meeting, agent, other
 
     public var displayName: String {
         switch self {
@@ -11,6 +11,7 @@ public enum UsageActivity: String, Codable, CaseIterable, Sendable {
         case .askAnything: return "Ask Anything"
         case .translate: return "Translate"
         case .meeting: return "Meetings"
+        case .agent: return "Agent"
         case .other: return "Other"
         }
     }
@@ -19,7 +20,7 @@ public enum UsageActivity: String, Codable, CaseIterable, Sendable {
 /// Which call inside that activity. One dictation is typically a live
 /// transcription plus a cleanup; one meeting is a transcription plus a summary.
 public enum UsageStage: String, Codable, Sendable {
-    case liveTranscribe, transcribe, cleanup, answer, translate, webQuery, meetingTranscribe, meetingSummary
+    case liveTranscribe, transcribe, cleanup, answer, translate, webQuery, meetingTranscribe, meetingSummary, agentStep
 
     public var displayName: String {
         switch self {
@@ -31,6 +32,7 @@ public enum UsageStage: String, Codable, Sendable {
         case .webQuery: return "Web query"
         case .meetingTranscribe: return "Meeting transcription"
         case .meetingSummary: return "Meeting notes"
+        case .agentStep: return "Agent step"
         }
     }
 }

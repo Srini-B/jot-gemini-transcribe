@@ -31,6 +31,10 @@ public enum FileLayout {
         appSupportRoot.appendingPathComponent("meetings", isDirectory: true)
     }
 
+    public static var agentRunsRoot: URL {
+        appSupportRoot.appendingPathComponent("agent-runs", isDirectory: true)
+    }
+
     /// Creates (if needed) and returns a fresh session folder. Name is
     /// timestamp-prefixed for human sortability in Finder.
     public static func makeSessionFolder(id: UUID, now: Date = Date()) throws -> URL {

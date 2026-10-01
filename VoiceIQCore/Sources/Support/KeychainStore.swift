@@ -18,6 +18,7 @@ public enum KeychainStore {
         case vercel = "vercel-ai-gateway-key"
         case openAI = "openai-api-key"
         case elevenLabs = "elevenlabs-api-key"
+        case agentProvider = "agent-provider-api-key"
 
         var label: String {
             switch self {
@@ -27,6 +28,7 @@ public enum KeychainStore {
             case .vercel: return "VoiceiQ — Vercel AI Gateway key"
             case .openAI: return "VoiceiQ — OpenAI API key"
             case .elevenLabs: return "VoiceiQ — ElevenLabs API key"
+            case .agentProvider: return "VoiceiQ — Agent provider API key"
             }
         }
 
@@ -39,9 +41,20 @@ public enum KeychainStore {
             case .vercel: return "vercelKey"
             case .openAI: return "openAIKey"
             case .elevenLabs: return "elevenLabsKey"
+            case .agentProvider: return "agentProviderKey"
             }
         }
     }
+
+    // MARK: - Agent provider override
+
+    public static func loadAgentProviderKey() -> String? { load(.agentProvider, service: service) }
+
+    @discardableResult
+    public static func saveAgentProviderKey(_ key: String) -> Bool { save(key, for: .agentProvider) }
+
+    @discardableResult
+    public static func deleteAgentProviderKey(notify: Bool = false) -> Bool { delete(.agentProvider, notify: notify) }
 
     private static func baseQuery(service: String = service, secret: Secret, dataProtection: Bool) -> [String: Any] {
         var query: [String: Any] = [

@@ -117,6 +117,36 @@ public struct TokenUsage: Equatable, Sendable, Codable {
         return usage.isEmpty && usage.reportedCostUSD == nil ? nil : usage
     }
 
+    // MARK: - Agent mode hosts
+
+    /// Anthropic Messages `usage`: `input_tokens` excludes the cached part,
+    /// which arrives as `cache_read_input_tokens`; `cache_creation_input_tokens`
+    /// is billed as input at the write rate, so it counts as text in.
+    public static func fromAnthropic(_ data: Data) -> TokenUsage? {
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let meta = root["usage"] as? [String: Any] else { return nil }
+        var usage = TokenUsage()
+        usage.cachedIn = int(meta, "cache_read_input_tokens", "cacheReadInputTokens")
+        usage.textIn = int(meta, "input_tokens", "inputTokens") + int(meta, "cache_creation_input_tokens", "cacheCreationInputTokens")
+        usage.textOut = int(meta, "output_tokens", "outputTokens")
+        return usage
+    }
+
+    /// OpenAI Responses `usage`: `input_tokens` includes the cached part
+    /// reported under `input_tokens_details.cached_tokens`.
+    public static func fromOpenAIResponses(_ data: Data) -> TokenUsage? {
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let meta = root["usage"] as? [String: Any] else { return nil }
+        var usage = TokenUsage()
+        let inDetails = meta["input_tokens_details"] as? [String: Any] ?? [:]
+        let outDetails = meta["output_tokens_details"] as? [String: Any] ?? [:]
+        usage.cachedIn = int(inDetails, "cached_tokens", "cachedTokens")
+        usage.thoughtOut = int(outDetails, "reasoning_tokens", "reasoningTokens")
+        usage.textIn = max(0, int(meta, "input_tokens", "inputTokens") - usage.cachedIn)
+        usage.textOut = max(0, int(meta, "output_tokens", "outputTokens") - usage.thoughtOut)
+        return usage
+    }
+
     // MARK: - Estimation
 
     /// Gemini bills audio at 32 tokens per second and text at roughly four

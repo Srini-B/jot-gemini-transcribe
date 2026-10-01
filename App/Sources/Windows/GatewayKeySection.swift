@@ -310,6 +310,7 @@ struct ExperimentalGatewaysSection: View {
             }
             GatewayKeySection(.openRouter)
             GatewayKeySection(.vercel)
+            AgentProviderSection()
         }
         }
         .onChange(of: provider) { _, _ in refresh() }

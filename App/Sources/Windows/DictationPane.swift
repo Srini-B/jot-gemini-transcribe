@@ -14,6 +14,7 @@ struct DictationPane: View {
     @State private var showIdleDot = SettingsStore().showIdleIndicator
     @State private var noiseHandling = SettingsStore().experimentalNoiseHandling
     @State private var liveTranscription = SettingsStore().liveTranscription
+    @State private var agentMode = SettingsStore().agentModeEnabled
     @State private var translationTarget = SettingsStore().translationTargetLanguage
     @State private var showingLanguages = false
     @State private var muteOtherAudio = SettingsStore().muteOtherAudioWhileDictating
@@ -136,6 +137,11 @@ struct DictationPane: View {
                     // leaving it tappable but inert is the exact silent no-op this
                     // app keeps writing comments about.
                     .disabled(settings.usesLegacyTranscribeEndpoint || !settings.liveTranscriptionSupported)
+                Toggle("Agent mode", isOn: $agentMode)
+                    .onChange(of: agentMode) { _, enabled in settings.setAgentModeEnabled(enabled) }
+                if agentMode {
+                    ShortcutRecorderRow(action: .agent)
+                }
             } header: {
                 Text("Experimental")
             } footer: {
@@ -145,7 +151,7 @@ struct DictationPane: View {
                     Text("Live transcription needs the provider's own API key or ElevenLabs transcription; it is unavailable through a gateway.")
                 } else {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Live streams your voice as you speak instead of uploading at the end. On Gemini it uses a separate model with a small daily request quota on free keys. If the connection stumbles it falls back to the normal upload, so nothing is lost. Loud rooms judges your voice against the actual room noise instead of a fixed level.")
+                        Text("Live streams your voice as you speak instead of uploading at the end. On Gemini it uses a separate model with a small daily request quota on free keys. If the connection stumbles it falls back to the normal upload, so nothing is lost. Loud rooms judges your voice against the actual room noise instead of a fixed level. Agent mode operates your Mac from a spoken command: it sees the screen and clicks, types and opens apps on your behalf. It needs Screen Recording and Accessibility access, and asks before anything that looks like sending, paying or deleting.")
                         // Live failing is invisible by design — it just looks like
                         // a slower dictation — so without this the question "is it
                         // actually working?" has no answer.
@@ -164,6 +170,7 @@ struct DictationPane: View {
             switch note.object as? String {
             case "smartTranscription": smartTranscription = settings.smartTranscriptionEnabled
             case "liveTranscription": liveTranscription = settings.liveTranscription
+            case "agentModeEnabled": agentMode = settings.agentModeEnabled
             case "smartCleanupPass": cleanupPass = settings.smartCleanupPassEnabled
             case "customInstructions": instructions = settings.customInstructions
             case "autoLearn": autoLearn = settings.autoLearnEnabled

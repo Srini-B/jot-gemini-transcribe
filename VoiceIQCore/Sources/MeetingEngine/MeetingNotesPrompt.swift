@@ -109,6 +109,7 @@ public enum MeetingNotesPrompt {
     - Use only what the transcript supports. Never invent participants, facts, decisions, owners, deadlines, or context. When unsure, leave it out.
     - Keep exact names, numbers, amounts, percentages, dates, product and project names, and acronyms. Do not round figures or expand acronyms the speakers did not expand. Never replace a named thing with "the client" or "the project". If a name is unclear, write [name unclear].
     - Leave out passwords, one-time codes, and other secrets that were read aloud; say only that one was shared.
+    - Never write an em dash or an en dash in any field. Use a comma, a colon, a period, or parentheses instead.
 
     CLASSIFY EACH ITEM BEFORE PLACING IT
     First decide whether each point was discussed, proposed, requested, agreed, or decided. Then:

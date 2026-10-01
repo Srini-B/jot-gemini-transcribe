@@ -27,6 +27,14 @@ final class DictationController {
     private var mainWindow: MainWindowController?
     private var onboardingWindow: OnboardingWindowController?
     private var pendingAnswer: String?
+    private lazy var agent = AgentController(panel: hud.model.agent)
+    private let agentRuns = AgentRunStore()
+    /// A coordinator session in `.agent` mode is recording or transcribing
+    /// the next command.
+    private var agentListening = false
+    private var activationObservers: [NSObjectProtocol] = []
+    /// The app in front before VoiceiQ was activated.
+    private var previousFrontmostApp: NSRunningApplication?
     private var cancellables: Set<AnyCancellable> = []
 
     private var previousState: DictationState = .idle
@@ -156,6 +164,12 @@ final class DictationController {
                 self.setPill(self.restingPill(for: self.coordinator.state))
             }
         }
+        NotificationCenter.default.addObserver(forName: .agentStopRequested, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.stopAgent() }
+        }
+        NotificationCenter.default.addObserver(forName: .agentListenTapped, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.agentShortcutPressed() }
+        }
         // Settings must take effect the moment they're flipped — not on the next
         // unrelated pill transition (dogfood: resting-dot toggle "didn't work").
         NotificationCenter.default.addObserver(forName: .gtSettingDidChange, object: nil, queue: .main) { [weak self] note in
@@ -229,8 +243,34 @@ final class DictationController {
         }
 
         coordinator.onAnswerReady = { [weak self] answer in
-            self?.pendingAnswer = answer
+            guard let self else { return }
+            if self.agentListening {
+                self.agent.submit(command: answer)
+            } else {
+                self.pendingAnswer = answer
+            }
         }
+        agent.overlay = hud
+        agent.onSessionChange = { [agentRuns] session in
+            guard session.commandCount > 0 else { return }
+            do { try agentRuns.save(session) } catch {
+                Log.history.error("agent run save failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        activationObservers = [
+            NSWorkspace.shared.notificationCenter.addObserver(
+                forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+            ) { [weak self] note in
+                guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                      app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
+                Task { @MainActor in self?.previousFrontmostApp = app }
+            },
+            NotificationCenter.default.addObserver(
+                forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in self?.handBackActivation() }
+            },
+        ]
 
         bind()
         startHistoryServices()
@@ -285,6 +325,10 @@ final class DictationController {
                 onStatusItemState?(.idle)
                 warmEngines.prewarmNext()
             }
+            // The model starts as .idleDot and the idle → hidden mapping
+            // arrives through bind() on a later main-queue hop. Paint the
+            // resting state first or the dot flashes for a frame at launch.
+            setPill(restingPill(for: coordinator.state))
             hud.show()
             // Only now does a pill exist to paint into. Called here rather than in
             // start() because the onboarding path never reaches activateEngine()
@@ -516,7 +560,8 @@ final class DictationController {
                     }
                     // Wiping history also forgets the paste-last buffer.
                     self.coordinator.clearLastResult()
-                }
+                },
+                agentRuns: agentRuns
             )
         }
         mainWindow?.show(section: section)
@@ -566,6 +611,8 @@ final class DictationController {
                 )
             case .meetingToggle:
                 self.meetingHUD.toggle()
+            case .agent:
+                self.agentShortcutPressed()
             }
         }
         globalShortcutEngine.onKeyUp = { [weak self] action in
@@ -574,10 +621,87 @@ final class DictationController {
             case .pasteLastTranscript:
                 Log.hotkey.info("paste-last shortcut fired")
                 self.pasteLastTranscript()
-            case .askAnything, .translate, .meetingToggle:
+            case .askAnything, .translate, .meetingToggle, .agent:
                 break
             }
         }
+    }
+
+    // MARK: - Agent mode
+
+    /// First press opens the session and listens. While listening, a press
+    /// ends the command. While the panel is open and idle, a press listens
+    /// again. The panel closes only from its Stop button.
+    private func agentShortcutPressed() {
+        guard SettingsStore().agentModeEnabled else { return }
+        Log.hotkey.info("agent shortcut pressed")
+        if agentListening {
+            coordinator.handle(.finalize)
+            return
+        }
+        if !agent.isOpen {
+            guard coordinator.state == .idle || coordinator.state.isTerminal, shortcutMode == nil else { return }
+            openAgentPanel()
+        }
+        guard agent.canRun, !agent.isBusy else { return }
+        startAgentListening()
+    }
+
+    #if DEBUG
+    /// voiceiq://agent[/<command>]. Nil presses the shortcut; text skips the
+    /// microphone and goes straight to the loop.
+    func debugAgent(command: String?) {
+        guard let command else { return agentShortcutPressed() }
+        guard SettingsStore().agentModeEnabled else { return }
+        if !agent.isOpen { openAgentPanel() }
+        guard agent.canRun, !agent.isBusy else { return }
+        agent.submit(command: command)
+    }
+    #endif
+
+    /// The pill panel is normally ordered in by activateEngine(); hud.show()
+    /// is idempotent, so calling it here also covers an engine that never
+    /// started (permissions still missing) and keeps the transcript visible.
+    private func openAgentPanel() {
+        hud.repositionToActiveScreen()
+        agent.start()
+        setPill(.agent)
+        hud.show()
+    }
+
+    /// The agent panel must not take focus from the app the agent works in.
+    /// A click on the panel's buttons can still activate VoiceiQ on some
+    /// systems; when that happens with no regular window open, give the
+    /// activation back to the app behind the panel.
+    private func handBackActivation() {
+        guard agent.isOpen else { return }
+        guard !NSApp.windows.contains(where: { $0.isVisible && $0.canBecomeMain }) else { return }
+        let app = previousFrontmostApp.flatMap { $0.isTerminated ? nil : $0 }
+            ?? NativeExecutor.topmostForeignWindowOwner().flatMap { NSRunningApplication(processIdentifier: $0) }
+        guard let app else {
+            Log.hotkey.info("agent panel activated VoiceiQ; no app to hand focus back to")
+            return
+        }
+        Log.hotkey.info("agent panel activated VoiceiQ; handing focus back to \(app.localizedName ?? "app", privacy: .public)")
+        app.activate()
+    }
+
+    private func startAgentListening() {
+        guard coordinator.state == .idle || coordinator.state.isTerminal else { return }
+        guard coordinator.handle(.begin, mode: .agent) else { return }
+        coordinator.handle(.lockIn)
+        shortcutMode = .agent
+        agentListening = true
+    }
+
+    private func stopAgent() {
+        if agentListening {
+            coordinator.handle(.cancel)
+            agentListening = false
+        }
+        agent.stop()
+        setPill(restingPill(for: coordinator.state))
+        if !engineActive { hud.hide() }
     }
 
     /// One press starts a hands-free Ask Anything or Translate session, the
@@ -601,6 +725,8 @@ final class DictationController {
             mode = .translate(target: SettingsStore().translationTargetLanguage)
         case .dictate:
             mode = .dictate
+        case .agent:
+            mode = .agent
         }
         guard coordinator.handle(.begin, mode: mode, selectedTextIsSettable: settable) else { return }
         coordinator.handle(.lockIn)
@@ -710,6 +836,7 @@ final class DictationController {
         // wiped the mode and let the dictation key fall through to "begin ignored".
         if state.isTerminal {
             shortcutMode = nil
+            agentListening = false
         }
         defer { previousState = state }
         dismissTask?.cancel()
@@ -808,7 +935,7 @@ final class DictationController {
         default: return true
         }
         switch hud.model.state {
-        case .answer, .meetingPrompt: return true
+        case .answer, .agent, .meetingPrompt: return true
         default: return shortcutMode != nil
         }
     }
@@ -826,6 +953,8 @@ final class DictationController {
                 setPill(.answer(answer))
                 return
             }
+            // An agent command is handed to the loop; the panel shows it.
+            if agent.isOpen { return }
             showSuccessBadge(words: coordinator.lastResult.map { $0.split(separator: " ").count })
         case .copiedToClipboard:
             earcons.play(.success)
@@ -864,6 +993,7 @@ final class DictationController {
     // MARK: - Pill helpers
 
     private func setPill(_ state: PillState) {
+        if agent.isOpen, reflectInAgentPanel(state) { return }
         // "Only while dictating" preference: the resting dot becomes nothing.
         if case .idleDot = state, !SettingsStore().showIdleIndicator {
             hud.model.state = .hidden
@@ -873,6 +1003,33 @@ final class DictationController {
         if case .processing = state {} else {
             hud.model.slow = false
         }
+    }
+
+    /// While the agent panel is open, the pill states a dictation session
+    /// would show become the panel's phase line instead, so the transcript
+    /// never flips away. True when the state was absorbed.
+    private func reflectInAgentPanel(_ state: PillState) -> Bool {
+        let panel = hud.model.agent
+        let wasListening = panel.phase == .listening || panel.phase == .transcribing
+        switch state {
+        case .agent:
+            return false
+        case .listening:
+            panel.phase = .listening
+            panel.notice = nil
+        case .processing:
+            panel.phase = .transcribing
+        case .error(let message), .notice(let message):
+            panel.notice = message
+            if wasListening { panel.phase = .idle }
+        case .success, .idleDot, .hidden:
+            if wasListening { panel.phase = .idle }
+        case .answer, .meetingPrompt, .meetingRecording, .updateReady:
+            return false
+        }
+        hud.model.state = .agent
+        hud.model.slow = false
+        return true
     }
 
     /// Notices about BACKGROUND events (retry drain, recovery)

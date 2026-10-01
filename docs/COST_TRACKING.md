@@ -12,9 +12,17 @@ time, activity, stage, model, session ID, token counts by modality (text,
 audio, image, cached in; text, audio, thought out), an `isEstimated` flag,
 and `costUSD`.
 
-Activities: `dictation`, `askAnything`, `translate`, `meeting`, `other`.
-Stages: `liveTranscribe`, `transcribe`, `cleanup`, `answer`, `translate`,
-`webQuery`, `meetingTranscribe`, `meetingSummary`.
+Activities: `dictation`, `askAnything`, `translate`, `meeting`, `agent`,
+`other`. Stages: `liveTranscribe`, `transcribe`, `cleanup`, `answer`,
+`translate`, `webQuery`, `meetingTranscribe`, `meetingSummary`, `agentStep`.
+
+Agent mode records one `agentStep` per model call. Its transports
+(`AgentEngine/AgentTransport+*.swift`) do not go through `GeminiClient.post`;
+each parses its own usage envelope with `TokenUsage.fromOpenAI`,
+`fromOpenAIResponses`, `fromAnthropic`, or `fromGenerateContent` and calls
+`UsageMeter.record(stage: .agentStep, …)`. The session ID is the agent
+session's UUID, so a whole session can be summed. Cached input tokens land in
+the cached-in column when the host reports them. See `docs/AGENT-MODE.md`.
 
 The ledger is separate from `history.sqlite` so deleting a dictation or its
 audio never changes what it cost.

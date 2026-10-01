@@ -20,7 +20,7 @@ struct PillView: View {
 
     private var hasInteractiveControls: Bool {
         switch model.state {
-        case .idleDot, .listening(locked: true), .answer, .meetingPrompt, .meetingRecording, .updateReady: return true
+        case .idleDot, .listening(locked: true), .answer, .agent, .meetingPrompt, .meetingRecording, .updateReady: return true
         default: return false
         }
     }
@@ -108,6 +108,11 @@ struct PillView: View {
 
         case .answer(let answer):
             AnswerView(answer: answer)
+                .frame(width: 520, height: 260)
+                .transition(.scale(scale: 0.94, anchor: .bottom).combined(with: .opacity))
+
+        case .agent:
+            AgentPanelView(model: model.agent)
                 .frame(width: 520, height: 260)
                 .transition(.scale(scale: 0.94, anchor: .bottom).combined(with: .opacity))
 
@@ -223,6 +228,7 @@ struct PillView: View {
         case .success(let words): return "Inserted\(words.map { " \($0) words" } ?? "")"
         case .notice(let message): return message
         case .answer: return "Answer"
+        case .agent: return "Agent"
         case .error(let message): return "Error — \(message)"
         case .meetingPrompt(let name): return "Meeting detected in \(name)"
         case .meetingRecording: return "Recording meeting"

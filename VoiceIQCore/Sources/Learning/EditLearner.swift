@@ -54,6 +54,16 @@ public final class EditLearner {
     /// the user was on the way from "Paystack" to "pstack").
     nonisolated static let settleSeconds: TimeInterval = 4
 
+    /// An auto-learned word edited again within this long of being learned
+    /// (or last renamed) is treated as a fix to that word, not a new one.
+    nonisolated static let reEditSeconds: TimeInterval = 120
+
+    private nonisolated static func isFreshlyLearned(_ entry: DictionaryEntry, as term: String) -> Bool {
+        entry.source == .auto
+            && entry.term.lowercased() == term
+            && Date().timeIntervalSince(entry.updatedAt) <= reEditSeconds
+    }
+
     private let dictionary: DictionaryStore
     private var fields: [FieldKey: TrackedField] = [:]
     /// The fields still being polled, for `captureBeforeReturn` on the tap thread.
@@ -250,6 +260,23 @@ public final class EditLearner {
         for correction in corrections {
             let original = correction.original.lowercased()
             let replacement = correction.replacement.lowercased()
+            if let index = known.firstIndex(where: { Self.isFreshlyLearned($0, as: original) }) {
+                // The user went back to a word learned moments ago: that is a
+                // correction of the correction, so the entry follows the edit.
+                let stale = known.remove(at: index)
+                let clashes = known.contains { $0.term.lowercased() == replacement }
+                if clashes || CommonWords.isOrdinary(correction.replacement) {
+                    dictionary.remove(id: stale.id)
+                    Log.learning.info("Dropped a just-learned word the user edited again")
+                } else {
+                    dictionary.update(id: stale.id, term: correction.replacement)
+                    if let entry = dictionary.entries().first(where: { $0.id == stale.id }) {
+                        learned.append(entry)
+                        known.append(entry)
+                    }
+                }
+                continue
+            }
             guard !known.contains(where: {
                 let term = $0.term.lowercased()
                 let misspelling = $0.misspelling?.lowercased()

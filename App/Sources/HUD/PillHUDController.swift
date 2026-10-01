@@ -7,7 +7,7 @@ import VoiceIQCore
 /// animates its own bounds inside (avoids NSWindow frame-animation jank).
 /// The panel never becomes key except transiently for the locked-state stop button.
 @MainActor
-final class PillHUDController {
+final class PillHUDController: AgentOverlay {
     let model = PillModel()
     private let panel: NSPanel
     private var stateObservation: AnyCancellable?
@@ -90,6 +90,12 @@ final class PillHUDController {
         panel.orderOut(nil)
     }
 
+    /// Fades the panel out for a screen capture without ordering it out, so
+    /// its position and the agent transcript survive the capture.
+    func setHidden(_ hidden: Bool) {
+        panel.alphaValue = hidden ? 0 : 1
+    }
+
     /// While the pill is up it lives on whichever display the pointer is on.
     /// People dictate into one screen and glance at another to read from it;
     /// the pill goes with the glance so the live text is never behind them.
@@ -110,10 +116,13 @@ final class PillHUDController {
     private func updatePanel(for state: PillState) {
         let isAnswer: Bool
         if case .answer = state { isAnswer = true } else { isAnswer = false }
-        let size = isAnswer ? answerPanelSize() : NSSize(width: 600, height: 96)
+        let isAgent: Bool
+        if case .agent = state { isAgent = true } else { isAgent = false }
+        let size = isAnswer || isAgent ? answerPanelSize() : NSSize(width: 600, height: 96)
         let oldOrigin = panel.frame.origin
         panel.setFrame(NSRect(origin: oldOrigin, size: size), display: true, animate: panel.isVisible)
         reposition()
+        // The agent panel stays until Stop: no click-away or Esc dismissal.
         isAnswer ? installAnswerMonitors() : removeAnswerMonitors()
     }
 

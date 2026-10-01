@@ -165,6 +165,17 @@ public struct DictionaryStore: Sendable {
         save(entries().filter { $0.id != id })
     }
 
+    /// Renames an entry in place. The id, origin and `learnedFrom` survive
+    /// so sync treats it as an edit, not a removal plus an addition.
+    public func update(id: UUID, term: String) {
+        let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (1...60).contains(trimmed.count) else { return }
+        var current = entries()
+        guard let index = current.firstIndex(where: { $0.id == id }) else { return }
+        current[index].term = trimmed
+        save(current)
+    }
+
     public func toggleStar(id: UUID) {
         var current = entries()
         if let index = current.firstIndex(where: { $0.id == id }) {

@@ -309,6 +309,10 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
         switch context.mode {
         case .dictate:
             return raw
+        case .agent:
+            // The command goes to the agent model as spoken; only the
+            // dictionary's hard replacements apply.
+            return ReplacementEngine.apply(dictionary.replacementRules(), to: raw)
         case .askAnything(let selectedText):
             var webContext: WebContext?
             if KeychainStore.loadTinyFishKey() != nil {
