@@ -328,7 +328,19 @@ public actor GeminiClient {
                 UsageMeter.record(stage: stage, model: modelLabel, usage: usage)
             }
         case 401:
+            // ElevenLabs answers 401 for an exhausted credit balance as well as
+            // for a bad key (`quota_exceeded`): that is "add credits", not "fix
+            // your key", and it clears on top-up, so it blocks the queue like a
+            // daily quota instead of failing the row.
+            if via == .elevenLabs {
+                let detail = Self.elevenLabsErrorDetail(from: data)
+                Log.transcription.error("GeminiClient: 401 on \(path, privacy: .public) via elevenLabs — \(detail.kinds.joined(separator: "/"), privacy: .public): \(detail.message ?? "no detail", privacy: .private)")
+                if Self.isElevenLabsQuota(detail) { throw TranscriptionError.rateLimitedDaily }
+            }
             throw TranscriptionError.auth
+        case 402 where via == .elevenLabs:
+            Log.transcription.error("GeminiClient: 402 on \(path, privacy: .public) via elevenLabs — \(Self.errorMessage(from: data) ?? "no detail", privacy: .private)")
+            throw TranscriptionError.rateLimitedDaily
         case 402:
             // Gateways: the key is fine, the account balance is not. Retryable
             // so the recording stays queued until credits are added.

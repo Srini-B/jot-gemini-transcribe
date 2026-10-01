@@ -473,6 +473,8 @@ final class DictationController {
             let message: String
             if case .auth = error {
                 message = "Queued dictations are waiting — fix your API key in Settings → Advanced"
+            } else if SettingsStore().transcriptionSource == .elevenLabs {
+                message = "ElevenLabs credits are used up — queued dictations will retry once you add credits"
             } else {
                 message = "Daily quota reached — queued dictations will retry later"
             }
@@ -1182,7 +1184,11 @@ final class DictationController {
         case .badRequest: return "\(providerName) rejected the request — saved to History"
         case .rateLimited: return "Rate limited — History will retry it shortly"
         case .noMicrophone: return "No microphone found — connect one to dictate"
-        case .quotaExhausted: return "Daily quota reached for your \(providerName) key. Saved to History"
+        case .quotaExhausted:
+            // ElevenLabs credits are a monthly balance, not a daily quota.
+            return SettingsStore().transcriptionSource == .elevenLabs
+                ? "ElevenLabs credits are used up. Saved to History"
+                : "Daily quota reached for your \(providerName) key. Saved to History"
         case .timeout: return "Timed out — saved to History"
         case .validation: return "Couldn't transcribe — saved to History"
         case .safetyBlocked: return "The API declined this one — saved to History"

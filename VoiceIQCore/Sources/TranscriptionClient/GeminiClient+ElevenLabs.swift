@@ -155,4 +155,13 @@ extension GeminiClient {
             return ([], nil)
         }
     }
+
+    /// `quota_exceeded` (legacy `status`, now `code`) or the `payment_required`
+    /// type: the key works, the credit balance does not.
+    static func isElevenLabsQuota(_ detail: (kinds: [String], message: String?)) -> Bool {
+        detail.kinds.contains { kind in
+            let lower = kind.lowercased()
+            return lower.contains("quota") || lower.contains("payment") || lower.contains("credit")
+        }
+    }
 }
