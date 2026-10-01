@@ -558,6 +558,9 @@ final class KeyboardInserter: TextInserting {
         case .dictate: mode = .dictate
         case .translate: mode = .translate
         case .askAnything: mode = .ask
+        // The iPhone never starts an agent session; its transcript is
+        // handed to the caller, not inserted. Deliver as plain text.
+        case .agent: mode = .dictate
         }
         onDeliver?(text, mode)
         return .inserted
