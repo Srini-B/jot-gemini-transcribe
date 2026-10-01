@@ -390,7 +390,6 @@ struct AdvancedPane: View {
                 geminiKeySection
             } else {
                 GatewayKeySection(.openAI)
-                OpenAIModelsSection()
             }
 
             TranscriptionSourceSection(provider: provider)
@@ -399,6 +398,8 @@ struct AdvancedPane: View {
 
             if provider == .gemini {
                 geminiModelSections
+            } else {
+                OpenAIModelsSection()
             }
 
             ExperimentalGatewaysSection(provider: provider)
