@@ -579,6 +579,7 @@ public final class DictationCoordinator: ObservableObject {
             $0.rawTranscript = outcome.rawTranscript
             $0.cleanedTranscript = outcome.cleanedTranscript
             $0.modelID = outcome.modelID
+            $0.errorMessage = outcome.cleanupNote
             $0.status = .transcribing
         }
         apply(.transcriptReady)

@@ -145,10 +145,11 @@ final class AppModel: ObservableObject {
     private func startHistoryServices() {
         guard let historyStore else { return }
         let scanner = RecoveryScanner(store: historyStore, transcription: transcription)
-        scanner.onRecovered = { [weak self] message in self?.banner = message }
+        scanner.onRecovered = { [weak self] _ in self?.banner = RecoveryNotice.message(for: .relaunch, copied: false) }
         recoveryScanner = scanner
         let queue = RetryQueue(store: historyStore, transcription: transcription)
-        queue.onDrained = { [weak self] count in
+        queue.onDrained = { [weak self] texts in
+            let count = texts.count
             self?.banner = count == 1 ? "A queued dictation is ready in History" : "\(count) queued dictations are ready in History"
         }
         retryQueue = queue

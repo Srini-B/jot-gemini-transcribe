@@ -13,11 +13,15 @@ public struct TranscriptionResult: Equatable, Sendable {
     public var rawTranscript: String
     public var cleanedTranscript: String
     public var modelID: String
+    /// Why the writing rules did not shape `cleanedTranscript`, when they were
+    /// on and did not. Shown in History as the row's details.
+    public var cleanupNote: String?
 
-    public init(rawTranscript: String, cleanedTranscript: String, modelID: String) {
+    public init(rawTranscript: String, cleanedTranscript: String, modelID: String, cleanupNote: String? = nil) {
         self.rawTranscript = rawTranscript
         self.cleanedTranscript = cleanedTranscript
         self.modelID = modelID
+        self.cleanupNote = cleanupNote
     }
 }
 

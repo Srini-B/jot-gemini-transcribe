@@ -14,7 +14,8 @@ public final class RetryQueue {
     private var lastPathSatisfied = false
     private var scheduledDrain: Task<Void, Never>?
 
-    public var onDrained: ((Int) -> Void)?
+    /// The text of each dictation a drain recovered, oldest first.
+    public var onDrained: (([String]) -> Void)?
     /// Fired once per blocked drain: the queue hit an account-level wall
     /// (auth/daily quota) — rows KEEP their queued promise and retry on the
     /// next external signal (launch, network flap, key change).
@@ -61,19 +62,19 @@ public final class RetryQueue {
 
         let retryable = store.retryableRecords()
         guard !retryable.isEmpty else { return }
-        var recoveredCount = 0
+        var recovered: [String] = []
 
         for record in retryable {
             switch await process(record) {
-            case .recovered:
-                recoveredCount += 1
+            case .recovered(let text):
+                recovered.append(text)
             case .stillOffline:
                 Log.history.info("RetryQueue: still offline — pausing drain")
-                if recoveredCount > 0 { onDrained?(recoveredCount) }
+                if !recovered.isEmpty { onDrained?(recovered) }
                 return
             case .rateLimited(let wait):
                 Log.history.info("RetryQueue: rate limited — draining again in \(Int(wait))s")
-                if recoveredCount > 0 { onDrained?(recoveredCount) }
+                if !recovered.isEmpty { onDrained?(recovered) }
                 scheduleDrain(after: wait)
                 return
             case .blocked(let error):
@@ -81,15 +82,15 @@ public final class RetryQueue {
                 // their queued status, tell the user ONCE — never silently convert
                 // "will retry automatically" into permanent failures.
                 Log.history.warning("RetryQueue: drain blocked (\(String(describing: error))) — keeping queue intact")
-                if recoveredCount > 0 { onDrained?(recoveredCount) }
+                if !recovered.isEmpty { onDrained?(recovered) }
                 onDrainBlocked?(error)
                 return
             case .failed, .skipped:
                 continue
             }
         }
-        if recoveredCount > 0 {
-            onDrained?(recoveredCount)
+        if !recovered.isEmpty {
+            onDrained?(recovered)
         }
     }
 
@@ -105,8 +106,8 @@ public final class RetryQueue {
         draining = true
         defer { draining = false }
         switch await process(record, again: true) {
-        case .recovered:
-            return .recovered
+        case .recovered(let text):
+            return .recovered(text: text)
         case .stillOffline:
             return .stillOffline
         case .rateLimited(let wait):
@@ -124,7 +125,9 @@ public final class RetryQueue {
 
     /// User-facing outcome of a manual Retry — a silent no-op reads as broken.
     public enum RetryOutcome {
-        case recovered, stillOffline, blocked, failed, alreadyDone, busy
+        case stillOffline, blocked, failed, alreadyDone, busy
+        /// The new text, also written to the History row.
+        case recovered(text: String)
         /// The throttle named its wait; a drain is already scheduled for it.
         case rateLimited(retryIn: TimeInterval)
     }
@@ -135,7 +138,7 @@ public final class RetryQueue {
     ]
 
     private enum ProcessResult {
-        case recovered, stillOffline, blocked(TranscriptionError), failed, skipped
+        case recovered(String), stillOffline, blocked(TranscriptionError), failed, skipped
         case rateLimited(TimeInterval)
     }
 
@@ -165,7 +168,7 @@ public final class RetryQueue {
             meta.errorCode = nil
             meta.write(to: folder)
             store.upsert(meta: meta, folder: folder)
-            return .recovered
+            return .recovered(meta.cleanedTranscript ?? meta.rawTranscript ?? "")
         }
         guard FileManager.default.fileExists(atPath: cafURL.path) else {
             meta.status = .failed
@@ -193,14 +196,14 @@ public final class RetryQueue {
             meta.cleanedTranscript = result.cleanedTranscript
             meta.modelID = result.modelID
             meta.errorCode = nil
-            meta.errorMessage = nil
+            meta.errorMessage = result.cleanupNote
             // .recovered, NOT .awaitingChip: the text was never put on the
             // clipboard, so no chip may promise "Ready to paste". A finished
             // dictation keeps its status: it was delivered, just differently.
             if !finished { meta.status = .recovered }
             meta.write(to: folder)
             store.upsert(meta: meta, folder: folder)
-            return .recovered
+            return .recovered(result.cleanedTranscript)
         } catch let error as TranscriptionError {
             // A finished dictation keeps its text; only report the failure.
             if finished {

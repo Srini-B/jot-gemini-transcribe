@@ -64,12 +64,7 @@ public actor GeminiClient {
         openAIConfig: @escaping @Sendable () -> OpenAIConfig = { OpenAIConfig() },
         route: @escaping @Sendable () -> ModelRoute = { ModelRoute(provider: .gemini, gateway: .direct) }
     ) {
-        let config = URLSessionConfiguration.ephemeral
-        config.waitsForConnectivity = false // fail fast into the retry/queue path
-        // Recordings are no longer capped at 10 minutes; a one-hour upload on a
-        // slow uplink needs more than the old 600s resource budget.
-        config.timeoutIntervalForResource = 3_600
-        self.session = URLSession(configuration: config)
+        self.session = Self.makeSession()
         self.apiKey = apiKey
         self.openRouterKey = openRouterKey
         self.vercelKey = vercelKey
@@ -279,19 +274,8 @@ public actor GeminiClient {
 
         let data: Data
         let response: URLResponse
-        let started = DispatchTime.now()
-        defer {
-            // One line per model call, so a slow dictation can be split into
-            // upload/transcription and cleanup from the device log alone.
-            let ms = Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000
-            Log.transcription.info("call \(stage.rawValue, privacy: .public) via \(via.rawValue, privacy: .public) (\(modelLabel, privacy: .public)) took \(ms, format: .fixed(precision: 0))ms, sent \(body.count) bytes")
-        }
         do {
-            // URLRequest.timeoutInterval is an IDLE timer; enforce the true
-            // overall deadline ourselves (audit L5).
-            (data, response) = try await Self.withDeadline(seconds: deadline) { [session, request] in
-                try await session.data(for: request)
-            }
+            (data, response) = try await Self.perform(request, deadline: deadline, stage: stage, via: via, modelLabel: modelLabel)
         } catch is DeadlineExceeded {
             throw TranscriptionError.timeout
         } catch let error as URLError {

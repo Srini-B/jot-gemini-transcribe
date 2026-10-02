@@ -209,6 +209,7 @@ struct TranscriptionSourceSection: View {
     @State private var source = SettingsStore().preferredTranscriptionSource
     @State private var hasElevenLabsKey = KeychainStore.loadElevenLabsKey() != nil
     @State private var hasGatewayKey = SettingsStore().maiTranscribeEndpoint != nil
+    @State private var maiStyle = SettingsStore().maiTranscribeStyle
 
     private var options: [TranscriptionSource] {
         TranscriptionSource.allCases.filter { source in
@@ -231,6 +232,15 @@ struct TranscriptionSourceSection: View {
                     .onChange(of: source) { _, value in
                         if value != settings.transcriptionSource { settings.setPreferredTranscriptionSource(value) }
                     }
+                    if source == .maiTranscribe {
+                        Picker("Transcript style", selection: $maiStyle) {
+                            ForEach(MAITranscribeStyle.allCases) { Text($0.displayName).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+                        .onChange(of: maiStyle) { _, value in
+                            if value != settings.maiTranscribeStyle { settings.setMAITranscribeStyle(value) }
+                        }
+                    }
                 }
             }
             GatewayKeySection(.elevenLabs)
@@ -243,6 +253,7 @@ struct TranscriptionSourceSection: View {
         hasElevenLabsKey = KeychainStore.loadElevenLabsKey() != nil
         hasGatewayKey = settings.maiTranscribeEndpoint != nil
         source = settings.transcriptionSource
+        maiStyle = settings.maiTranscribeStyle
     }
 }
 

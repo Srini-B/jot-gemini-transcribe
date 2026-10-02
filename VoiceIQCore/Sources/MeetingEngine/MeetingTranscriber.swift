@@ -351,7 +351,8 @@ public struct MeetingTranscriber: Sendable {
         let via: ModelRoute
         switch speech {
         case .elevenLabs: return try await client.elevenLabsDiarize(audio: flac, audioSeconds: seconds, deadline: 600)
-        case .mai(let endpoint): return try await client.maiDiarize(audio: flac, deadline: 600, via: endpoint)
+        case .mai(let endpoint): return try await client.maiDiarize(audio: flac, deadline: 600, via: endpoint,
+                                                                       style: SettingsStore().maiTranscribeStyle)
         case .model(let route): via = route
         }
         switch (via.provider, via.gateway) {

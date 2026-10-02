@@ -4,11 +4,13 @@ import Foundation
 /// the MOST RECENT interrupted session is auto-transcribed (that's the one the
 /// user actually lost mid-flow); older interrupted folders become manual
 /// "Recovered — Retry" rows. Never auto-insert — the focus context is gone.
+/// The app may also copy the recovered text, when the user turned that on.
 @MainActor
 public final class RecoveryScanner {
     private let store: HistoryStore
     private let transcription: TranscriptionServicing
 
+    /// The text of the dictation the launch scan recovered.
     public var onRecovered: ((String) -> Void)?
 
     public init(store: HistoryStore, transcription: TranscriptionServicing) {
@@ -40,7 +42,7 @@ public final class RecoveryScanner {
                 meta.write(to: folder)
                 store.upsert(meta: meta, folder: folder)
                 if index == 0 {
-                    onRecovered?("Recovered your last dictation — it's in History")
+                    onRecovered?(meta.cleanedTranscript ?? meta.rawTranscript ?? "")
                 }
                 continue
             }
@@ -72,10 +74,11 @@ public final class RecoveryScanner {
                     meta.rawTranscript = result.rawTranscript
                     meta.cleanedTranscript = result.cleanedTranscript
                     meta.modelID = result.modelID
-                    meta.status = .recovered // text ready, user decides in History — never on the clipboard
+                    meta.errorMessage = result.cleanupNote
+                    meta.status = .recovered // text ready in History; the app copies it only when the user turned that on
                     meta.write(to: folder)
                     store.upsert(meta: meta, folder: folder)
-                    onRecovered?("Recovered your last dictation — it's in History")
+                    onRecovered?(result.cleanedTranscript)
                     Log.history.info("RecoveryScanner: recovered \(record.id, privacy: .public)")
                 } catch {
                     meta.status = .queuedForRetry

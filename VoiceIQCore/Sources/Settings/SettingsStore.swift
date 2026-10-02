@@ -120,6 +120,17 @@ public struct SettingsStore: Sendable {
         }
     }
 
+    /// Clean unless the user picked Verbatim: the writing rules exist to
+    /// remove fillers, and when they cannot run the transcript should not
+    /// carry every "uh" into the text.
+    public var maiTranscribeStyle: MAITranscribeStyle {
+        MAITranscribeStyle(rawValue: Self.defaults.string(forKey: "maiTranscribeStyle") ?? "") ?? .clean
+    }
+
+    public func setMAITranscribeStyle(_ style: MAITranscribeStyle) {
+        Self.set(style.rawValue, forKey: "maiTranscribeStyle")
+    }
+
     /// The picked transcription source as a meeting route; nil when the
     /// provider's meeting routes transcribe.
     public var meetingTranscriptionRoute: MeetingTranscriber.SpeechRoute? {
@@ -207,6 +218,17 @@ public struct SettingsStore: Sendable {
 
     public func setMuteOtherAudioWhileDictating(_ enabled: Bool) {
         Self.set(enabled, forKey: "muteOtherAudioWhileDictating")
+    }
+
+    /// On unless the user turned it off. Read from the stored value only when
+    /// one exists, so an explicit Off survives and every install that never
+    /// touched the toggle gets the default with no migration write.
+    public var copyRecoveredToClipboard: Bool {
+        Self.defaults.object(forKey: "copyRecoveredToClipboard") as? Bool ?? true
+    }
+
+    public func setCopyRecoveredToClipboard(_ enabled: Bool) {
+        Self.set(enabled, forKey: "copyRecoveredToClipboard")
     }
 
     public var screenContextEnabled: Bool {

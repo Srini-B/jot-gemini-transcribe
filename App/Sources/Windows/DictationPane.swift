@@ -18,6 +18,7 @@ struct DictationPane: View {
     @State private var showingLanguages = false
     @State private var muteOtherAudio = SettingsStore().muteOtherAudioWhileDictating
     @State private var screenContext = SettingsStore().screenContextEnabled
+    @State private var copyRecovered = SettingsStore().copyRecoveredToClipboard
     @State private var preferredMicrophone = SettingsStore().preferredInputDeviceUID
     @State private var microphones = AudioInputDevices.list()
 
@@ -55,6 +56,10 @@ struct DictationPane: View {
                 Toggle("Mute other audio while dictating", isOn: $muteOtherAudio)
                     .onChange(of: muteOtherAudio) { _, enabled in
                         settings.setMuteOtherAudioWhileDictating(enabled)
+                    }
+                Toggle("Copy recovered dictations to the clipboard", isOn: $copyRecovered)
+                    .onChange(of: copyRecovered) { _, enabled in
+                        settings.setCopyRecoveredToClipboard(enabled)
                     }
             }
 
@@ -152,6 +157,7 @@ struct DictationPane: View {
             case "translationTargetLanguage": translationTarget = settings.translationTargetLanguage
             case "muteOtherAudioWhileDictating": muteOtherAudio = settings.muteOtherAudioWhileDictating
             case "screenContextEnabled": screenContext = settings.screenContextEnabled
+            case "copyRecoveredToClipboard": copyRecovered = settings.copyRecoveredToClipboard
             case "preferredInputDeviceUID": preferredMicrophone = settings.preferredInputDeviceUID
             default: break
             }

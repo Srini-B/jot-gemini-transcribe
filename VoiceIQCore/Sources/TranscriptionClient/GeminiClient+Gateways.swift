@@ -59,10 +59,13 @@ extension GeminiClient {
     }
 
     func gatewayTranscribe(audio: Data, mimeType: String = "audio/flac", model: String,
-                           deadline: TimeInterval, stage: UsageStage, via: ModelEndpoint) async throws -> String {
+                           deadline: TimeInterval, stage: UsageStage, via: ModelEndpoint,
+                           maiStyle: MAITranscribeStyle? = nil) async throws -> String {
         let modelID = Self.gatewayModelID(model)
+        let azure = maiStyle.map { Self.maiAzureOptions(style: $0, via: via) }
         if via == .vercel {
-            let body: [String: Any] = ["audio": audio.base64EncodedString(), "mediaType": mimeType]
+            var body: [String: Any] = ["audio": audio.base64EncodedString(), "mediaType": mimeType]
+            if let azure { body["providerOptions"] = ["azure": azure] }
             let data = try await post(
                 path: "transcription-model",
                 body: try JSONSerialization.data(withJSONObject: body),
@@ -72,10 +75,11 @@ extension GeminiClient {
             )
             return try Self.extractGatewayTranscript(from: data)
         }
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "model": modelID,
             "input_audio": ["data": audio.base64EncodedString(), "format": Self.audioFormat(mimeType)],
         ]
+        if let azure { body["provider"] = ["options": ["azure": azure]] }
         let data = try await post(
             path: "audio/transcriptions",
             body: try JSONSerialization.data(withJSONObject: body),
@@ -90,21 +94,23 @@ extension GeminiClient {
     /// gateways forward Azure Speech's own options; OpenRouter's `diarize`
     /// field is refused for this model. PROBED 2026-10-02 on a three-voice
     /// 40 s call: both answered with every word under the right speaker.
-    ///  - OpenRouter: `provider.options.azure` with `diarization.enabled` and
-    ///    `modelOptions.timestamps: word`, plus `verbose_json`. The answer's
-    ///    `words` carry `speaker`, `start` and `end`.
+    ///  - OpenRouter: `provider.options.azure` with `diarization.enabled`,
+    ///    plus `verbose_json` and word granularity. The answer's `words` carry
+    ///    `speaker`, `start` and `end`. Word timestamps and the style now go in
+    ///    `enhancedMode.modelOptions` (see `maiAzureOptions`).
     ///  - Vercel: `providerOptions.azure` with `diarization.enabled` and a
     ///    flat `timestamps: word` (`modelOptions` is refused as "invalid azure
     ///    provider options"). Speakers come only in
     ///    `providerMetadata.azure.phrases`, each with `speaker` and `words`
     ///    timed in milliseconds.
-    func maiDiarize(audio: Data, deadline: TimeInterval, via: ModelEndpoint) async throws -> [DiarizedWord] {
+    func maiDiarize(audio: Data, deadline: TimeInterval, via: ModelEndpoint,
+                    style: MAITranscribeStyle) async throws -> [DiarizedWord] {
         let model = Self.maiTranscribeModel
         let data: Data
         if via == .vercel {
             let body: [String: Any] = [
                 "audio": audio.base64EncodedString(), "mediaType": "audio/flac",
-                "providerOptions": ["azure": ["diarization": ["enabled": true], "timestamps": "word"]],
+                "providerOptions": ["azure": Self.maiAzureOptions(style: style, via: .vercel, diarize: true)],
             ]
             data = try await post(path: "transcription-model", body: try JSONSerialization.data(withJSONObject: body),
                                   endpoint: Self.vercelTranscriptionEndpoint, deadline: deadline, modelLabel: model,
@@ -115,7 +121,7 @@ extension GeminiClient {
                 "model": model,
                 "input_audio": ["data": audio.base64EncodedString(), "format": "flac"],
                 "response_format": "verbose_json", "timestamp_granularities": ["word"],
-                "provider": ["options": ["azure": ["diarization": ["enabled": true], "modelOptions": ["timestamps": "word"]]]],
+                "provider": ["options": ["azure": Self.maiAzureOptions(style: style, via: .openRouter, diarize: true)]],
             ]
             data = try await post(path: "audio/transcriptions", body: try JSONSerialization.data(withJSONObject: body),
                                   endpoint: Self.openRouterEndpoint, deadline: deadline, modelLabel: model,
@@ -131,6 +137,31 @@ extension GeminiClient {
             throw TranscriptionError.network("no_speaker_labels")
         }
         return words
+    }
+
+    /// Azure Speech options for MAI Transcribe 2, in each gateway's shape.
+    /// PROBED 2026-10-02 from the signed app on the Mac mini, on a real
+    /// dictation with one "uh" and a 48 s one with sixteen:
+    ///  - OpenRouter forwards `provider.options.azure` into Azure's request
+    ///    definition, merging nested objects, so the style goes where Azure
+    ///    documents it: `enhancedMode.modelOptions.transcribeStyle`. "clean"
+    ///    removed every "uh"; "verbatim" kept them. A top-level `modelOptions`
+    ///    or a flat `transcribeStyle` is accepted with 200 and has no effect.
+    ///  - Vercel takes `providerOptions.azure` with model options flat:
+    ///    `transcribeStyle` "clean" removed every "uh", "verbatim" kept them,
+    ///    and `modelOptions` is refused (400 "invalid azure provider options").
+    static func maiAzureOptions(style: MAITranscribeStyle, via: ModelEndpoint, diarize: Bool = false) -> [String: Any] {
+        var options: [String: Any] = [:]
+        if diarize { options["diarization"] = ["enabled": true] }
+        if via == .vercel {
+            options["transcribeStyle"] = style.rawValue
+            if diarize { options["timestamps"] = "word" }
+        } else {
+            var modelOptions: [String: Any] = ["transcribeStyle": style.rawValue]
+            if diarize { modelOptions["timestamps"] = "word" }
+            options["enhancedMode"] = ["modelOptions": modelOptions]
+        }
+        return options
     }
 
     /// OpenRouter's `words`, or the Azure phrases Vercel passes through in

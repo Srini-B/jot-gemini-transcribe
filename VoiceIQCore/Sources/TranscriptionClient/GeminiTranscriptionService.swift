@@ -25,8 +25,8 @@ import Foundation
 /// typed TranscriptionError mapping to the failure matrix.
 public struct GeminiTranscriptionService: TranscriptionServicing {
     static let untranslatableToken = "<<UNTRANSLATABLE>>"
-    private let client: GeminiClient
-    private let settings: SettingsStore
+    let client: GeminiClient
+    let settings: SettingsStore
 
     /// Cleanup budget. The pass reads the whole transcript and writes it back, so
     /// the budget grows with the text: a one-line dictation gets ~12 s, a
@@ -153,11 +153,15 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
         }
 
         let second = await Self.awaitSecondOpinion(secondOpinion, raw: trimmedRaw, audioSeconds: durationSeconds)
-        let cleaned = await cleanupOrFallback(raw: trimmedRaw, context: context, config: config, second: second)
+        let cleanup = await cleanupOrFallback(
+            raw: trimmedRaw, context: context, config: config, second: second,
+            rawHasFillers: transcriptKeepsFillers(source: source, policy: policy)
+        )
         return TranscriptionResult(
             rawTranscript: trimmedRaw,
-            cleanedTranscript: cleaned,
-            modelID: "\(names.transcribe)+\(names.writing)"
+            cleanedTranscript: cleanup.text,
+            modelID: "\(names.transcribe)+\(names.writing)",
+            cleanupNote: cleanup.note
         )
     }
 
@@ -368,7 +372,8 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
         // this model. The writing rules still get the dictionary.
         if source == .maiTranscribe, let endpoint = settings.maiTranscribeEndpoint {
             return try await client.gatewayTranscribe(audio: flacData, model: GeminiClient.maiTranscribeModel,
-                                                      deadline: deadline, stage: .transcribe, via: endpoint)
+                                                      deadline: deadline, stage: .transcribe, via: endpoint,
+                                                      maiStyle: settings.maiTranscribeStyle)
         }
         // The transport decision lives in ONE place so the fail-open retry below
         // cannot silently switch endpoints half way through a recovery.
@@ -425,8 +430,10 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
             switch error {
             case .network, .timeout:
                 // One silent retry for transient classes (audio is safe on disk).
-                Log.transcription.info("transcribe retrying after \(String(describing: error), privacy: .public)")
-                try await Task.sleep(nanoseconds: 500_000_000)
+                // Every request has its own connection, so a timeout retries at
+                // once; a server error waits half a second first.
+                Log.transcription.notice("transcribe retrying after \(String(describing: error), privacy: .public)")
+                if case .network = error { try await Task.sleep(nanoseconds: 500_000_000) }
                 return try await sendTranscribe(
                     flacData: flacData, seconds: seconds, source: source, config: config, policy: policy,
                     vocabulary: vocabulary, deadline: deadline
@@ -446,69 +453,6 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
             default:
                 throw error
             }
-        }
-    }
-
-    private enum CleanupOutcome {
-        case accepted(String)
-        case rejected(reason: String)
-        case unavailable
-    }
-
-    private func cleanupOrFallback(
-        raw: String, context: DictationContext, config: GeminiConfig, second: String? = nil
-    ) async -> String {
-        settle(await runCleanup(raw: raw, context: context, config: config, second: second), raw: raw)
-    }
-
-    /// Turns a cleanup outcome into the text to insert. The dictionary's hard
-    /// guarantee applies on every branch: explicit wrong→right rules always win.
-    private func settle(_ outcome: CleanupOutcome, raw: String) -> String {
-        let rules = DictionaryStore().replacementRules()
-        switch outcome {
-        case .accepted(let cleaned):
-            return ReplacementEngine.apply(rules, to: cleaned)
-        case .rejected(let reason):
-            // Writing rules stay on: only the user turns them off. One bad
-            // rewrite costs that dictation its formatting, nothing more.
-            Log.transcription.warning("cleanup gate REJECTED (\(reason, privacy: .public)) — inserting raw")
-            return ReplacementEngine.apply(rules, to: raw)
-        case .unavailable:
-            return ReplacementEngine.apply(rules, to: raw)
-        }
-    }
-
-    private func runCleanup(
-        raw: String, context: DictationContext, config: GeminiConfig, second: String? = nil
-    ) async -> CleanupOutcome {
-        let dictionary = DictionaryStore()
-        let prompt = PromptV1.cleanupPrompt(
-            raw: raw,
-            vocabulary: dictionary.sanitizedVocabulary(),
-            spellings: dictionary.spellings(),
-            instructions: settings.customInstructions,
-            imagesAttached: !context.screenshots.isEmpty,
-            secondTranscript: second
-        )
-        do {
-            let deadline = min(
-                60,
-                Self.cleanupDeadline(forCharacters: raw.count)
-                    + Double(context.screenshots.count * 2)
-            )
-            let response = try await client.cleanup(
-                prompt: prompt, images: context.screenshots,
-                model: config.cleanupModel, endpoint: config.endpoint, deadline: deadline
-            )
-            let cleaned = ValidationGate.stripArtifacts(response)
-            let verdict = ValidationGate.validate(raw: raw, cleaned: cleaned)
-            guard verdict.accepted else { return .rejected(reason: verdict.reason ?? "?") }
-            return .accepted(cleaned)
-        } catch {
-            // Deadline miss / network hiccup on cleanup never costs the dictation —
-            // and the dictionary guarantee still holds (audit L9).
-            Log.transcription.info("cleanup unavailable (\(String(describing: error), privacy: .public)) — inserting raw")
-            return .unavailable
         }
     }
 }

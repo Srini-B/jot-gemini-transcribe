@@ -68,6 +68,22 @@ public enum TranscriptionSource: String, CaseIterable, Sendable, Identifiable {
     }
 }
 
+/// MAI Transcribe 2's output style (Azure `transcribeStyle`). Clean drops
+/// fillers and false starts; verbatim keeps every "um" and "uh".
+public enum MAITranscribeStyle: String, CaseIterable, Sendable, Identifiable {
+    case clean
+    case verbatim
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .clean: return "Clean"
+        case .verbatim: return "Verbatim"
+        }
+    }
+}
+
 /// How calls reach the provider: its own API, or a gateway. OpenRouter and
 /// Vercel AI Gateway serve both providers' models with one key each, so a
 /// gateway key is entered once whichever provider is selected.

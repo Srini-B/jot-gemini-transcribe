@@ -437,6 +437,21 @@ final class DictationController {
 
     // MARK: - History, recovery, retry queue
 
+    /// With "Copy recovered dictations" on, puts the recovered text on the
+    /// clipboard. True only when it is there, so the pill never claims a copy
+    /// that did not happen; the History row is written either way.
+    private static func copyRecovered(_ texts: [String]) -> Bool {
+        guard SettingsStore().copyRecoveredToClipboard,
+              let text = RecoveryNotice.clipboardText(texts) else { return false }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        guard pasteboard.setString(text, forType: .string) else {
+            Log.history.error("Recovered dictation could not be copied to the clipboard")
+            return false
+        }
+        return true
+    }
+
     private func startHistoryServices() {
         guard let historyStore else {
             Log.history.error("HistoryStore unavailable — history features disabled")
@@ -456,16 +471,16 @@ final class DictationController {
         }
 
         let scanner = RecoveryScanner(store: historyStore, transcription: transcriptionService)
-        scanner.onRecovered = { [weak self] message in
-            self?.showBackgroundNotice(message, for: 4.0, sound: .success)
+        scanner.onRecovered = { [weak self] text in
+            let copied = Self.copyRecovered([text])
+            self?.showBackgroundNotice(RecoveryNotice.message(for: .relaunch, copied: copied), for: 4.0, sound: .success)
         }
         recoveryScanner = scanner
 
         let queue = RetryQueue(store: historyStore, transcription: transcriptionService)
-        queue.onDrained = { [weak self] count in
-            let message = count == 1
-                ? "Your queued dictation is ready — it's in History"
-                : "\(count) queued dictations are ready — they're in History"
+        queue.onDrained = { [weak self] texts in
+            let copied = Self.copyRecovered(texts)
+            let message = RecoveryNotice.message(for: .queue(count: texts.count), copied: copied)
             self?.showBackgroundNotice(message, for: 4.0, sound: .success)
         }
         queue.onDrainBlocked = { [weak self] error in
@@ -531,8 +546,9 @@ final class DictationController {
                             self.showNotice(record.rawTranscript != nil
                                             ? "Couldn't transcribe it again — the earlier text is kept"
                                             : "Retry didn't work — the row has the details", for: 3.5, sound: nil)
-                        case .recovered:
-                            self.showNotice("Transcribed again — the new text is in History", for: 3.5, sound: .success)
+                        case .recovered(let text):
+                            let copied = Self.copyRecovered([text])
+                            self.showNotice(RecoveryNotice.message(for: .retry, copied: copied), for: 3.5, sound: .success)
                         case .alreadyDone:
                             self.showNotice("Couldn't find this recording", for: 3.0, sound: nil)
                         case .blocked:

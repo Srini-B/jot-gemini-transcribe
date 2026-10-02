@@ -15,8 +15,9 @@ public struct SessionMeta: Codable, Equatable, Sendable {
         case awaitingChip
         case heldSecure
         case queuedForRetry
-        /// Transcribed after a crash/offline drain — the text was NEVER put on
-        /// the clipboard, so no UI may promise "Ready to paste".
+        /// Transcribed after a crash/offline drain. Never inserted, so no chip
+        /// may promise "Ready to paste"; the text reaches the clipboard only
+        /// when the user turned on copying recovered dictations.
         case recovered
         case silent
         case cancelled
