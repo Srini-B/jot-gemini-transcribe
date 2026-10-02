@@ -40,10 +40,7 @@ struct PillView: View {
                 .padding(.vertical, 20) // stable panel hit area
 
         case .listening(let locked):
-            // Live mode: the pill grows to carry the words as they arrive. Capped
-            // and tail-anchored so a long dictation scrolls rather than pushing
-            // the panel past its bounds.
-            pillSurface(width: model.partial.isEmpty ? (locked ? 268 : 200) : 520) {
+            pillSurface(width: locked ? 268 : 200) {
                 HStack(spacing: VoiceIQUI.Spacing.s) {
                     if locked {
                         Image(systemName: "lock.fill")
@@ -58,18 +55,6 @@ struct PillView: View {
                             .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
                     }
                     WaveformView(level: model.level, processing: false)
-                    if !model.partial.isEmpty {
-                        Text(model.partial)
-                            .font(VoiceIQUI.TypeScale.labelSmall())
-                            .foregroundStyle(VoiceIQUI.Colors.onSurfaceVariant)
-                            .lineLimit(1)
-                            .truncationMode(.head) // the newest words matter most
-                            .frame(maxWidth: .infinity, alignment: .trailing)
-                            // The text changes at token cadence; animating each
-                            // change would make it jitter continuously.
-                            .animation(nil, value: model.partial)
-                            .accessibilityHidden(true) // VoiceOver must not read a moving guess
-                    }
                     if locked {
                         stopButton
                     }
@@ -77,10 +62,6 @@ struct PillView: View {
             }
 
         case .processing:
-            // The live transcript leaves with the key-up. Holding the sentence
-            // here and sweeping the correction across it made the pill carry
-            // the last dictation's words into the next one, and the user asked
-            // for bars plus a working notice only.
             pillSurface(width: model.slow ? 220 : 132) {
                 HStack(spacing: VoiceIQUI.Spacing.s) {
                     WaveformView(processing: true)

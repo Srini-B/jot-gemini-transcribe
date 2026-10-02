@@ -67,7 +67,7 @@ final class DictationController {
             config: { SettingsStore().geminiConfig },
             summaryModel: SettingsStore().geminiConfig.cleanupModel,
             providers: { SettingsStore().meetingRoutes },
-            transcriptionSource: { SettingsStore().transcriptionSource }
+            transcriptionRoute: { SettingsStore().meetingTranscriptionRoute }
         )
         coordinator = DictationCoordinator(
             audioFactory: { [warmEngines] in warmEngines.take() },
@@ -91,8 +91,7 @@ final class DictationController {
                     targetPID: app?.processIdentifier,
                     focusedField: field
                 )
-            },
-            makeLiveSession: LiveTranscriber.makeFromSettings
+            }
         )
     }
 
@@ -810,17 +809,6 @@ final class DictationController {
                 self?.showNotice(hint, for: 3.0, sound: nil)
             }
             .store(in: &cancellables)
-
-        // Deliberately NOT routed through coachingHint: that sink calls
-        // showNotice(for: 3.0), which would arm a fresh three-second dismiss
-        // timer on every token and leave the pill flickering between states for
-        // the whole dictation.
-        coordinator.$partialTranscript
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] text in
-                self?.hud.model.partial = text
-            }
-            .store(in: &cancellables)
     }
 
     private func transition(to state: DictationState) {
@@ -854,7 +842,7 @@ final class DictationController {
             engine.setExternalSessionActive(false)
         }
 
-        // Background notices deferred during a live session flush once it ends.
+        // Background notices deferred during an active session flush once it ends.
         if case .idle = state { flushPendingNotice() }
         if state.isTerminal { flushPendingNotice() }
 
@@ -882,9 +870,6 @@ final class DictationController {
         case .finalizing:
             earcons.play(.stop)
             stopElapsedTimer()
-            // The running guess is not shown while working, and must not
-            // reappear in the next session's pill.
-            hud.model.partial = ""
             setPill(.processing)
             armSlowTimer()
             onStatusItemState?(.processing)
@@ -1035,7 +1020,7 @@ final class DictationController {
     }
 
     /// Notices about BACKGROUND events (retry drain, recovery)
-    /// must never hijack a live session's pill — they wait for it to end.
+    /// must never hijack an active session's pill — they wait for it to end.
     /// Session-critical notices (cap warning, device change) still interrupt.
     private var pendingNotice: (message: String, seconds: TimeInterval, sound: EarconPlayer.Earcon?)?
 
@@ -1162,12 +1147,18 @@ final class DictationController {
 
     // MARK: - Copy
 
-    /// The service the recording goes to: ElevenLabs when it transcribes,
-    /// otherwise the active route's provider or gateway.
+    /// The service the recording goes to: ElevenLabs or MAI Transcribe 2's
+    /// gateway when either transcribes, otherwise the active route's provider
+    /// or gateway.
     private static var providerName: String {
-        if SettingsStore().transcriptionSource == .elevenLabs { return "ElevenLabs" }
-        let route = SettingsStore().activeRoute
-        return route.gateway == .direct ? route.provider.displayName : route.gateway.displayName(for: route.provider)
+        let settings = SettingsStore()
+        switch settings.transcriptionSource {
+        case .elevenLabs: return "ElevenLabs"
+        case .maiTranscribe: return settings.maiTranscribeEndpoint?.hostName ?? "MAI Transcribe 2"
+        case .provider:
+            let route = settings.activeRoute
+            return route.gateway == .direct ? route.provider.displayName : route.gateway.displayName(for: route.provider)
+        }
     }
 
     private static func copy(for failure: DictationFailure) -> String {

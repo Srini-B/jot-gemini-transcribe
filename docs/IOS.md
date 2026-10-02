@@ -202,7 +202,8 @@ so a trip to Settings resumes on the same page.
 
 Onboarding has four pages: welcome, API keys (every provider plus the optional
 ElevenLabs and TinyFish keys on one page, with a provider picker once two or
-more keys are saved and a Transcription picker once an ElevenLabs key is), permissions
+more keys are saved and a Transcription provider picker once an ElevenLabs,
+OpenRouter or Vercel key is), permissions
 (microphone and keyboard together), and a Try it field.
 
 ### Design system

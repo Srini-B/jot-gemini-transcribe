@@ -51,9 +51,6 @@ public struct SettingsStore: Sendable {
         if let model = Self.defaults.string(forKey: "transcribeModelOverride"), !model.isEmpty {
             config.transcribeModel = model
         }
-        if let model = Self.defaults.string(forKey: "liveModelOverride"), !model.isEmpty {
-            config.liveModel = model
-        }
         if let model = Self.defaults.string(forKey: "cleanupModelOverride"), !model.isEmpty {
             config.cleanupModel = model
         }
@@ -64,22 +61,15 @@ public struct SettingsStore: Sendable {
     public var openAIConfig: OpenAIConfig {
         var config = OpenAIConfig()
         if let model = Self.nonEmpty("openAITranscribeModelOverride") { config.transcribeModel = model }
-        if let model = Self.nonEmpty("openAILiveModelOverride") { config.liveModel = model }
         if let model = Self.nonEmpty("openAIWritingModelOverride") { config.writingModel = model }
-        if let raw = Self.defaults.string(forKey: "openAILiveDelay"), let delay = OpenAIConfig.LiveDelay(rawValue: raw) {
-            config.liveDelay = delay
-        }
         return config
     }
 
     public var openAITranscribeModelOverride: String? { Self.defaults.string(forKey: "openAITranscribeModelOverride") }
-    public var openAILiveModelOverride: String? { Self.defaults.string(forKey: "openAILiveModelOverride") }
     public var openAIWritingModelOverride: String? { Self.defaults.string(forKey: "openAIWritingModelOverride") }
 
     public func setOpenAITranscribeModelOverride(_ raw: String?) { Self.set(raw, forKey: "openAITranscribeModelOverride") }
-    public func setOpenAILiveModelOverride(_ raw: String?) { Self.set(raw, forKey: "openAILiveModelOverride") }
     public func setOpenAIWritingModelOverride(_ raw: String?) { Self.set(raw, forKey: "openAIWritingModelOverride") }
-    public func setOpenAILiveDelay(_ delay: OpenAIConfig.LiveDelay) { Self.set(delay.rawValue, forKey: "openAILiveDelay") }
 
     private static func nonEmpty(_ key: String) -> String? {
         guard let value = defaults.string(forKey: key)?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
@@ -120,9 +110,33 @@ public struct SettingsStore: Sendable {
     }
 
     /// Who transcribes the next dictation. ElevenLabs only while its key is
-    /// stored, so removing the key falls back to the provider's own model.
+    /// stored and MAI Transcribe 2 only while a gateway key is, so removing a
+    /// key falls back to the provider's own model.
     public var transcriptionSource: TranscriptionSource {
-        preferredTranscriptionSource == .elevenLabs && KeychainStore.loadElevenLabsKey() != nil ? .elevenLabs : .provider
+        switch preferredTranscriptionSource {
+        case .elevenLabs where KeychainStore.loadElevenLabsKey() != nil: return .elevenLabs
+        case .maiTranscribe where maiTranscribeEndpoint != nil: return .maiTranscribe
+        default: return .provider
+        }
+    }
+
+    /// The picked transcription source as a meeting route; nil when the
+    /// provider's meeting routes transcribe.
+    public var meetingTranscriptionRoute: MeetingTranscriber.SpeechRoute? {
+        switch transcriptionSource {
+        case .provider: return nil
+        case .elevenLabs: return .elevenLabs
+        case .maiTranscribe: return maiTranscribeEndpoint.map(MeetingTranscriber.SpeechRoute.mai)
+        }
+    }
+
+    /// The gateway MAI Transcribe 2 runs on: the chosen one when its key is
+    /// stored, otherwise the first with a key. Nil without a gateway key.
+    public var maiTranscribeEndpoint: ModelEndpoint? {
+        var keys = KeychainStore.gatewaysWithKeys(for: preferredProvider)
+        keys.remove(.direct)
+        guard !keys.isEmpty else { return nil }
+        return ModelRoute.resolve(provider: preferredProvider, preferred: preferredGateway, available: keys).endpoint
     }
 
     /// The route that serves calls right now; see `ModelRoute.resolve`.
@@ -353,39 +367,10 @@ public struct SettingsStore: Sendable {
         Self.set(enabled, forKey: "experimentalNoiseHandling")
     }
 
-    /// Stream audio to the Live API over a WebSocket and show words as they are
-    /// spoken, instead of uploading the clip at key-up.
-    ///
-    /// Off by default: the live model draws on its own, small daily request
-    /// quota, and a long dictation rotates through several sessions. When on,
-    /// the CAF is still written to disk in parallel, and any live stream that
-    /// fails falls back to the batch upload over that file.
-    public var liveTranscription: Bool {
-        Self.defaults.object(forKey: "liveTranscription") as? Bool ?? false
-    }
-
-    public func setLiveTranscription(_ enabled: Bool) {
-        Self.set(enabled, forKey: "liveTranscription")
-    }
-
-    /// Live needs the interactions-era transport; the legacy escape hatch is a
-    /// different endpoint entirely. Rather than let the two contradict each other
-    /// silently, the hatch wins and live stands down.
-    public var liveTranscriptionActive: Bool {
-        liveTranscription && !usesLegacyTranscribeEndpoint && liveTranscriptionSupported
-    }
-
-    /// With ElevenLabs on any route; otherwise only over a provider's own API
-    /// (see `ModelRoute.supportsLiveTranscription`).
-    public var liveTranscriptionSupported: Bool {
-        transcriptionSource == .elevenLabs || activeRoute.supportsLiveTranscription
-    }
-
     // Raw override values for the Settings UI — panes must not duplicate the
     // defaults keys (a rename would silently desync display from effect).
     public var endpointOverride: String? { Self.defaults.string(forKey: "endpointOverride") }
     public var transcribeModelOverride: String? { Self.defaults.string(forKey: "transcribeModelOverride") }
-    public var liveModelOverride: String? { Self.defaults.string(forKey: "liveModelOverride") }
     public var cleanupModelOverride: String? { Self.defaults.string(forKey: "cleanupModelOverride") }
 
     public func setEndpointOverride(_ raw: String?) {
@@ -394,10 +379,6 @@ public struct SettingsStore: Sendable {
 
     public func setTranscribeModelOverride(_ raw: String?) {
         Self.set(raw, forKey: "transcribeModelOverride")
-    }
-
-    public func setLiveModelOverride(_ raw: String?) {
-        Self.set(raw, forKey: "liveModelOverride")
     }
 
     public func setCleanupModelOverride(_ raw: String?) {

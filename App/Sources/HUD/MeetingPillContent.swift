@@ -36,7 +36,7 @@ struct MeetingPromptContent: View {
     }
 }
 
-/// Recording: elapsed time, working bars, the live preview tail, and Stop.
+/// Recording: elapsed time, working bars, and Stop.
 /// The timer is a `TimelineView` over the start date, so no published tick is needed.
 struct MeetingRecordingContent: View {
     let since: Date

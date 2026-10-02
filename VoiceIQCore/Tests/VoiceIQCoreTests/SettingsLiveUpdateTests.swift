@@ -10,7 +10,7 @@ final class SettingsLiveUpdateTests: XCTestCase {
     override func tearDown() {
         for key in ["showIdleIndicator", "soundsEnabled", "gateTrips",
                     "experimentalNoiseHandling", "smartTranscription", "smartCleanupPass",
-                    "legacyTranscribeEndpoint", "liveTranscription", "liveModelOverride"] {
+                    "legacyTranscribeEndpoint"] {
             UserDefaults.standard.removeObject(forKey: key)
         }
     }
@@ -38,22 +38,6 @@ final class SettingsLiveUpdateTests: XCTestCase {
         expectChange(forKey: "dictationTrigger") { settings.setDictationTrigger(.modifier(.fn)) }
         expectChange(forKey: "audioRetentionDays") { settings.setAudioRetentionDays(7) }
         expectChange(forKey: "experimentalNoiseHandling") { settings.setExperimentalNoiseHandling(true) }
-        expectChange(forKey: "liveTranscription") { settings.setLiveTranscription(false) }
-        expectChange(forKey: "liveModelOverride") { settings.setLiveModelOverride("gemini-3.5-transcribe-live") }
-    }
-
-    func testLiveTranscriptionDefaultsToOffAndLiveModelOverrideApplies() {
-        UserDefaults.standard.removeObject(forKey: "liveTranscription")
-        UserDefaults.standard.removeObject(forKey: "liveModelOverride")
-        UserDefaults.standard.removeObject(forKey: "legacyTranscribeEndpoint")
-        XCTAssertFalse(settings.liveTranscription)
-        XCTAssertFalse(settings.liveTranscriptionActive)
-        settings.setLiveTranscription(true)
-        XCTAssertTrue(settings.liveTranscriptionActive)
-        XCTAssertEqual(settings.geminiConfig.liveModel, "gemini-3.5-transcribe-live")
-
-        settings.setLiveModelOverride("gemini-3.8-live")
-        XCTAssertEqual(settings.geminiConfig.liveModel, "gemini-3.8-live")
     }
 }
 

@@ -1,12 +1,13 @@
 import Foundation
 
 /// Whose bill a usage record lands on, for the Cost pane: either provider,
-/// and ElevenLabs when it transcribes. Records store only the model ID, so the
-/// source is read off its prefix.
+/// and ElevenLabs or MAI Transcribe 2 when it transcribes. Records store only
+/// the model ID, so the source is read off its prefix.
 public enum CostSource: String, CaseIterable, Sendable, Identifiable {
     case gemini
     case openAI
     case elevenLabs
+    case mai
 
     public init(_ provider: ModelProvider) {
         switch provider {
@@ -22,6 +23,7 @@ public enum CostSource: String, CaseIterable, Sendable, Identifiable {
         case .gemini: return ModelProvider.gemini.displayName
         case .openAI: return ModelProvider.openAI.displayName
         case .elevenLabs: return "ElevenLabs"
+        case .mai: return "MAI"
         }
     }
 
@@ -31,6 +33,7 @@ public enum CostSource: String, CaseIterable, Sendable, Identifiable {
         case .gemini: return ModelProvider.gemini.modelPrefixes
         case .openAI: return ModelProvider.openAI.modelPrefixes
         case .elevenLabs: return ["scribe", "elevenlabs/"]
+        case .mai: return ["microsoft/", "mai-"]
         }
     }
 
@@ -42,7 +45,9 @@ public enum CostSource: String, CaseIterable, Sendable, Identifiable {
             let provider: ModelProvider = self == .gemini ? .gemini : .openAI
             return ModelRoute(provider: provider, gateway: provider == activeRoute.provider ? activeRoute.gateway : .direct).pricingNote
         case .elevenLabs:
-            return "List prices from the ElevenLabs API pricing page: Scribe v2 $0.22 an hour, plus $0.05 an hour when dictionary terms are sent, and Scribe v2 Realtime $0.39 an hour. Hours included in your plan are not subtracted."
+            return "List prices from the ElevenLabs API pricing page: Scribe v2 $0.22 an hour, plus $0.05 an hour when dictionary terms are sent. Hours included in your plan are not subtracted."
+        case .mai:
+            return "Costs reported by OpenRouter or Vercel AI Gateway for each call."
         }
     }
 }

@@ -7,8 +7,6 @@ struct GatewayKeySection: View {
     struct Gateway {
         let name: String
         let secret: KeychainStore.Secret
-        /// Gateways have no live socket; the provider's own API does.
-        let isGateway: Bool
         let load: () -> String?
         let save: (String) -> Bool
         let delete: () -> Void
@@ -20,33 +18,30 @@ struct GatewayKeySection: View {
         static let openRouter = Gateway(
             name: "OpenRouter",
             secret: .openRouter,
-            isGateway: true,
             load: KeychainStore.loadOpenRouterKey,
             save: KeychainStore.saveOpenRouterKey,
             delete: { KeychainStore.deleteOpenRouterKey(notify: true) },
             validate: { await $0.validateOpenRouterKey() },
             client: { key in GeminiClient(apiKey: { nil }, openRouterKey: { key }) },
             keyURL: URL(string: "https://openrouter.ai/settings/keys")!,
-            footer: "Optional. Runs Gemini or OpenAI models through OpenRouter, which has no per-minute tier limits. Stored in your Mac's Keychain and only ever sent to OpenRouter."
+            footer: "Optional. Runs Gemini or OpenAI models, and MAI Transcribe 2, through OpenRouter, which has no per-minute tier limits. Stored in your Mac's Keychain and only ever sent to OpenRouter."
         )
 
         static let vercel = Gateway(
             name: "Vercel AI Gateway",
             secret: .vercel,
-            isGateway: true,
             load: KeychainStore.loadVercelKey,
             save: KeychainStore.saveVercelKey,
             delete: { KeychainStore.deleteVercelKey(notify: true) },
             validate: { await $0.validateVercelKey() },
             client: { key in GeminiClient(apiKey: { nil }, vercelKey: { key }) },
             keyURL: URL(string: "https://vercel.com/ai-gateway")!,
-            footer: "Optional. Runs Gemini or OpenAI models through Vercel AI Gateway, billed per call. Stored in your Mac's Keychain and only ever sent to Vercel."
+            footer: "Optional. Runs Gemini or OpenAI models, and MAI Transcribe 2, through Vercel AI Gateway, billed per call. Stored in your Mac's Keychain and only ever sent to Vercel."
         )
 
         static let openAI = Gateway(
             name: "OpenAI",
             secret: .openAI,
-            isGateway: false,
             load: KeychainStore.loadOpenAIKey,
             save: KeychainStore.saveOpenAIKey,
             delete: { KeychainStore.deleteOpenAIKey(notify: true) },
@@ -59,7 +54,6 @@ struct GatewayKeySection: View {
         static let elevenLabs = Gateway(
             name: "ElevenLabs",
             secret: .elevenLabs,
-            isGateway: false,
             load: KeychainStore.loadElevenLabsKey,
             save: KeychainStore.saveElevenLabsKey,
             delete: { KeychainStore.deleteElevenLabsKey(notify: true) },
@@ -122,7 +116,7 @@ struct GatewayKeySection: View {
         } header: {
             Text("\(gateway.name) API key")
         } footer: {
-            Text(footer)
+            Text(gateway.footer)
         }
         .onReceive(NotificationCenter.default.publisher(for: .gtSettingDidChange).receive(on: RunLoop.main)) { note in
             guard let key = note.object as? String else { return }
@@ -133,11 +127,6 @@ struct GatewayKeySection: View {
     }
 
     private var secret: KeychainStore.Secret { gateway.secret }
-
-    private var footer: String {
-        guard hasStoredKey, gateway.isGateway, SettingsStore().transcriptionSource == .provider else { return gateway.footer }
-        return gateway.footer + " Live transcription is unavailable while \(gateway.name) is the active gateway."
-    }
 
     @ViewBuilder
     private var keyStatusBadge: some View {
@@ -182,22 +171,12 @@ struct OpenAIModelsSection: View {
     private static let defaults = OpenAIConfig()
     private let settings = SettingsStore()
     @State private var transcribeModel = SettingsStore().openAITranscribeModelOverride ?? ""
-    @State private var liveModel = SettingsStore().openAILiveModelOverride ?? ""
     @State private var writingModel = SettingsStore().openAIWritingModelOverride ?? ""
-    @State private var liveDelay = SettingsStore().openAIConfig.liveDelay
 
     var body: some View {
         Section {
             modelField("Transcription model", text: $transcribeModel, placeholder: Self.defaults.transcribeModel,
                        save: settings.setOpenAITranscribeModelOverride)
-            modelField("Live transcription model", text: $liveModel, placeholder: Self.defaults.liveModel,
-                       save: settings.setOpenAILiveModelOverride)
-            Picker("Live transcription delay", selection: $liveDelay) {
-                ForEach(OpenAIConfig.LiveDelay.allCases, id: \.self) { delay in
-                    Text(delay.rawValue.capitalized).tag(delay)
-                }
-            }
-            .onChange(of: liveDelay) { _, value in settings.setOpenAILiveDelay(value) }
             modelField("Formatting model", text: $writingModel, placeholder: Self.defaults.writingModel,
                        save: settings.setOpenAIWritingModelOverride)
         } header: {
@@ -220,32 +199,50 @@ struct OpenAIModelsSection: View {
     }
 }
 
-/// Settings → Advanced: who transcribes, the provider's speech model or
-/// ElevenLabs Scribe, and the ElevenLabs key. The choice appears once a key is
-/// stored; without one the provider transcribes whatever was picked.
+/// Settings → Advanced: who transcribes, and the ElevenLabs key. ElevenLabs is
+/// offered once its key is stored, MAI Transcribe 2 once an OpenRouter or
+/// Vercel key is. With neither, the picker is hidden and the provider
+/// transcribes.
 struct TranscriptionSourceSection: View {
     let provider: ModelProvider
     private let settings = SettingsStore()
     @State private var source = SettingsStore().preferredTranscriptionSource
-    @State private var hasKey = KeychainStore.loadElevenLabsKey() != nil
+    @State private var hasElevenLabsKey = KeychainStore.loadElevenLabsKey() != nil
+    @State private var hasGatewayKey = SettingsStore().maiTranscribeEndpoint != nil
+
+    private var options: [TranscriptionSource] {
+        TranscriptionSource.allCases.filter { source in
+            switch source {
+            case .provider: return true
+            case .elevenLabs: return hasElevenLabsKey
+            case .maiTranscribe: return hasGatewayKey
+            }
+        }
+    }
 
     var body: some View {
         Group {
-            if hasKey {
+            if options.count > 1 {
                 Section {
-                    Picker("Transcription", selection: $source) {
-                        ForEach(TranscriptionSource.allCases) { Text($0.displayName(for: provider)).tag($0) }
+                    Picker("Transcription provider", selection: $source) {
+                        ForEach(options) { Text($0.displayName(for: provider)).tag($0) }
                     }
                     .pickerStyle(.segmented)
-                    .onChange(of: source) { _, value in settings.setPreferredTranscriptionSource(value) }
+                    .onChange(of: source) { _, value in
+                        if value != settings.transcriptionSource { settings.setPreferredTranscriptionSource(value) }
+                    }
                 }
             }
             GatewayKeySection(.elevenLabs)
         }
-        .onReceive(NotificationCenter.default.publisher(for: .gtSettingDidChange).receive(on: RunLoop.main)) { note in
-            guard note.object as? String == KeychainStore.Secret.elevenLabs.settingKey else { return }
-            hasKey = KeychainStore.loadElevenLabsKey() != nil
-        }
+        .onAppear(perform: refresh)
+        .onReceive(NotificationCenter.default.publisher(for: .gtSettingDidChange).receive(on: RunLoop.main)) { _ in refresh() }
+    }
+
+    private func refresh() {
+        hasElevenLabsKey = KeychainStore.loadElevenLabsKey() != nil
+        hasGatewayKey = settings.maiTranscribeEndpoint != nil
+        source = settings.transcriptionSource
     }
 }
 

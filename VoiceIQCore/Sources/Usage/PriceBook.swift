@@ -5,9 +5,8 @@ import Foundation
 /// nothing; the app cannot tell which tier a key is on, so it always shows
 /// the paid-tier figure and says so on the Cost pane.
 ///
-/// Models are matched by prefix, longest first, so `gemini-3.5-transcribe-live`
-/// wins over `gemini-3.5-transcribe` and a dated suffix (`-preview-09-2026`)
-/// still resolves.
+/// Models are matched by prefix, longest first, so a dated suffix
+/// (`-preview-09-2026`) still resolves.
 public struct ModelPrice: Equatable, Sendable {
     public var textIn: Double
     public var audioIn: Double
@@ -48,9 +47,7 @@ public enum PriceBook {
             ("gemini-3.8-flash", late
                 ? ModelPrice(textIn: 1.50, cachedIn: 0.15, textOut: 7.50)
                 : ModelPrice(textIn: 0.75, cachedIn: 0.075, textOut: 3.75)),
-            ("gemini-3.5-transcribe-live", ModelPrice(textIn: 3.50, audioIn: 3.50, textOut: 21.00)),
             ("gemini-3.5-transcribe", ModelPrice(textIn: 2.00, audioIn: 2.00, textOut: 12.00)),
-            ("gemini-3.5-live-translate", ModelPrice(textIn: 3.50, audioIn: 3.50, textOut: 21.00, audioOut: 21.00)),
             ("gemini-3.1-flash-lite", ModelPrice(textIn: 0.25, audioIn: 0.50, cachedIn: 0.025, textOut: 1.50)),
             ("gemini-3-flash", ModelPrice(textIn: 0.50, audioIn: 1.00, cachedIn: 0.05, textOut: 3.00)),
             ("gemini-2.5-flash-lite", ModelPrice(textIn: 0.10, audioIn: 0.30, textOut: 0.40)),
@@ -64,20 +61,16 @@ public enum PriceBook {
 
     /// OpenAI transcription models billed per audio minute, USD, same source.
     static let perMinute: [(prefix: String, price: Double)] = [
-        ("gpt-live-transcribe", 0.017),
         ("gpt-transcribe", 0.0045),
         ("gpt-4o-mini-transcribe", 0.003),
         ("gpt-4o-transcribe", 0.006),
-        ("gpt-realtime-translate", 0.034),
         ("whisper-1", 0.006),
         // ElevenLabs, from elevenlabs.io/pricing/api (copied 2026-09-28):
-        // $0.22 an hour batch, $0.39 an hour realtime, the same on every plan.
-        ("scribe_v2_realtime", 0.39 / 60),
+        // $0.22 an hour, the same on every plan.
         ("scribe_v2", 0.22 / 60),
     ]
 
-    /// ElevenLabs' batch add-on for `keyterms` (the dictionary terms), same
-    /// source. Its realtime surcharge is not published, so none is booked.
+    /// ElevenLabs' add-on for `keyterms` (the dictionary terms), same source.
     public static let elevenLabsKeytermsPerMinute = 0.05 / 60
 
     public static func perMinutePrice(for model: String) -> Double? {

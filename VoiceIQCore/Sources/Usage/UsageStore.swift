@@ -17,14 +17,13 @@ public enum UsageActivity: String, Codable, CaseIterable, Sendable {
     }
 }
 
-/// Which call inside that activity. One dictation is typically a live
+/// Which call inside that activity. One dictation is typically a
 /// transcription plus a cleanup; one meeting is a transcription plus a summary.
 public enum UsageStage: String, Codable, Sendable {
-    case liveTranscribe, transcribe, cleanup, answer, translate, webQuery, meetingTranscribe, meetingSummary, agentStep
+    case transcribe, cleanup, answer, translate, webQuery, meetingTranscribe, meetingSummary, agentStep
 
     public var displayName: String {
         switch self {
-        case .liveTranscribe: return "Live transcription"
         case .transcribe: return "Transcription"
         case .cleanup: return "Cleanup"
         case .answer: return "Answer"

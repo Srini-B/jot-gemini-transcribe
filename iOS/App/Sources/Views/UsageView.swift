@@ -2,7 +2,7 @@ import SwiftUI
 import VoiceIQCore
 
 /// Cost, as on the Mac: one source at a time (Gemini, OpenAI, or ElevenLabs
-/// transcription), opening on the selected provider.
+/// or MAI transcription), opening on the selected provider.
 /// Period totals, cost per action, and in Detailed the per-model table and
 /// the most recent calls.
 struct UsageView: View {

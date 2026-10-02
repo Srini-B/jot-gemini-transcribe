@@ -254,22 +254,35 @@ struct PrivacyPane: View {
     private let settings = SettingsStore()
     @State private var route = SettingsStore().activeRoute
     private let source = SettingsStore().transcriptionSource
+    private let maiHost = SettingsStore().maiTranscribeEndpoint?.hostName ?? ""
 
     private var owner: String { route.provider == .gemini ? "Google" : "OpenAI" }
 
     /// Where each request goes on the active route: the provider itself, or
     /// a gateway (with the gateway's key) that forwards it to the provider.
-    /// With ElevenLabs transcribing, dictation audio goes only to ElevenLabs.
+    /// With ElevenLabs or MAI Transcribe 2 transcribing, dictation audio goes
+    /// only there.
     private var audioDestination: String {
-        if source == .elevenLabs { return "Sent to ElevenLabs with your key" }
-        return route.gateway == .direct
-            ? "Sent to \(owner) with your key"
-            : "Sent to \(route.endpoint.hostName) with your key, then to \(owner)"
+        switch source {
+        case .elevenLabs: return "Sent to ElevenLabs with your key"
+        case .maiTranscribe: return "Sent to \(maiHost) with your key, then to Microsoft"
+        case .provider:
+            return route.gateway == .direct
+                ? "Sent to \(owner) with your key"
+                : "Sent to \(route.endpoint.hostName) with your key, then to \(owner)"
+        }
     }
 
     private var recipients: String {
-        let model = route.gateway == .direct ? owner : "\(route.endpoint.hostName), \(owner)"
-        return source == .elevenLabs ? "\(model) and ElevenLabs" : model.replacingOccurrences(of: ", ", with: " and ")
+        var names = route.gateway == .direct ? [owner] : [route.endpoint.hostName, owner]
+        switch source {
+        case .provider: break
+        case .elevenLabs: names.append("ElevenLabs")
+        case .maiTranscribe: names += [maiHost, "Microsoft"]
+        }
+        var unique: [String] = []
+        for name in names where !unique.contains(name) { unique.append(name) }
+        return unique.count == 1 ? unique[0] : unique.dropLast().joined(separator: ", ") + " and " + unique.last!
     }
     @State private var retentionDays = SettingsStore().audioRetentionDays
     @State private var confirmingDelete = false
@@ -366,7 +379,6 @@ struct AdvancedPane: View {
     @State private var keyStatus: KeyStatus = KeychainStore.loadAPIKey() == nil ? .missing : .stored
     @State private var endpoint = SettingsStore().endpointOverride ?? ""
     @State private var transcribeModel = SettingsStore().transcribeModelOverride ?? ""
-    @State private var liveModel = SettingsStore().liveModelOverride ?? ""
     @State private var cleanupModel = SettingsStore().cleanupModelOverride ?? ""
 
     enum KeyStatus { case missing, stored, validating, valid, invalid, saveFailed, savedOffline }
@@ -483,16 +495,6 @@ struct AdvancedPane: View {
                 .onChange(of: transcribeModel) { _, value in
                     let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
                     settings.setTranscribeModelOverride(trimmed.isEmpty ? nil : trimmed)
-                }
-                LabeledContent("Live transcription model") {
-                    TextField("", text: $liveModel, prompt: Text(Self.defaultConfig.liveModel))
-                        .labelsHidden()
-                        .font(VoiceIQUI.TypeScale.code)
-                        .multilineTextAlignment(.trailing)
-                }
-                .onChange(of: liveModel) { _, value in
-                    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-                    settings.setLiveModelOverride(trimmed.isEmpty ? nil : trimmed)
                 }
                 LabeledContent("Formatting model") {
                     TextField("", text: $cleanupModel, prompt: Text(Self.defaultConfig.cleanupModel))

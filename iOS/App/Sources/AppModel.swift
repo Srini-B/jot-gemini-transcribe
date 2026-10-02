@@ -44,6 +44,7 @@ final class AppModel: ObservableObject {
 
     init() {
         FormattingSettingsMigration.restoreAutoDegradedWritingRulesOnce()
+        FormattingSettingsMigration.removeLiveTranscriptionSettings()
         let client = GeminiClient(
             apiKey: { KeychainStore.loadAPIKey() },
             openRouterKey: { KeychainStore.loadOpenRouterKey() },
@@ -61,7 +62,7 @@ final class AppModel: ObservableObject {
             config: { SettingsStore().geminiConfig },
             summaryModel: SettingsStore().geminiConfig.cleanupModel,
             providers: { SettingsStore().meetingRoutes },
-            transcriptionSource: { SettingsStore().transcriptionSource }
+            transcriptionRoute: { SettingsStore().meetingTranscriptionRoute }
         )
         let inserter = self.inserter
         coordinator = DictationCoordinator(
@@ -78,8 +79,7 @@ final class AppModel: ObservableObject {
                     targetAppBundleID: target.host,
                     targetAppName: target.host.map(AppNames.displayName(for:))
                 )
-            },
-            makeLiveSession: LiveTranscriber.makeFromSettings
+            }
         )
         inserter.onDeliver = { [weak self] text, mode in self?.deliver(text, mode: mode) }
 

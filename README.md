@@ -136,18 +136,20 @@ dictation is a few seconds of audio. VoiceiQ itself is free and has no account.
 | | Gemini | OpenAI |
 | --- | --- | --- |
 | Transcription | `gemini-3.5-transcribe` | `gpt-transcribe` |
-| Live transcription (opt-in) | `gemini-3.5-transcribe-live` | `gpt-live-transcribe` |
 | Writing rules, Ask Anything, Translate, meeting notes | `gemini-3.8-flash` | `gpt-6-luna` |
 | Meeting speakers | `gemini-3.5-transcribe` | `gpt-4o-transcribe-diarize` |
 
-With ElevenLabs picked as the transcription source, dictation uses
-`scribe_v2` (`scribe_v2_realtime` when live) and meetings use `scribe_v2` with
-speaker labels; the provider above still writes the text and the notes.
+Settings → Advanced → Transcription provider can hand the transcription stage
+to another model; the provider above still writes the text and the notes. With
+an ElevenLabs key, dictation and meetings can use `scribe_v2`. With an
+OpenRouter or Vercel AI Gateway key, they can use MAI Transcribe 2
+(`microsoft/mai-transcribe-2`), which labels the speakers and times each word
+for meetings. The picker appears only when one of those keys
+is stored.
 
 With Gemini, a dictation under ten minutes is one call to `gemini-3.8-flash`
 with the audio attached; OpenAI's writing model takes no audio, so every
-dictation there is a transcription followed by a writing-rules pass. Live
-transcription needs the provider's own key; it does not run through a gateway.
+dictation there is a transcription followed by a writing-rules pass.
 Settings → Advanced can pin other model names for either provider.
 
 ## How it works

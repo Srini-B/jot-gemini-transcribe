@@ -18,7 +18,7 @@ enum PillState: Equatable {
     case error(String)
     /// A call was noticed; the pill offers to record it. The string names the app or site.
     case meetingPrompt(String)
-    /// A meeting is recording: timer, waveform, live preview, stop.
+    /// A meeting is recording: timer, waveform, stop.
     case meetingRecording(since: Date)
     /// A downloaded update waits for a restart. The string is its version.
     case updateReady(String)
@@ -41,10 +41,6 @@ final class PillModel: ObservableObject {
     @Published var elapsed: TimeInterval = 0
     /// Still-working slow state (>3s in processing — TimeoutPolicy.slowStateUI).
     @Published var slow = false
-    /// Live mode's speculative transcript, shown while the user speaks. Display
-    /// only: this is a guess the model is still revising, and it is never what
-    /// gets inserted.
-    @Published var partial: String = ""
     /// `SettingsStore.pillAnchor`, mirrored so the pill hugs the panel edge
     /// the anchor points at instead of floating in the panel's middle.
     @Published var anchor: Double = SettingsStore().pillAnchor

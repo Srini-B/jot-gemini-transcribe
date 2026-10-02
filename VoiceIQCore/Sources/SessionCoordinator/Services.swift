@@ -7,22 +7,6 @@ import Foundation
 public protocol TranscriptionServicing: Sendable {
     /// Returns (rawTranscript, cleanedTranscript). Throws TranscriptionError.
     func transcribe(audioURL: URL, durationSeconds: Double, context: DictationContext) async throws -> TranscriptionResult
-    /// Runs the cleanup pass (writing rules, tone, dictionary) over a transcript
-    /// that was produced elsewhere, e.g. by a live stream. Never throws: on any
-    /// failure the input comes back unchanged.
-    /// `audioURL` is the CAF the stream was fed from, so the pass can listen
-    /// again where the stream misheard, and re-transcribe it outright when the
-    /// stream turns out to have stopped early. `durationSeconds` is the length
-    /// of that recording.
-    func polish(
-        _ result: TranscriptionResult, context: DictationContext, audioURL: URL?, durationSeconds: Double
-    ) async -> TranscriptionResult
-}
-
-public extension TranscriptionServicing {
-    func polish(
-        _ result: TranscriptionResult, context: DictationContext, audioURL: URL?, durationSeconds: Double
-    ) async -> TranscriptionResult { result }
 }
 
 public struct TranscriptionResult: Equatable, Sendable {

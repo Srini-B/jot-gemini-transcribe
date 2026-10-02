@@ -25,8 +25,9 @@ import Foundation
     /// Routes to try in order; see `ModelRoute.meetingOrder`. The notes
     /// always run here; the transcript does unless ElevenLabs is chosen.
     private let providers: @Sendable () -> [ModelRoute]
-    /// The transcription source picked in Settings, shared with dictation.
-    private let transcriptionSource: @Sendable () -> TranscriptionSource
+    /// The transcription source picked in Settings as a meeting route, shared
+    /// with dictation; nil when the provider's meeting routes transcribe.
+    private let transcriptionRoute: @Sendable () -> MeetingTranscriber.SpeechRoute?
     private lazy var detector = CallDetector()
     private var mic: MicTap?, system: SystemAudioTap?
     private var currentFolder: URL?, currentMeta: MeetingMeta?
@@ -36,10 +37,10 @@ import Foundation
     public init(client: GeminiClient, store: MeetingStore = MeetingStore(), config: @escaping () -> GeminiConfig,
                 transcribeModel: String? = nil, summaryModel: String = "gemini-3.8-flash",
                 providers: @escaping @Sendable () -> [ModelRoute] = { [ModelRoute(provider: .gemini, gateway: .direct)] },
-                transcriptionSource: @escaping @Sendable () -> TranscriptionSource = { .provider }) {
+                transcriptionRoute: @escaping @Sendable () -> MeetingTranscriber.SpeechRoute? = { nil }) {
         self.client = client; self.store = store; self.config = config
         self.transcribeModel = transcribeModel; self.summaryModel = summaryModel; self.providers = providers
-        self.transcriptionSource = transcriptionSource
+        self.transcriptionRoute = transcriptionRoute
         detector.onChange = { [weak self] source in self?.detected(source) }
         failInterruptedRecordings()
     }
@@ -173,8 +174,8 @@ import Foundation
     /// The recording stays; the meeting is marked failed with a reason the
     /// Meetings list shows, and Retry runs it again with the keys stored then.
     private var speechRoutes: @Sendable () -> [MeetingTranscriber.SpeechRoute] {
-        { [providers, transcriptionSource] in
-            MeetingTranscriber.SpeechRoute.order(source: transcriptionSource(), providers: providers())
+        { [providers, transcriptionRoute] in
+            MeetingTranscriber.SpeechRoute.order(picked: transcriptionRoute(), providers: providers())
         }
     }
 

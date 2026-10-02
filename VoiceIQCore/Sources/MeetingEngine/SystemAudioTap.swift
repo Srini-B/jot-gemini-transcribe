@@ -7,8 +7,6 @@ import Foundation
 public final class SystemAudioTap: @unchecked Sendable {
     public enum TapError: Error { case unsupported, coreAudio(OSStatus), format }
     private let url: URL
-    /// Receives every converted 16 kHz mono int16 buffer, on the IO queue. Set before `start()`.
-    public var pcmSink: (@Sendable (Data) -> Void)?
     private let queue = DispatchQueue(label: "io.blue.voiceiq.meeting.system", qos: .userInitiated)
     private let target = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16_000, channels: 1, interleaved: true)!
     private var tapID: AudioObjectID = kAudioObjectUnknown
@@ -74,9 +72,6 @@ public final class SystemAudioTap: @unchecked Sendable {
         guard status != .error, output.frameLength > 0 else { return }
         do { try writer.write(output); frames += Int64(output.frameLength) }
         catch { Log.meeting.error("system write failed: \(String(describing: error), privacy: .public)") }
-        if let pcmSink, let channel = output.int16ChannelData {
-            pcmSink(Data(bytes: channel[0], count: Int(output.frameLength) * 2))
-        }
     }
 
     private func check(_ status: OSStatus) throws { if status != noErr { throw TapError.coreAudio(status) } }

@@ -20,15 +20,10 @@ import Foundation
 ///    credits, 422 schema validation, 429 rate or concurrency limits.
 public enum ElevenLabs {
     public static let batchModel = "scribe_v2"
-    public static let realtimeModel = "scribe_v2_realtime"
     static let apiBase = URL(string: "https://api.elevenlabs.io/v1")!
-    static let realtimeEndpoint = URL(string: "wss://api.elevenlabs.io/v1/speech-to-text/realtime")!
 
     static let batchKeytermLimit = 100
     static let batchKeytermCharacters = 49
-    /// Realtime takes at most 50 terms of at most 20 characters.
-    static let realtimeKeytermLimit = 50
-    static let realtimeKeytermCharacters = 20
 
     /// Dictionary terms ElevenLabs will accept, in dictionary order, deduped.
     static func keyterms(_ vocabulary: [String], limit: Int, maxCharacters: Int) -> [String] {

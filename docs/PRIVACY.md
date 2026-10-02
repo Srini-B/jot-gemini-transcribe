@@ -9,7 +9,10 @@ to that gateway with your gateway key, and it forwards them to the provider.
 If you add an ElevenLabs key and pick ElevenLabs as the transcription source,
 dictation and meeting audio goes to ElevenLabs (`api.elevenlabs.io`) with your
 ElevenLabs key instead, and only the transcript goes on to the provider for the
-writing rules and meeting notes. There is no VoiceiQ server, no account, no analytics, no telemetry.
+writing rules and meeting notes. If you pick MAI Transcribe 2, dictation audio
+goes to OpenRouter or Vercel AI Gateway with your gateway key, which forwards
+it to Microsoft; the provider again receives only the transcript, for meetings
+too. There is no VoiceiQ server, no account, no analytics, no telemetry.
 Everything else stays on your Mac. The code is open — verify all of this.
 
 "The provider" below means whichever of these the active route sends to:
@@ -19,30 +22,31 @@ dictation; nothing is sent to the others. Meetings are the one exception: they
 need a model that labels speakers, so with OpenAI selected through a gateway a
 meeting goes to OpenAI with your OpenAI key, or to Gemini when there is no
 OpenAI key, and a meeting whose provider fails moves on to the other provider
-you have a key for. With ElevenLabs as the transcription source, meeting audio
-goes only to ElevenLabs and the provider receives the transcript for the notes.
+you have a key for. With ElevenLabs or MAI Transcribe 2 as the transcription
+source, meeting audio goes only there (MAI through your OpenRouter or Vercel
+key) and the provider receives the transcript for the notes.
 With no usable key, nothing is sent and the recording stays on your Mac.
 
 ## What leaves your machine (the complete list)
 
 1. **The audio of each dictation** (FLAC-compressed), sent to the provider —
    the only network host this app talks to apart from the update check
-   (item 9) and a TinyFish key if you add one (item 5). With live transcription on, the audio streams to the provider over
-   a WebSocket while you speak (the provider's own API only).
-   With ElevenLabs as the transcription source, this audio (batch or live)
-   goes to ElevenLabs instead, along with up to 100 dictionary terms as
-   `keyterms` (50 when live), and the provider never receives it: the
-   writing-rules request (item 3) carries no audio in that case.
+   (item 9) and a TinyFish key if you add one (item 5).
+   With ElevenLabs as the transcription source, this audio goes to ElevenLabs
+   instead, along with up to 100 dictionary terms as `keyterms`, and the
+   provider never receives it: the writing-rules request (item 3) carries no
+   audio in that case. With MAI Transcribe 2, the audio goes to OpenRouter or
+   Vercel AI Gateway (the chosen one when both keys are stored) and on to
+   Microsoft, without dictionary terms; the provider again never receives it.
 2. **Your dictionary terms**, alongside that audio. The transcription model uses
    them to bias what it hears, which is why names and jargon come out spelled
    right as you speak rather than being corrected afterwards. Only the correct
    spellings are sent — never the misspellings you record. They ride on every
    dictation, including with Smart transcription off.
 3. **The writing-rules prompt**, while "Apply writing rules" is on in
-   Settings → Dictation — on by default. With Gemini the dictation audio is
-   attached to this request too (FLAC, up to 12 MB), so the writing model
-   checks the words against what you said instead of trusting the live
-   transcript. OpenAI's writing model takes no audio, so with OpenAI only text
+   Settings → Dictation — on by default. With Gemini a dictation under ten
+   minutes is this request with the audio attached (FLAC), and the writing
+   model transcribes and formats it in one step. OpenAI's writing model takes no audio, so with OpenAI only text
    (and screen images, item 4) is sent. On OpenAI's own API, the dictation
    audio also goes to OpenAI's `whisper-1` for a second transcript, which is
    added to this prompt so the writing model can repair misheard words. It contains the transcript being

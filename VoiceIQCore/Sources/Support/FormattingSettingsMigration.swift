@@ -92,15 +92,13 @@ public enum FormattingSettingsMigration {
         Log.session.info("writing rules migration: auto-degraded writing rules turned back on")
     }
 
-    private static let liveOffFlag = "didDisableLiveTranscription"
-
-    /// Third one-time step: live transcription becomes opt-in. Installs that
-    /// had it on (the old default, stored or implied) are switched off once;
-    /// whatever the user picks in Settings afterwards persists as usual.
-    public static func disableLiveTranscriptionOnce(defaults: UserDefaults = .standard) {
-        guard !defaults.bool(forKey: liveOffFlag) else { return }
-        defaults.set(true, forKey: liveOffFlag)
-        defaults.set(false, forKey: "liveTranscription")
-        Log.session.info("live transcription migration: switched off, now opt-in")
+    /// Live transcription was removed. Its settings and failure
+    /// counters are dropped so nothing stale is left behind.
+    public static func removeLiveTranscriptionSettings(defaults: UserDefaults = .standard) {
+        let fixed = ["liveTranscription", "didDisableLiveTranscription", "liveModelOverride",
+                     "openAILiveModelOverride", "openAILiveDelay", "liveAttempts", "liveSuccesses",
+                     "liveConsecutiveFailures", "liveLastFailureAt"]
+        let counters = ["neverOpened", "droppedMidSession", "truncated", "noFinal"].map { "liveFallback_\($0)" }
+        for key in fixed + counters { defaults.removeObject(forKey: key) }
     }
 }

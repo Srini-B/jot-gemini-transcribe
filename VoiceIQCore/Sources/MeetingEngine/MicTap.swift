@@ -13,8 +13,6 @@ import Foundation
 public final class MicTap: @unchecked Sendable {
     public enum MicError: Error { case coreAudio(OSStatus), format, noDevice }
     private let url: URL
-    /// Receives every converted 16 kHz mono int16 buffer, on the IO queue. Set before `start()`.
-    public var pcmSink: (@Sendable (Data) -> Void)?
     private let target = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16_000,
                                        channels: 1, interleaved: true)!
     /// IO callbacks run on `ioQueue`; start/stop/device moves run on `control` so that
@@ -110,9 +108,6 @@ public final class MicTap: @unchecked Sendable {
         guard status != .error, output.frameLength > 0 else { return }
         do { try writer.write(output); frames += Int64(output.frameLength) }
         catch { Log.meeting.error("mic write failed: \(String(describing: error), privacy: .public)") }
-        if let pcmSink, let channel = output.int16ChannelData {
-            pcmSink(Data(bytes: channel[0], count: Int(output.frameLength) * 2))
-        }
     }
 
     private static func defaultInputDevice() -> AudioDeviceID {

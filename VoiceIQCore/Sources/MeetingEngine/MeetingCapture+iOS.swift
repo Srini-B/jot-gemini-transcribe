@@ -9,7 +9,6 @@ import VoiceIQObjC
 /// only builds the engine, so it keeps recording after the app is backgrounded.
 public final class MicTap: @unchecked Sendable {
     public enum MicError: Error { case format, noDevice }
-    public var pcmSink: (@Sendable (Data) -> Void)?
     private let url: URL
     private let target = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16_000,
                                        channels: 1, interleaved: true)!
@@ -83,9 +82,6 @@ public final class MicTap: @unchecked Sendable {
         do {
             try writer.write(out)
             frames += Int64(out.frameLength)
-            if let sink = pcmSink, let channel = out.int16ChannelData {
-                sink(Data(bytes: channel[0], count: Int(out.frameLength) * 2))
-            }
         } catch { Log.meeting.error("mic write failed: \(String(describing: error), privacy: .public)") }
     }
 }
@@ -93,7 +89,6 @@ public final class MicTap: @unchecked Sendable {
 /// iOS does not let an app record other apps' audio or call audio. The meeting
 /// pipeline mixes a mic file with a system file, so this writes an empty one.
 public final class SystemAudioTap: @unchecked Sendable {
-    public var pcmSink: (@Sendable (Data) -> Void)?
     private let url: URL
     public init(url: URL) { self.url = url }
 

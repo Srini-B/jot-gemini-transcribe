@@ -21,16 +21,19 @@ public struct MeetingTranscriber: Sendable {
         public init(transcribe: String, flash: String) { self.transcribe = transcribe; self.flash = flash }
     }
 
-    /// Who hears the audio: ElevenLabs Scribe when Settings picks it as the
-    /// transcription source, the same as dictation; otherwise the provider's
-    /// meeting routes in order.
+    /// Who hears the audio: ElevenLabs Scribe or MAI Transcribe 2 when
+    /// Settings picks it as the transcription source, the same as dictation;
+    /// otherwise the provider's meeting routes in order.
     public enum SpeechRoute: Equatable, Sendable {
         case elevenLabs
+        /// MAI Transcribe 2 through this gateway.
+        case mai(ModelEndpoint)
         case model(ModelRoute)
 
         public var label: String {
             switch self {
             case .elevenLabs: return "ElevenLabs"
+            case .mai(let via): return "mai/\(via.rawValue)"
             case .model(let route): return route.label
             }
         }
@@ -38,6 +41,7 @@ public struct MeetingTranscriber: Sendable {
         public var displayName: String {
             switch self {
             case .elevenLabs: return "ElevenLabs"
+            case .mai(let via): return "MAI Transcribe 2 via \(via.hostName)"
             case .model(let route): return route.displayName
             }
         }
@@ -47,12 +51,24 @@ public struct MeetingTranscriber: Sendable {
         var cacheKey: String {
             switch self {
             case .elevenLabs: return "elevenlabs"
+            case .mai(let via): return "mai-\(via.rawValue)"
             case .model(let route): return "\(route.provider.rawValue)-\(route.gateway.rawValue)"
             }
         }
 
-        public static func order(source: TranscriptionSource, providers: [ModelRoute]) -> [SpeechRoute] {
-            source == .elevenLabs ? [.elevenLabs] : providers.map(SpeechRoute.model)
+        /// Speech-to-text models that label speakers themselves: the
+        /// reference clips go inside the audio and `SpeakerLinker.link`
+        /// reads the ids off the labels they get.
+        var anchorsInAudio: Bool {
+            switch self {
+            case .elevenLabs, .mai: return true
+            case .model(let route): return route == ModelRoute(provider: .gemini, gateway: .direct)
+            }
+        }
+
+        /// The picked source alone when there is one, otherwise the provider's routes.
+        public static func order(picked: SpeechRoute?, providers: [ModelRoute]) -> [SpeechRoute] {
+            picked.map { [$0] } ?? providers.map(SpeechRoute.model)
         }
     }
 
@@ -75,12 +91,14 @@ public struct MeetingTranscriber: Sendable {
     /// gets shorter windows. MEASURED 2026-09-27 on a 30-minute call: native
     /// at 600 s gave 907 words, the gateway at 150 s gave 807, and the gateway
     /// at 600 s on one track gave 29 segments for ten minutes of speech.
-    /// OpenAI's diarizing model and ElevenLabs Scribe are transcription
-    /// models, not the flash model, so they get the native window. Neither is
-    /// measured on a long call yet.
+    /// OpenAI's diarizing model, ElevenLabs Scribe and MAI Transcribe 2 are
+    /// transcription models, not the flash model, so they get the native
+    /// window. None is measured on a long call yet. MAI's diarization fails
+    /// on recordings of about 15 minutes (Azure Speech docs, 2026-09), so
+    /// its window must stay well under that.
     static func windowSpeech(_ via: SpeechRoute?) -> Double {
         switch via {
-        case .elevenLabs: return 600
+        case .elevenLabs, .mai: return 600
         case .model(let route): return route.gateway == .direct ? 600 : 150
         case nil: return 150
         }
@@ -330,8 +348,11 @@ public struct MeetingTranscriber: Sendable {
     /// on whichever model the route has for it.
     private func transcribeSpeakers(_ flac: Data, seconds: Double, references: [(id: String, audio: Data)],
                                     via speech: SpeechRoute) async throws -> [DiarizedWord] {
-        guard case .model(let via) = speech else {
-            return try await client.elevenLabsDiarize(audio: flac, audioSeconds: seconds, deadline: 600)
+        let via: ModelRoute
+        switch speech {
+        case .elevenLabs: return try await client.elevenLabsDiarize(audio: flac, audioSeconds: seconds, deadline: 600)
+        case .mai(let endpoint): return try await client.maiDiarize(audio: flac, deadline: 600, via: endpoint)
+        case .model(let route): via = route
         }
         switch (via.provider, via.gateway) {
         case (.gemini, .direct):
@@ -347,13 +368,13 @@ public struct MeetingTranscriber: Sendable {
         }
     }
 
-    /// Native Gemini and ElevenLabs: reference clips go inside the audio and
-    /// the labels the API gives them name the speakers. Elsewhere: reference
-    /// clips go as separate parts and the model answers with the ids.
+    /// Native Gemini, ElevenLabs and MAI: reference clips go inside the audio
+    /// and the labels the API gives them name the speakers. Elsewhere:
+    /// reference clips go as separate parts and the model answers with the ids.
     private func transcribe(window regions: [ClosedRange<Double>], audio: CallAudio, clips: [(key: String, value: [ClosedRange<Double>])],
                             known: [TimedWord], via speech: SpeechRoute) async throws -> [TimedWord] {
         var request = AssembledAudio()
-        if speech == .elevenLabs || speech == .model(ModelRoute(provider: .gemini, gateway: .direct)) {
+        if speech.anchorsInAudio {
             for (id, ranges) in clips { try request.appendAnchor(id: id, clips: ranges, from: audio) }
             try request.appendBody(regions, from: audio)
             let raw = try await transcribeSpeakers(try FLACEncoder.encode(samples: request.samples), seconds: request.duration,

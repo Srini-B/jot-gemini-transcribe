@@ -22,8 +22,8 @@ public struct UsageScope: Equatable, Sendable {
     }
 }
 
-/// The single write path into `UsageStore`. `GeminiClient.post` and the live
-/// session call `record`; nothing else does.
+/// The single write path into `UsageStore`. Only the model clients call
+/// `record`.
 public enum UsageMeter {
     @TaskLocal public static var scope: UsageScope?
 

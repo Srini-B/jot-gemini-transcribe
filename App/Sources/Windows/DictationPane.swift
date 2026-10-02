@@ -13,7 +13,6 @@ struct DictationPane: View {
     @State private var meetingDetection = SettingsStore().meetingDetectionEnabled
     @State private var showIdleDot = SettingsStore().showIdleIndicator
     @State private var noiseHandling = SettingsStore().experimentalNoiseHandling
-    @State private var liveTranscription = SettingsStore().liveTranscription
     @State private var agentMode = SettingsStore().agentModeEnabled
     @State private var translationTarget = SettingsStore().translationTargetLanguage
     @State private var showingLanguages = false
@@ -124,19 +123,6 @@ struct DictationPane: View {
                     .onChange(of: noiseHandling) { _, enabled in
                         settings.setExperimentalNoiseHandling(enabled)
                     }
-                Toggle("Live transcription", isOn: $liveTranscription)
-                    .onChange(of: liveTranscription) { _, enabled in
-                        settings.setLiveTranscription(enabled)
-                        // Switching it on is an explicit "try again" — clear the
-                        // streak that suppressed it, but keep the history so the
-                        // footer still tells the truth about how it has gone.
-                        if enabled { LiveStats().clearStreak() }
-                    }
-                    // The legacy transport is a different endpoint entirely, so
-                    // live cannot run alongside it. Disabling the control says so;
-                    // leaving it tappable but inert is the exact silent no-op this
-                    // app keeps writing comments about.
-                    .disabled(settings.usesLegacyTranscribeEndpoint || !settings.liveTranscriptionSupported)
                 Toggle("Agent mode", isOn: $agentMode)
                     .onChange(of: agentMode) { _, enabled in settings.setAgentModeEnabled(enabled) }
                 if agentMode {
@@ -145,21 +131,7 @@ struct DictationPane: View {
             } header: {
                 Text("Experimental")
             } footer: {
-                if settings.usesLegacyTranscribeEndpoint {
-                    Text("Live transcription is unavailable while the legacy transcription endpoint is on in Advanced.")
-                } else if !settings.liveTranscriptionSupported {
-                    Text("Live transcription needs the provider's own API key or ElevenLabs transcription; it is unavailable through a gateway.")
-                } else {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Live streams your voice as you speak instead of uploading at the end. On Gemini it uses a separate model with a small daily request quota on free keys. If the connection stumbles it falls back to the normal upload, so nothing is lost. Loud rooms judges your voice against the actual room noise instead of a fixed level. Agent mode operates your Mac from a spoken command: it sees the screen and clicks, types and opens apps on your behalf. It needs Screen Recording and Accessibility access, and asks before anything that looks like sending, paying or deleting.")
-                        // Live failing is invisible by design — it just looks like
-                        // a slower dictation — so without this the question "is it
-                        // actually working?" has no answer.
-                        if let summary = LiveStats().summary {
-                            Text(summary)
-                        }
-                    }
-                }
+                Text("Loud rooms judges your voice against the actual room noise instead of a fixed level. Agent mode operates your Mac from a spoken command: it sees the screen and clicks, types and opens apps on your behalf. It needs Screen Recording and Accessibility access, and asks before anything that looks like sending, paying or deleting.")
             }
         }
         .onAppear { microphones = AudioInputDevices.list() }
@@ -169,7 +141,6 @@ struct DictationPane: View {
         .onReceive(NotificationCenter.default.publisher(for: .gtSettingDidChange).receive(on: RunLoop.main)) { note in
             switch note.object as? String {
             case "smartTranscription": smartTranscription = settings.smartTranscriptionEnabled
-            case "liveTranscription": liveTranscription = settings.liveTranscription
             case "agentModeEnabled": agentMode = settings.agentModeEnabled
             case "smartCleanupPass": cleanupPass = settings.smartCleanupPassEnabled
             case "customInstructions": instructions = settings.customInstructions

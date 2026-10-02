@@ -13,14 +13,10 @@ public enum PromptV1 {
         spellings: [(wrong: String, right: String)] = [],
         instructions: String? = nil,
         imagesAttached: Bool = false,
-        audioAttached: Bool = false,
         secondTranscript: String? = nil
     ) -> String {
         var sections = sharedSections(vocabulary: vocabulary, spellings: spellings,
                                       instructions: instructions, imagesAttached: imagesAttached)
-        if audioAttached {
-            sections.append("AUDIO:\nThe attached recording is the dictation itself and is authoritative for the words. RAW is a machine transcript of that recording and can contain recognition errors, wrong sentence boundaries, and merged or split words; where the audio clearly says something different, follow the audio. Still output only the cleaned text.")
-        }
         sections.append(examples)
         sections.append(layoutReminder)
         if secondTranscript != nil {

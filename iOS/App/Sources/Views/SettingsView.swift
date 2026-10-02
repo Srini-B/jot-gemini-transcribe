@@ -84,7 +84,6 @@ struct DictationSettingsView: View {
     @State private var smartTranscription = SettingsStore().smartTranscriptionEnabled
     @State private var cleanupPass = SettingsStore().smartCleanupPassEnabled
     @State private var instructions = SettingsStore().customInstructions
-    @State private var liveTranscription = SettingsStore().liveTranscription
     @State private var noiseHandling = SettingsStore().experimentalNoiseHandling
     @State private var builtInMic = MobileSettings.preferBuiltInMic
     @State private var warmWindow = MobileSettings.warmWindow
@@ -122,24 +121,8 @@ struct DictationSettingsView: View {
             Section {
                 Toggle("Better hearing in loud rooms", isOn: $noiseHandling)
                     .onChange(of: noiseHandling) { _, value in settings.setExperimentalNoiseHandling(value) }
-                Toggle("Live transcription", isOn: $liveTranscription)
-                    .onChange(of: liveTranscription) { _, value in
-                        settings.setLiveTranscription(value)
-                        // Switching it on is an explicit "try again": clear the
-                        // failure streak that turned it off.
-                        if value { LiveStats().clearStreak() }
-                    }
-                    .disabled(settings.usesLegacyTranscribeEndpoint || !settings.liveTranscriptionSupported)
             } header: {
                 SettingsSectionHeader("Experimental")
-            } footer: {
-                if settings.usesLegacyTranscribeEndpoint {
-                    Text("Live transcription is unavailable while the previous transcription endpoint is on in Advanced.")
-                } else if !settings.liveTranscriptionSupported {
-                    Text("Live transcription needs the provider's own API key or ElevenLabs transcription; it is unavailable through a gateway.")
-                } else if let summary = LiveStats().summary {
-                    Text(summary)
-                }
             }
             Section {
                 Text("Settings › Action Button › Controls › VoiceiQ Dictate. Press it to start dictating in any app and again to stop. It also works from Control Center.")
@@ -157,7 +140,6 @@ struct DictationSettingsView: View {
             case "smartTranscription": smartTranscription = settings.smartTranscriptionEnabled
             case "smartCleanupPass": cleanupPass = settings.smartCleanupPassEnabled
             case "customInstructions": instructions = settings.customInstructions
-            case "liveTranscription": liveTranscription = settings.liveTranscription
             case "experimentalNoiseHandling": noiseHandling = settings.experimentalNoiseHandling
             case "translationTargetLanguage": translationTarget = settings.translationTargetLanguage
             default: break
@@ -308,15 +290,19 @@ struct PrivacyView: View {
     @State private var retentionDays = SettingsStore().audioRetentionDays
     @State private var route = SettingsStore().activeRoute
     @State private var source = SettingsStore().transcriptionSource
+    @State private var maiHost = SettingsStore().maiTranscribeEndpoint?.hostName ?? ""
 
     private var owner: String { route.provider == .gemini ? "Google" : "OpenAI" }
 
     /// Where requests go on the active route: the provider, or a gateway that
-    /// forwards them to the provider. With ElevenLabs transcribing, dictation
-    /// audio goes only to ElevenLabs.
+    /// forwards them to the provider. With ElevenLabs or MAI Transcribe 2
+    /// transcribing, dictation audio goes only there.
     private var audioDestination: String {
-        if source == .elevenLabs { return "ElevenLabs, with your key" }
-        return route.gateway == .direct ? "\(owner), with your key" : "\(route.endpoint.hostName), then \(owner)"
+        switch source {
+        case .elevenLabs: return "ElevenLabs, with your key"
+        case .maiTranscribe: return "\(maiHost), then Microsoft"
+        case .provider: return route.gateway == .direct ? "\(owner), with your key" : "\(route.endpoint.hostName), then \(owner)"
+        }
     }
 
     var body: some View {
@@ -345,6 +331,7 @@ struct PrivacyView: View {
         .onAppear {
             route = SettingsStore().activeRoute
             source = SettingsStore().transcriptionSource
+            maiHost = SettingsStore().maiTranscribeEndpoint?.hostName ?? ""
         }
     }
 }
@@ -356,13 +343,10 @@ struct AdvancedView: View {
     private let provider = SettingsStore().preferredProvider
     @State private var endpoint = SettingsStore().endpointOverride ?? ""
     @State private var transcribeModel = SettingsStore().transcribeModelOverride ?? ""
-    @State private var liveModel = SettingsStore().liveModelOverride ?? ""
     @State private var cleanupModel = SettingsStore().cleanupModelOverride ?? ""
     @State private var legacyEndpoint = SettingsStore().usesLegacyTranscribeEndpoint
     @State private var openAITranscribe = SettingsStore().openAITranscribeModelOverride ?? ""
-    @State private var openAILive = SettingsStore().openAILiveModelOverride ?? ""
     @State private var openAIWriting = SettingsStore().openAIWritingModelOverride ?? ""
-    @State private var openAILiveDelay = SettingsStore().openAIConfig.liveDelay
     private let geminiDefaults = GeminiConfig()
     private let openAIDefaults = OpenAIConfig()
 
@@ -386,7 +370,6 @@ struct AdvancedView: View {
                             .foregroundStyle(Theme.Colors.recording)
                     }
                     field("Transcription", text: $transcribeModel, prompt: geminiDefaults.transcribeModel) { settings.setTranscribeModelOverride($0) }
-                    field("Live", text: $liveModel, prompt: geminiDefaults.liveModel) { settings.setLiveModelOverride($0) }
                     field("Formatting", text: $cleanupModel, prompt: geminiDefaults.cleanupModel) { settings.setCleanupModelOverride($0) }
                 } header: { SettingsSectionHeader("Gemini models") }
                 Section {
@@ -396,11 +379,6 @@ struct AdvancedView: View {
             } else {
                 Section {
                     field("Transcription", text: $openAITranscribe, prompt: openAIDefaults.transcribeModel) { settings.setOpenAITranscribeModelOverride($0) }
-                    field("Live", text: $openAILive, prompt: openAIDefaults.liveModel) { settings.setOpenAILiveModelOverride($0) }
-                    Picker("Live delay", selection: $openAILiveDelay) {
-                        ForEach(OpenAIConfig.LiveDelay.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
-                    }
-                    .onChange(of: openAILiveDelay) { _, value in settings.setOpenAILiveDelay(value) }
                     field("Formatting", text: $openAIWriting, prompt: openAIDefaults.writingModel) { settings.setOpenAIWritingModelOverride($0) }
                 } header: { SettingsSectionHeader("OpenAI models") }
             }

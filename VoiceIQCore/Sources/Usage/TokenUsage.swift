@@ -76,9 +76,8 @@ public struct TokenUsage: Equatable, Sendable, Codable {
     }
 
     /// OpenAI's transcription models bill per minute and report
-    /// `usage: {type: "duration", seconds}` (the realtime session's completion
-    /// event carries the same block). There are no tokens to count, so the
-    /// charge is the list price for those seconds.
+    /// `usage: {type: "duration", seconds}`. There are no tokens to count, so
+    /// the charge is the list price for those seconds.
     public static func fromOpenAIDuration(_ data: Data, model: String) -> TokenUsage? {
         guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let meta = root["usage"] as? [String: Any], meta["type"] as? String == "duration",
@@ -174,8 +173,8 @@ public struct TokenUsage: Equatable, Sendable, Codable {
         return fromUsageMetadata(meta)
     }
 
-    /// Shared by REST `usageMetadata` and the Live socket's `usageMetadata`, which
-    /// uses the same shape with `responseTokenCount` / `responseTokensDetails`.
+    /// REST `usageMetadata`; also accepts `responseTokenCount` /
+    /// `responseTokensDetails` in place of the candidates fields.
     static func fromUsageMetadata(_ meta: [String: Any]) -> TokenUsage {
         var usage = TokenUsage()
         let promptDetails = details(meta, "promptTokensDetails", "prompt_tokens_details", countKey: "tokenCount")
@@ -224,15 +223,6 @@ public struct TokenUsage: Equatable, Sendable, Codable {
             }
         }
         return usage
-    }
-
-    // MARK: - Live socket
-
-    /// A `usageMetadata` frame from the Live API, or nil for any other frame.
-    public static func fromLiveFrame(_ data: Data) -> TokenUsage? {
-        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let meta = (root["usageMetadata"] ?? root["usage_metadata"]) as? [String: Any] else { return nil }
-        return fromUsageMetadata(meta)
     }
 
     // MARK: - Helpers

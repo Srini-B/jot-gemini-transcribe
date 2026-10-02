@@ -5,7 +5,6 @@ import Foundation
 public struct GeminiConfig: Sendable, Equatable {
     public var endpoint: URL
     public var transcribeModel: String
-    public var liveModel: String
     public var cleanupModel: String
 
     public init(
@@ -16,12 +15,10 @@ public struct GeminiConfig: Sendable, Equatable {
         // on 2026-08-18 was the -preview suffix; the graduated name is this
         // one.) A user can still pin something else in Settings → Advanced.
         transcribeModel: String = "gemini-3.5-transcribe",
-        liveModel: String = "gemini-3.5-transcribe-live",
         cleanupModel: String = "gemini-3.8-flash"
     ) {
         self.endpoint = endpoint
         self.transcribeModel = transcribeModel
-        self.liveModel = liveModel
         self.cleanupModel = cleanupModel
     }
 
@@ -44,7 +41,7 @@ public extension GeminiClient {
 
 /// Low-level Gemini API client. Uses non-streaming `generateContent`: the probe
 /// showed the transcribe model delivers its entire result in one SSE lump anyway,
-/// so streaming buys nothing but parsing complexity today. The bidi live model is the future streaming path.
+/// so streaming buys nothing but parsing complexity.
 public actor GeminiClient {
     let session: URLSession
     private let apiKey: @Sendable () -> String?

@@ -72,72 +72,32 @@ public final class DictationCoordinator: ObservableObject {
     static let discardSNRThreshold: Double = 6
 
     /// Speech must rise this far above the room, for this many ~100 ms buffers,
-    /// before live text is shown or trusted. Room tone stays within ~6 dB of
-    /// its 10th percentile; speech crosses 12 dB within 0.2–3 s of the key.
+    /// before the one-call dictation path trusts the recording. Room tone stays
+    /// within ~6 dB of its 10th percentile; speech crosses 12 dB within 0.2–3 s
+    /// of the key.
     static let speechAboveRoomDB: Double = 12
     static let speechBuffersRequired = 3
-
-    /// Live sessions are server-capped at ten minutes. Past this point the
-    /// stream is about to be (or has been) closed, so the batch path over the
-    /// CAF is the only complete transcript; waiting on a live final would only
-    /// add latency before the same fallback.
-    static let liveMaxSeconds: TimeInterval = 570
 
     /// The in-flight transcription task — cancelled when the user cancels the
     /// session (audit L8: Esc previously left the network work running).
     private var inFlightTask: Task<Void, Never>?
 
-    /// Folder of the live session, if any — Delete All must not sweep it (audit L7).
+    /// Folder of the session in progress, if any — Delete All must not sweep it (audit L7).
     public var activeSessionFolder: URL? { session?.folder }
 
     /// `didSet` rather than a teardown call at each exit, because there are a
     /// dozen places that clear this — four early returns in `completeFinalize`
     /// alone (blip, zero frames, sub-0.4s, digital silence), plus cancel, error
-    /// and warming paths. Every one of them must close the socket, and patching
-    /// them individually is how one gets missed: the miss leaves an orphaned
-    /// socket with an unclosed activity, still billing and still holding the
-    /// actor, whose only remaining terminator is a timeout. A double-tap of the
-    /// hotkey would leave two.
+    /// and warming paths. Every one of them must stop the screen collector.
     private var session: Session? {
         didSet {
             guard oldValue?.id != session?.id else { return }
-            partialPump?.cancel()
-            partialPump = nil
-            partialTranscript = ""
-            correctedTranscript = ""
-            correctionSegments = []
-            lastInterim = ""
             if oldValue != nil, let collector = screenContextCollector {
                 screenContextCollector = nil
                 _ = collector.stop()
             }
-            guard let live = liveSession else { return }
-            liveSession = nil
-            Task { await live.abort() }
         }
     }
-    /// The socket for the CURRENT session, if live mode is on and it opened.
-    /// Never outlives `session` — see the `didSet` above.
-    private var liveSession: LiveTranscribing?
-    /// Latched at key-down, not read per-use: the user toggling the setting
-    /// mid-dictation must not make one recording half-live.
-    private var liveActiveForSession = false
-    /// The words the model currently thinks it heard. Display only — never
-    /// inserted, never stored. Cleared whenever a session ends so a fast second
-    /// dictation cannot show the previous one's tail.
-    @Published public private(set) var partialTranscript: String = ""
-    private var partialPump: Task<Void, Never>?
-    /// Set once, at the instant the model's finished answer replaces the running
-    /// guess. The HUD sweeps on it. Distinct from `partialTranscript` because the
-    /// sweep must fire on the CORRECTION, not on every revision — the interim
-    /// text changes several times a second.
-    @Published public private(set) var correctedTranscript: String = ""
-    /// The edit smart transcription made, as kept/cut runs over what was said.
-    /// Empty when nothing was removed or the two texts could not be aligned.
-    @Published public private(set) var correctionSegments: [TranscriptDiff.Segment] = []
-    /// The last interim hypothesis — close to literally what was said, and the
-    /// left-hand side of the diff.
-    private var lastInterim: String = ""
     private var capture: AudioCapturing?
     private var screenContextCollector: ScreenContextCollector?
     /// Most recent metered level — decides whether the user was mid-word when
@@ -146,19 +106,19 @@ public final class DictationCoordinator: ObservableObject {
     /// How loud the room is. Always measured, never in charge: what it feeds is
     /// gated on `noiseHandlingActive`, what it records is not.
     private var noiseFloor = NoiseFloorEstimator()
-    /// Whether the mic has heard speech above the room this session. Live
-    /// partials are hidden until it has, and a live final from a session that
-    /// never heard speech is not used: fed silence, the stream model guesses a
-    /// dictionary term. Relative to the room, not absolute: AirPods room tone
-    /// sits near −52 dBFS, above `trailingSpeechThreshold` (−54.6 dBFS), so an
-    /// absolute bar latched on the first buffer (measured 2026-09-28).
+    /// Whether the mic has heard speech above the room this session. The
+    /// one-call path runs only when it has: fed silence, the flash model
+    /// guesses a dictionary term. Relative to the room, not absolute: AirPods
+    /// room tone sits near −52 dBFS, above `trailingSpeechThreshold`
+    /// (−54.6 dBFS), so an absolute bar latched on the first buffer (measured
+    /// 2026-09-28).
     private var speechHeard = false
     /// Why the last session ended with no speech — the pill copy differs, nothing
     /// else does, so this rides alongside the outcome instead of widening the
     /// state machine for a string.
     public private(set) var lastSilenceReason: SilenceReason = .noSpeech
     /// The experiment's state, read ONCE at key-down. A toggle flipped while the
-    /// pill is up must not change the rules the live recording is judged by.
+    /// pill is up must not change the rules the recording is judged by.
     private var noiseHandlingActive = false
     /// Space-lock (or UI hands-free) that arrived while the engine was still
     /// coming up — applied on engineStarted, cleared when the session ends.
@@ -191,10 +151,6 @@ public final class DictationCoordinator: ObservableObject {
     /// Keyboard Entry — which is a coin flip for a contributor, not a bug in
     /// their change.
     private let secureInputActive: @MainActor () -> Bool
-    /// Returns a live session, or nil when live mode is off or unavailable.
-    /// Injected so the coordinator never needs to know about sockets or keys,
-    /// and so tests can drive every live failure mode with no network.
-    private let makeLiveSession: @MainActor () -> LiveTranscribing?
 
     public init(
         audioFactory: @escaping @MainActor () -> AudioCapturing,
@@ -203,8 +159,7 @@ public final class DictationCoordinator: ObservableObject {
         contextProvider: @escaping @MainActor () -> DictationContext = { DictationContext() },
         now: @escaping () -> Date = Date.init,
         noiseHandlingEnabled: @escaping @MainActor () -> Bool = { SettingsStore().experimentalNoiseHandling },
-        secureInputActive: @escaping @MainActor () -> Bool = { SecureInput.isActive },
-        makeLiveSession: @escaping @MainActor () -> LiveTranscribing? = { nil }
+        secureInputActive: @escaping @MainActor () -> Bool = { SecureInput.isActive }
     ) {
         self.audioFactory = audioFactory
         self.transcription = transcription
@@ -212,7 +167,6 @@ public final class DictationCoordinator: ObservableObject {
         self.contextProvider = contextProvider
         self.now = now
         self.noiseHandlingEnabled = noiseHandlingEnabled
-        self.makeLiveSession = makeLiveSession
         self.secureInputActive = secureInputActive
     }
 
@@ -381,41 +335,7 @@ public final class DictationCoordinator: ObservableObject {
             return
         }
         do {
-            // Latched once, here: the user flipping the setting mid-dictation
-            // must not produce a recording that is half streamed and half not.
-            let live = session?.context.mode == .dictate ? makeLiveSession() : nil
-            liveSession = live
-            liveActiveForSession = live != nil
-
-            var sink: (@Sendable (Data) -> Void)?
-            if let live {
-                sink = { [weak live] pcm in live?.enqueue(pcm) }
-                // Deliberately not awaited. Key-down must not wait on a socket —
-                // a slow handshake would delay the mic, which is the one thing
-                // that actually loses words. Audio accumulates in the ring
-                // meanwhile, and a handshake that never lands simply means
-                // finish() returns nil and the upload runs as it always has.
-                partialPump?.cancel()
-                partialPump = Task { [weak self] in
-                    for await text in live.partials {
-                        guard let self else { return }
-                        // Late partials from a session the user already ended
-                        // must not paint over the next one — same stale-session
-                        // guard the transcript completion paths use.
-                        guard self.session?.id == sessionID else { return }
-                        guard self.speechHeard else { continue }
-                        self.lastInterim = text
-                        self.partialTranscript = text
-                    }
-                }
-                Task { [weak self] in
-                    do { try await live.begin() } catch {
-                        Log.transcription.info("live session did not open (\(error)) — this dictation uploads instead")
-                        await MainActor.run { self?.liveActiveForSession = false }
-                    }
-                }
-            }
-            try capture.start(writingTo: FileLayout.audioCAF(in: folder), pcmSink: sink)
+            try capture.start(writingTo: FileLayout.audioCAF(in: folder))
             apply(.engineStarted)
             if pendingLockIn {
                 pendingLockIn = false
@@ -638,54 +558,6 @@ public final class DictationCoordinator: ObservableObject {
           await UsageMeter.$scope.withValue(usageScope) {
             guard let self else { return }
             do {
-                // Live first, when it is on. Inside this task on purpose: Esc
-                // cancels inFlightTask, so a live finish outside it would be
-                // invisible to cancellation and keep running after the user
-                // gave up.
-                if self.liveActiveForSession, let live = self.liveSession,
-                   result.durationSeconds <= Self.liveMaxSeconds {
-                    let liveResult = await live.finish(
-                        deadline: TimeoutPolicy.liveFinal,
-                        framesWritten: result.framesWritten
-                    )
-                    guard !Task.isCancelled else { return }
-                    if liveResult != nil, !self.speechHeard {
-                        Log.transcription.info("live text from a session with no speech above the room — uploading instead")
-                    }
-                    if let liveResult, self.speechHeard {
-                        // Show the finished text in place of the guess before the
-                        // pill moves on. This is the beat the landing page sells:
-                        // the sentence visibly becomes the polished one.
-                        // Show what the model took out, not just what it kept.
-                        // Only when there is a real edit to show: an empty result
-                        // means nothing was removed, or the texts could not be
-                        // aligned, and either way the HUD just shows the sentence.
-                        let diff = TranscriptDiff.segments(
-                            verbatim: self.lastInterim,
-                            cleaned: liveResult.cleanedTranscript
-                        )
-                        self.correctionSegments = diff.contains(where: \.isCut) ? diff : []
-                        self.partialTranscript = liveResult.cleanedTranscript
-                        self.correctedTranscript = liveResult.cleanedTranscript
-                        // The live model only formats; the writing rules (late
-                        // corrections, grammar-driven sentence boundaries, tone)
-                        // are the cleanup pass, same as the batch path.
-                        let polished = await self.transcription.polish(
-                            liveResult, context: session.context,
-                            audioURL: FileLayout.audioCAF(in: session.folder),
-                            durationSeconds: result.durationSeconds
-                        )
-                        guard !Task.isCancelled else { return }
-                        await self.completeTranscription(
-                            sessionID: sessionID, outcome: polished, startedAt: finalizeStartedAt
-                        )
-                        return
-                    }
-                    // nil means the stream was not clean — dropped audio, a dead
-                    // socket, no final in time. The CAF has been accumulating the
-                    // whole time, so this costs latency and nothing else.
-                    Log.transcription.info("live result unusable — uploading the recording instead")
-                }
                 let outcome = try await self.transcription.transcribe(
                     audioURL: FileLayout.audioCAF(in: session.folder),
                     durationSeconds: result.durationSeconds,

@@ -16,20 +16,32 @@ struct KeysView: View {
     }
 }
 
-/// The provider (Gemini or OpenAI) and its key, the transcription choice once
-/// an ElevenLabs key is stored, the optional ElevenLabs and TinyFish keys,
-/// and the gateways under a collapsed Experimental section, as on the Mac.
-/// Gateway keys serve both providers, so they are entered once.
+/// The provider (Gemini or OpenAI) and its key, the transcription provider
+/// (shown once an ElevenLabs, OpenRouter or Vercel key makes a second option),
+/// the optional ElevenLabs and TinyFish keys, and the gateways under a collapsed Experimental section, as
+/// on the Mac. Gateway keys serve both providers and MAI Transcribe 2, so
+/// they are entered once.
 struct ModelKeysForm: View {
     @State private var provider = SettingsStore().preferredProvider
     @State private var gateway = SettingsStore().activeRoute.gateway
     @State private var available = KeychainStore.gatewaysWithKeys(for: SettingsStore().preferredProvider)
     @State private var transcriptionSource = SettingsStore().preferredTranscriptionSource
     @State private var hasElevenLabsKey = KeychainStore.loadElevenLabsKey() != nil
+    @State private var hasGatewayKey = SettingsStore().maiTranscribeEndpoint != nil
     /// Collapsed on every visit, like the Mac's Experimental group.
     @State private var experimentalExpanded = false
 
     private var providerSlot: KeySlot { provider == .gemini ? .gemini : .openAI }
+
+    private var transcriptionOptions: [TranscriptionSource] {
+        TranscriptionSource.allCases.filter { source in
+            switch source {
+            case .provider: return true
+            case .elevenLabs: return hasElevenLabsKey
+            case .maiTranscribe: return hasGatewayKey
+            }
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
@@ -61,14 +73,16 @@ struct ModelKeysForm: View {
                     .id(providerSlot)
             }
 
-            if hasElevenLabsKey {
+            if transcriptionOptions.count > 1 {
                 VStack(alignment: .leading, spacing: Theme.Spacing.m) {
-                    GroupLabel(text: "Transcription")
-                    Picker("Transcription", selection: $transcriptionSource) {
-                        ForEach(TranscriptionSource.allCases) { Text($0.displayName(for: provider)).tag($0) }
+                    GroupLabel(text: "Transcription provider")
+                    Picker("Transcription provider", selection: $transcriptionSource) {
+                        ForEach(transcriptionOptions) { Text($0.displayName(for: provider)).tag($0) }
                     }
                     .pickerStyle(.segmented)
-                    .onChange(of: transcriptionSource) { _, value in SettingsStore().setPreferredTranscriptionSource(value) }
+                    .onChange(of: transcriptionSource) { _, value in
+                        if value != SettingsStore().transcriptionSource { SettingsStore().setPreferredTranscriptionSource(value) }
+                    }
                 }
             }
 
@@ -80,6 +94,7 @@ struct ModelKeysForm: View {
 
             experimental
         }
+        .onAppear(perform: reload)
         .onReceive(NotificationCenter.default.publisher(for: .gtSettingDidChange).receive(on: RunLoop.main)) { _ in
             reload()
         }
@@ -131,7 +146,8 @@ struct ModelKeysForm: View {
         available = KeychainStore.gatewaysWithKeys(for: provider)
         gateway = settings.activeRoute.gateway
         hasElevenLabsKey = KeychainStore.loadElevenLabsKey() != nil
-        transcriptionSource = settings.preferredTranscriptionSource
+        hasGatewayKey = settings.maiTranscribeEndpoint != nil
+        transcriptionSource = settings.transcriptionSource
     }
 }
 

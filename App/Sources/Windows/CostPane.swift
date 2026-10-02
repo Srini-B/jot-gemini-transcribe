@@ -2,7 +2,7 @@ import SwiftUI
 import VoiceIQCore
 
 /// Cost Analysis: what the model calls behind each action cost, for one
-/// source at a time (Gemini, OpenAI, or ElevenLabs transcription). It opens on
+/// source at a time (Gemini, OpenAI, or ElevenLabs or MAI transcription). It opens on
 /// the provider selected in Settings; the toggle shows the others' calls. Period totals up top, then a breakdown
 /// by action and by model for the chosen period, then the most recent calls.
 struct CostPane: View {
@@ -46,16 +46,16 @@ struct CostPane: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: VoiceIQUI.Spacing.l) {
-                HStack(alignment: .top) {
-                    summary
-                    Picker("Source", selection: $source) {
-                        ForEach(CostSource.allCases) { Text($0.displayName).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .fixedSize()
-                    .onChange(of: source) { _, _ in reload() }
+                // Its own row: beside the totals, four sources squeezed them
+                // into "$0.01…".
+                Picker("Source", selection: $source) {
+                    ForEach(CostSource.allCases) { Text($0.displayName).tag($0) }
                 }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                .onChange(of: source) { _, _ in reload() }
+                summary
                 HStack(spacing: VoiceIQUI.Spacing.m) {
                     Picker("Period", selection: $period) {
                         ForEach(Period.allCases) { Text($0.title).tag($0) }

@@ -47,13 +47,15 @@ public enum ModelProvider: String, CaseIterable, Sendable, Codable, Identifiable
     }
 }
 
-/// Who turns dictation and meeting audio into text: the selected provider's
-/// own speech model, or ElevenLabs Scribe v2 (batch and meetings) and Scribe
-/// v2 Realtime (live). The writing rules and meeting notes always run on the
-/// selected provider's writing model.
+/// Who turns dictation audio into text: the selected provider's own speech
+/// model, ElevenLabs Scribe v2 (also meetings), or MAI Transcribe 2 through a
+/// gateway. The writing rules and meeting notes always run on the selected
+/// provider's writing model: neither ElevenLabs nor MAI Transcribe 2 takes a
+/// prompt.
 public enum TranscriptionSource: String, CaseIterable, Sendable, Identifiable {
     case provider
     case elevenLabs
+    case maiTranscribe
 
     public var id: String { rawValue }
 
@@ -61,6 +63,7 @@ public enum TranscriptionSource: String, CaseIterable, Sendable, Identifiable {
         switch self {
         case .provider: return provider.displayName
         case .elevenLabs: return "ElevenLabs"
+        case .maiTranscribe: return "MAI Transcribe 2"
         }
     }
 }
@@ -127,11 +130,6 @@ public struct ModelRoute: Hashable, Sendable {
         case .vercel: return .vercel
         }
     }
-
-    /// Streaming transcription runs only on the providers' own sockets.
-    /// OpenRouter has no streaming transcription; Vercel's beta WebSocket
-    /// protocol is not implemented.
-    public var supportsLiveTranscription: Bool { gateway == .direct }
 
     /// For logs.
     public var label: String { "\(provider.rawValue)/\(gateway.rawValue)" }

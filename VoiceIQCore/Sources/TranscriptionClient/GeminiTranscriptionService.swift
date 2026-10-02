@@ -13,9 +13,9 @@ import Foundation
 ///   On OpenAI's own API the writing model cannot hear the audio, so a
 ///   single-chunk dictation also gets whisper-1's transcript as SECOND,
 ///   fetched in parallel, for cleanup to repair misheard stretches of RAW.
-///   With ElevenLabs picked as the transcription source, every chunk goes to
-///   Scribe v2 instead, and neither the one-call path nor SECOND runs: the
-///   writing model gets Scribe's transcript as RAW.
+///   With ElevenLabs or MAI Transcribe 2 picked as the transcription source,
+///   every chunk goes to that model instead, and neither the one-call path nor
+///   SECOND runs: the writing model gets its transcript as RAW.
 ///
 /// The one-call path has no separate raw transcript, so there is nothing for
 /// the validation gate to compare against; the raw column holds the same text.
@@ -235,7 +235,11 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
             let config = settings.geminiConfig
             names = ("\(config.transcribeModel)/\(settings.formattingPolicy.mode.rawValue)", config.cleanupModel)
         }
-        return source == .elevenLabs ? (ElevenLabs.batchModel, names.writing) : names
+        switch source {
+        case .provider: return names
+        case .elevenLabs: return (ElevenLabs.batchModel, names.writing)
+        case .maiTranscribe: return (GeminiClient.maiTranscribeModel, names.writing)
+        }
     }
 
     /// Routes whose key was refused the flash model this run.
@@ -251,54 +255,6 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
             lock.lock(); defer { lock.unlock() }
             providers.insert(provider)
         }
-    }
-
-    /// The cleanup stage on its own, for transcripts the live stream produced.
-    /// Live output has already had dictionary rules applied by `LiveTranscriber`;
-    /// the pass here works from the raw transcript so the gate has a true
-    /// reference, and re-applies the rules on whatever comes back.
-    public func polish(
-        _ result: TranscriptionResult, context: DictationContext, audioURL: URL?, durationSeconds: Double
-    ) async -> TranscriptionResult {
-        guard context.mode == .dictate else { return result }
-        guard settings.formattingPolicy.cleanupPass else { return result }
-        let config = settings.geminiConfig
-        let raw = result.rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !raw.isEmpty else { return result }
-        // The live model hears the audio once and cannot be asked again; the
-        // cleanup model can. Sending the recording along lets it settle words the
-        // stream misheard ("have a look at it" vs "I will look at it") instead of
-        // polishing the error. MEASURED 2026-09-26: +1.4 s on a 99 s dictation.
-        let audio = audioURL.flatMap { url -> Data? in
-            // With ElevenLabs transcribing, the recording goes only to ElevenLabs.
-            guard settings.activeRoute.provider.writingModelHearsAudio, settings.transcriptionSource == .provider else { return nil }
-            let flacURL = url.deletingLastPathComponent().appendingPathComponent("audio-polish.flac")
-            let speech = (try? AVAudioFile(forReading: url, commonFormat: .pcmFormatInt16, interleaved: true))
-                .map(AudioChunker.speechRange(in:))
-            guard let encoded = try? FLACEncoder.encode(cafURL: url, flacURL: flacURL, frameRange: speech) else { return nil }
-            defer { try? FileManager.default.removeItem(at: encoded.url) }
-            guard encoded.byteCount <= Self.maxPolishAudioBytes else { return nil }
-            return try? Data(contentsOf: encoded.url)
-        }
-        let outcome = await runCleanup(raw: raw, context: context, config: config, audio: audio)
-        // A cleanup that comes back much longer than the live text is the
-        // cleanup model transcribing speech the stream never wrote down: the
-        // live server stops mid-dictation on long turns (measured 2026-09-27,
-        // 15 of 29 sentences). The recording is complete, so upload it instead
-        // of pasting the half that the stream kept. Not a gate trip: the
-        // cleanup did its job, the reference was short.
-        if case .rejected(let reason) = outcome, reason.hasPrefix("expansion_ratio"), let audioURL, durationSeconds > 0 {
-            Log.transcription.warning("live text shorter than the audio (\(reason, privacy: .public)) — uploading the recording instead")
-            if let batch = try? await transcribe(audioURL: audioURL, durationSeconds: durationSeconds, context: context) {
-                return batch
-            }
-        }
-        let cleaned = settle(outcome, raw: raw)
-        return TranscriptionResult(
-            rawTranscript: result.rawTranscript,
-            cleanedTranscript: cleaned,
-            modelID: "\(result.modelID)+\(modelNames(settings.transcriptionSource).writing)"
-        )
     }
 
     // MARK: - Stages
@@ -408,6 +364,12 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
         config: GeminiConfig, policy: SettingsStore.FormattingPolicy,
         vocabulary: [String], deadline: TimeInterval
     ) async throws -> String {
+        // No dictionary terms: neither gateway documents keyword biasing for
+        // this model. The writing rules still get the dictionary.
+        if source == .maiTranscribe, let endpoint = settings.maiTranscribeEndpoint {
+            return try await client.gatewayTranscribe(audio: flacData, model: GeminiClient.maiTranscribeModel,
+                                                      deadline: deadline, stage: .transcribe, via: endpoint)
+        }
         // The transport decision lives in ONE place so the fail-open retry below
         // cannot silently switch endpoints half way through a recovery.
         func send(_ terms: [String]) async throws -> String {
@@ -487,10 +449,6 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
         }
     }
 
-    /// Inline request parts are capped at 20 MB by the API; a 10-minute mono
-    /// 16 kHz FLAC is about 8 MB, so this only trips on an override.
-    static let maxPolishAudioBytes = 12_000_000
-
     private enum CleanupOutcome {
         case accepted(String)
         case rejected(reason: String)
@@ -498,9 +456,9 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
     }
 
     private func cleanupOrFallback(
-        raw: String, context: DictationContext, config: GeminiConfig, audio: Data? = nil, second: String? = nil
+        raw: String, context: DictationContext, config: GeminiConfig, second: String? = nil
     ) async -> String {
-        settle(await runCleanup(raw: raw, context: context, config: config, audio: audio, second: second), raw: raw)
+        settle(await runCleanup(raw: raw, context: context, config: config, second: second), raw: raw)
     }
 
     /// Turns a cleanup outcome into the text to insert. The dictionary's hard
@@ -521,7 +479,7 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
     }
 
     private func runCleanup(
-        raw: String, context: DictationContext, config: GeminiConfig, audio: Data?, second: String? = nil
+        raw: String, context: DictationContext, config: GeminiConfig, second: String? = nil
     ) async -> CleanupOutcome {
         let dictionary = DictionaryStore()
         let prompt = PromptV1.cleanupPrompt(
@@ -530,7 +488,6 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
             spellings: dictionary.spellings(),
             instructions: settings.customInstructions,
             imagesAttached: !context.screenshots.isEmpty,
-            audioAttached: audio != nil,
             secondTranscript: second
         )
         do {
@@ -538,10 +495,9 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
                 60,
                 Self.cleanupDeadline(forCharacters: raw.count)
                     + Double(context.screenshots.count * 2)
-                    + (audio.map { Double($0.count) / 400_000 } ?? 0)
             )
             let response = try await client.cleanup(
-                prompt: prompt, images: context.screenshots, audioFLAC: audio,
+                prompt: prompt, images: context.screenshots,
                 model: config.cleanupModel, endpoint: config.endpoint, deadline: deadline
             )
             let cleaned = ValidationGate.stripArtifacts(response)

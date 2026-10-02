@@ -9,9 +9,7 @@ import Foundation
 ///    work the Gemini interactions endpoint would have done.
 ///  - `POST /chat/completions` for every flash call, with text, JPEG and FLAC
 ///    as message content parts.
-///
-/// Live (WebSocket) transcription has no gateway equivalent, so the
-/// coordinator skips the live session whenever a gateway is active.
+
 /// Extra message content after the prompt, in order.
 public enum ChatPart: Sendable {
     case text(String)
@@ -29,14 +27,15 @@ extension GeminiClient {
         "ai-transcription-model-specification-version": "4",
     ]
 
-    /// Both gateways name Google models `google/<gemini id>`; the live model
-    /// maps to its batch sibling because there is no live surface here.
+    /// Both gateways name Google models `google/<gemini id>`.
     static func gatewayModelID(_ model: String) -> String {
-        if model.contains("/") { return model }
-        var id = model
-        if id.hasSuffix("-live") { id.removeLast("-live".count) }
-        return "google/\(id)"
+        model.contains("/") ? model : "google/\(model)"
     }
+
+    /// Microsoft's speech-to-text model, the same ID on both gateways. It takes
+    /// audio only, so it cannot apply the writing rules (OpenRouter lists its
+    /// modality as `audio->transcription` with no supported parameters).
+    public static let maiTranscribeModel = "microsoft/mai-transcribe-2"
 
     /// OpenRouter slugs of Google's priority-tier endpoints.
     static let openRouterPriorityEndpoints = ["google-ai-studio/priority", "google-vertex/global/priority"]
@@ -84,6 +83,79 @@ extension GeminiClient {
             stage: stage, via: .openRouter
         )
         return try Self.extractGatewayTranscript(from: data)
+    }
+
+    /// One meeting window from MAI Transcribe 2, speaker-labelled and timed
+    /// per word. Labels are per request, so `SpeakerLinker` maps them. Both
+    /// gateways forward Azure Speech's own options; OpenRouter's `diarize`
+    /// field is refused for this model. PROBED 2026-10-02 on a three-voice
+    /// 40 s call: both answered with every word under the right speaker.
+    ///  - OpenRouter: `provider.options.azure` with `diarization.enabled` and
+    ///    `modelOptions.timestamps: word`, plus `verbose_json`. The answer's
+    ///    `words` carry `speaker`, `start` and `end`.
+    ///  - Vercel: `providerOptions.azure` with `diarization.enabled` and a
+    ///    flat `timestamps: word` (`modelOptions` is refused as "invalid azure
+    ///    provider options"). Speakers come only in
+    ///    `providerMetadata.azure.phrases`, each with `speaker` and `words`
+    ///    timed in milliseconds.
+    func maiDiarize(audio: Data, deadline: TimeInterval, via: ModelEndpoint) async throws -> [DiarizedWord] {
+        let model = Self.maiTranscribeModel
+        let data: Data
+        if via == .vercel {
+            let body: [String: Any] = [
+                "audio": audio.base64EncodedString(), "mediaType": "audio/flac",
+                "providerOptions": ["azure": ["diarization": ["enabled": true], "timestamps": "word"]],
+            ]
+            data = try await post(path: "transcription-model", body: try JSONSerialization.data(withJSONObject: body),
+                                  endpoint: Self.vercelTranscriptionEndpoint, deadline: deadline, modelLabel: model,
+                                  stage: .meetingTranscribe, via: .vercel,
+                                  extraHeaders: Self.vercelTranscriptionHeaders.merging(["ai-model-id": model]) { $1 })
+        } else {
+            let body: [String: Any] = [
+                "model": model,
+                "input_audio": ["data": audio.base64EncodedString(), "format": "flac"],
+                "response_format": "verbose_json", "timestamp_granularities": ["word"],
+                "provider": ["options": ["azure": ["diarization": ["enabled": true], "modelOptions": ["timestamps": "word"]]]],
+            ]
+            data = try await post(path: "audio/transcriptions", body: try JSONSerialization.data(withJSONObject: body),
+                                  endpoint: Self.openRouterEndpoint, deadline: deadline, modelLabel: model,
+                                  stage: .meetingTranscribe, via: .openRouter)
+        }
+        guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            throw TranscriptionError.network("unparseable_response")
+        }
+        let words = Self.maiDiarizedWords(json)
+        if words.isEmpty, !(json["text"] as? String ?? "").isEmpty {
+            // Text without speakers: the options were dropped on the way.
+            Log.meeting.error("MAI via \(via.rawValue, privacy: .public) returned no speaker labels; keys: \(json.keys.sorted().joined(separator: ","), privacy: .public)")
+            throw TranscriptionError.network("no_speaker_labels")
+        }
+        return words
+    }
+
+    /// OpenRouter's `words`, or the Azure phrases Vercel passes through in
+    /// `providerMetadata`. Speaker indices become string labels.
+    static func maiDiarizedWords(_ json: [String: Any]) -> [DiarizedWord] {
+        func number(_ value: Any?) -> Double? { (value as? NSNumber)?.doubleValue }
+        func label(_ value: Any?) -> String? { value.map { "\($0)" } }
+        let words: [DiarizedWord] = (json["words"] as? [[String: Any]] ?? []).compactMap { word in
+            guard let speaker = label(word["speaker"]),
+                  let text = (word["word"] as? String)?.trimmingCharacters(in: .whitespaces), !text.isEmpty else { return nil }
+            return DiarizedWord(text: text, speaker: speaker, start: number(word["start"]), end: number(word["end"]))
+        }
+        if !words.isEmpty { return words }
+        let azure = (json["providerMetadata"] as? [String: Any])?["azure"] as? [String: Any]
+        return (azure?["phrases"] as? [[String: Any]] ?? []).flatMap { phrase -> [DiarizedWord] in
+            guard let speaker = label(phrase["speaker"]) else { return [] }
+            func timed(_ node: [String: Any]) -> DiarizedWord? {
+                guard let text = (node["text"] as? String)?.trimmingCharacters(in: .whitespaces), !text.isEmpty else { return nil }
+                let start = number(node["offsetMilliseconds"]).map { $0 / 1000 }
+                let end = start.flatMap { start in number(node["durationMilliseconds"]).map { start + $0 / 1000 } }
+                return DiarizedWord(text: text, speaker: speaker, start: start, end: end)
+            }
+            let inner = (phrase["words"] as? [[String: Any]] ?? []).compactMap(timed)
+            return inner.isEmpty ? timed(phrase).map { [$0] } ?? [] : inner
+        }
     }
 
     func gatewayChat(prompt: String, images: [Data] = [], audioFLAC: Data? = nil, model: String,

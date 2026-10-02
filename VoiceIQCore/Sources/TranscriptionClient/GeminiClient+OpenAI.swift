@@ -1,25 +1,16 @@
 import Foundation
 
 /// OpenAI's models for each role the app has. Defaults follow OpenAI's own
-/// recommendations (2026-09): `gpt-transcribe` for recorded speech,
-/// `gpt-live-transcribe` for streaming, and GPT-6 Luna for the writing rules,
-/// Ask Anything, Translate and meeting notes.
+/// recommendations (2026-09): `gpt-transcribe` for recorded speech and
+/// GPT-6 Luna for the writing rules, Ask Anything, Translate and meeting notes.
 public struct OpenAIConfig: Sendable, Equatable {
-    /// `audio.input.transcription.delay` on the realtime session: lower shows
-    /// words sooner, higher hears more context first.
-    public enum LiveDelay: String, CaseIterable, Sendable {
-        case minimal, low, medium, high, xhigh
-    }
-
     public var transcribeModel = "gpt-transcribe"
-    public var liveModel = "gpt-live-transcribe"
     public var writingModel = "gpt-6-luna"
     /// Meetings only. `gpt-transcribe` has no speaker labels.
     public var diarizeModel = "gpt-4o-transcribe-diarize"
     /// Dictation only: a second transcript for the writing model, which cannot
     /// hear the recording. A different model family errs in different places.
     public var secondOpinionModel = "whisper-1"
-    public var liveDelay: LiveDelay = .low
 
     public init() {}
 }

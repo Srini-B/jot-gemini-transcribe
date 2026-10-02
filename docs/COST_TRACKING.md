@@ -49,8 +49,7 @@ On OpenAI's own API, the transcription models (`gpt-transcribe`,
 rules also sends for a second transcript) bill per audio minute and report
 `usage: {type: "duration", seconds}`; `TokenUsage.fromOpenAIDuration` books
 `seconds / 60 × PriceBook.perMinutePrice` as `reportedCostUSD` with no token
-counts. The realtime socket (`OpenAILiveDialect`) books the seconds it sent
-at the `gpt-live-transcribe` rate. Chat models (GPT-6 Luna, and
+counts. Chat models (GPT-6 Luna, and
 `gpt-4o-transcribe-diarize`, which bills tokens) use the OpenAI-shaped
 `usage` block (`TokenUsage.fromOpenAI`).
 
@@ -59,12 +58,16 @@ books each batch call itself (`post` skips it for `.elevenLabs`): the
 response's `audio_duration_secs`, or the chunk's length when that field is
 missing, at `scribe_v2`'s $0.22 an hour, plus
 `PriceBook.elevenLabsKeytermsPerMinute` ($0.05 an hour) when dictionary terms
-were sent as `keyterms`. The realtime socket (`ElevenLabsLiveDialect`) books the
-seconds it sent at `scribe_v2_realtime`'s $0.39 an hour; ElevenLabs does not
-publish a realtime keyterm surcharge, so none is added. Prices are from
+were sent as `keyterms`. Prices are from
 elevenlabs.io/pricing/api (copied 2026-09-28) and are the same on every plan;
 hours included in a subscription are not subtracted, so the pane shows list
 price.
+
+MAI Transcribe 2 runs through OpenRouter or Vercel AI Gateway, and both report
+the charge for each call (`usage.cost`, or `providerMetadata.gateway.cost` on
+Vercel), so nothing is priced locally. Both list it at $0.10 an hour (checked
+2026-10-02). Its records are stored under `microsoft/mai-transcribe-2` and the
+Cost pane shows them under MAI.
 
 ## Attribution
 

@@ -98,7 +98,7 @@ final class PillHUDController: AgentOverlay {
 
     /// While the pill is up it lives on whichever display the pointer is on.
     /// People dictate into one screen and glance at another to read from it;
-    /// the pill goes with the glance so the live text is never behind them.
+    /// the pill goes with the glance so it is never behind them.
     private func followMouse() {
         guard mouseMonitor == nil else { return }
         mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { [weak self] _ in
