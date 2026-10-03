@@ -147,8 +147,9 @@ OpenRouter or Vercel AI Gateway key, they can use MAI Transcribe 2
 for meetings. With a Sarvam key, they can use Saaras V4 (`saaras:v4`), which
 transcribes English and 22 Indian languages, detects the language by default,
 and labels speakers in meetings; the same key offers Sarvam 105B
-(`sarvam-105b`) as the writing model. Sarvam prices in rupees, and Cost
-Analysis shows dollars or rupees. The picker appears only when one of those
+(`sarvam-105b`) as the writing model, which is the default while Saaras
+transcribes until you pick one. Sarvam prices in rupees, and Cost Analysis
+shows dollars or rupees. The picker appears only when one of those
 keys is stored.
 
 With Gemini, a dictation under ten minutes is one call to `gemini-3.8-flash`

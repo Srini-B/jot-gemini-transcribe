@@ -159,7 +159,9 @@ picker drives the by-action and by-model tables and the recent-calls list.
 The footer names the price source (`CostSource.pricingNote`): the active
 gateway for the selected provider, the provider's pricing page for the other,
 ElevenLabs' and Sarvam's list prices on their tabs, and the Frankfurter rate
-when rupees are shown. The iPhone's Cost page has the same source toggle.
+when rupees are shown. The iPhone's Cost page has the same source and
+currency toggles, and both apps refresh the rate and back-fill unrated rows
+at launch and when the page opens.
 `HistoryPane` shows the summed session cost on each row and the detail sheet
 lists each call with its model, what it was billed on, and its cost.
 

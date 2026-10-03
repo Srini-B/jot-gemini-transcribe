@@ -42,6 +42,18 @@ switches apps right after the hotkey.
 - Meetings on Sarvam use the diarized batch job; speaker turns feed the same
   `DiarizedWord` path the OpenAI diarizer uses.
 
+## Follow-up: iOS parity and the writing-model default
+
+- Picking Sarvam as transcription provider now defaults the writing model to
+  Sarvam 105B. `SettingsStore.preferredWritingSource` derives the default from
+  the transcription source when no `writingSource` key is stored; a stored
+  choice wins whatever transcribes. The pickers show the derived value without
+  writing it, so switching back to another provider restores the provider's
+  model unless the user chose one.
+- iOS Cost page gained the USD/INR toggle (same `costPaneCurrency` key) and the
+  rupee footer; `AppModel` refreshes the rate and back-fills unrated rows at
+  launch like the Mac controller. Compile-checked only; no simulator run.
+
 ## The ⌘-Tab abort
 
 Report: tap the hotkey, switch apps within a second, dictation cancels. Code:

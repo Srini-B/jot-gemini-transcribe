@@ -59,6 +59,11 @@ final class AppModel: ObservableObject {
         transcription = GeminiTranscriptionService(client: client)
         historyStore = try? HistoryStore.standard()
         UsageMeter.store = try? UsageStore.standard()
+        // Today's rupee rate for the rows to come, and the rate of their day
+        // for rows that have none.
+        if let usage = UsageMeter.store {
+            Task.detached(priority: .utility) { await FXRates.refresh(); await usage.backfillFX() }
+        }
         meetings = MeetingEngine(
             client: client,
             config: { SettingsStore().geminiConfig },

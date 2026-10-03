@@ -130,8 +130,12 @@ public struct SettingsStore: Sendable {
         Self.set(language.rawValue, forKey: "sarvamLanguage")
     }
 
+    /// Writing model chosen in Settings. Until the user picks one, Sarvam
+    /// transcription brings Sarvam's own writing model and everything else
+    /// the provider's; an explicit choice sticks whatever transcribes.
     public var preferredWritingSource: WritingSource {
-        WritingSource(rawValue: Self.defaults.string(forKey: "writingSource") ?? "") ?? .provider
+        if let stored = WritingSource(rawValue: Self.defaults.string(forKey: "writingSource") ?? "") { return stored }
+        return preferredTranscriptionSource == .sarvam ? .sarvam : .provider
     }
 
     public func setPreferredWritingSource(_ source: WritingSource) {
