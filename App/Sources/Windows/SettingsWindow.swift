@@ -274,6 +274,11 @@ struct PrivacyPane: View {
         }
     }
 
+    /// Who writes meeting notes: the writing model, not the transcriber.
+    private var notesWriter: String {
+        settings.writingSource == .sarvam ? "Sarvam" : route.provider.displayName
+    }
+
     private var recipients: String {
         var names = route.gateway == .direct ? [owner] : [route.endpoint.hostName, owner]
         switch source {
@@ -337,7 +342,7 @@ struct PrivacyPane: View {
             Section {
                 LabeledContent("Audio") { Text(audioDestination) }
                 LabeledContent("Transcript text") { Text("Only if writing rules are on — otherwise it never leaves") }
-                LabeledContent("Meeting audio") { Text("Only if call recording is on; notes are made by \(route.provider.displayName)") }
+                LabeledContent("Meeting audio") { Text("Only if call recording is on; notes are made by \(notesWriter)") }
                 LabeledContent("Dictionary terms") { Text("Sent with the audio, so names are spelled right as you speak") }
                 LabeledContent("Dictionary") { Text("Synced to your iPhone through your iCloud account") }
                 LabeledContent("Screen snapshots") { Text("Only if screen context is on; sent with the audio, never stored") }

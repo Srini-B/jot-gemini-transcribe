@@ -95,9 +95,10 @@ known the row is unpriced.
 Every row stores INR per USD for its day (`fxRateINR`) and the quote's date
 (`fxDate`). The rate comes from Frankfurter (`api.frankfurter.dev/v1`, the
 European Central Bank reference rate, published on business days), with no
-key. `FXRates.refresh` fetches `latest?base=USD&symbols=INR` at launch, before
-each Sarvam call, and whenever a row is booked without a rate, and caches the
-quote in `UserDefaults` (`fxQuoteINR`) for four hours. `UsageRecord.init` uses
+key. `FXRates.refresh` fetches `latest?base=USD&symbols=INR` at launch, when
+a Sarvam call starts (without waiting for it), and whenever a row is booked
+without a rate, and caches the quote in `UserDefaults` (`fxQuoteINR`) for
+four hours. `UsageMeter` runs one refresh-and-backfill at a time. `UsageRecord.init` uses
 the cached quote only if it was fetched within 36 hours of the call; otherwise
 the row waits.
 

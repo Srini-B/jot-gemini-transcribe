@@ -305,7 +305,8 @@ public actor GeminiClient {
         }
         switch http.statusCode {
         // Sarvam answers 202 Accepted when it creates a batch job.
-        case 200, 202 where via == .sarvam:
+        case 200,
+             202 where via == .sarvam:
             // Every billed call passes through here, so this is the one place
             // usage is read. Both envelopes are tried; a body with neither is
             // simply not metered.

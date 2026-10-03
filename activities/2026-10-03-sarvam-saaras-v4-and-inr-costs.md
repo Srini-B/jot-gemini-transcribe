@@ -54,6 +54,46 @@ switches apps right after the hotkey.
   rupee footer; `AppModel` refreshes the rate and back-fills unrated rows at
   launch like the Mac controller. Compile-checked only; no simulator run.
 
+## Review follow-up (PR #3 bot comments) and the iPad Settings header
+
+Accepted:
+
+- `sarvam-105b` chat now sends `max_tokens` (`Sarvam.outputBudget`: the
+  prompt's character count, clamped to 4 096…32 768). The API default is
+  2 048, which a long meeting's notes could exceed.
+- A batch download that never reaches `COMPLETED` throws
+  `network("sarvam_output_pending")`, so the recovery path retries it
+  instead of treating it as a bad request.
+- `UsageMeter` runs one FX refresh/back-fill at a time; `sarvamChat` no
+  longer waits for the rate, it starts the refresh and lets the back-fill
+  price the row.
+- The cleanup prompt says "no images attached" when Sarvam writes, so the
+  model is not told about screenshots it never receives.
+- Batch polling starts at 3 s and treats a 429 as a wait, not a failure.
+- Privacy pages (Mac and iOS) name Sarvam as the meeting-notes writer when
+  it is the writing model.
+
+Declined, with a reply on the thread:
+
+- "+10 % for automatic language detection": the rate card lists ₹30/h and
+  ₹45/h with no detection surcharge, and its FAQ's percentages do not match
+  the card (45/30 is +50 %, not +20 %). The card stays the source. Check the
+  Sarvam dashboard against the Cost pane after a few days of use.
+- "Meetings with only a Sarvam key": the app requires a Gemini or OpenAI key
+  as the provider; ElevenLabs and MAI have the same limit. Product decision,
+  not changed here.
+
+iPad Settings: the detail column showed a translucent bar with the section's
+title over the content, and no row said which section was open.
+`ListDetailNavigation` now removes the title and bar background from both
+columns in regular width, paints the band under the tab bar with the canvas
+colour, and `SettingsView` keeps a `SettingsSection` selection whose row is
+tinted. Verified on the iPad Air 13" simulator (portrait, dark): no band, no
+title, Dictation row tinted, Writing rules still pushes with a back button;
+iPhone 17 simulator still pushes titled pages. Screenshots in
+`.amp/in/artifacts/ipad-settings-dictation.png` and
+`iphone-dictation.png` (not committed).
+
 ## The ⌘-Tab abort
 
 Report: tap the hotkey, switch apps within a second, dictation cancels. Code:

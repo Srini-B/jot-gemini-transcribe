@@ -64,22 +64,25 @@ extension GeminiTranscriptionService {
         raw: String, context: DictationContext, config: GeminiConfig, second: String? = nil
     ) async -> CleanupOutcome {
         let dictionary = DictionaryStore()
+        // Sarvam's writing model takes text only, so the prompt must not
+        // promise it screenshots it will never see.
+        let screenshots = settings.writingSource == .sarvam ? [] : context.screenshots
         let prompt = PromptV1.cleanupPrompt(
             raw: raw,
             vocabulary: dictionary.sanitizedVocabulary(),
             spellings: dictionary.spellings(),
             instructions: settings.customInstructions,
-            imagesAttached: !context.screenshots.isEmpty,
+            imagesAttached: !screenshots.isEmpty,
             secondTranscript: second
         )
         do {
             let deadline = min(
                 60,
                 Self.cleanupDeadline(forCharacters: raw.count)
-                    + Double(context.screenshots.count * 2)
+                    + Double(screenshots.count * 2)
             )
             let response = try await client.cleanupWithFreshRetry(
-                prompt: prompt, images: context.screenshots,
+                prompt: prompt, images: screenshots,
                 model: config.cleanupModel, endpoint: config.endpoint, deadline: deadline
             )
             let cleaned = ValidationGate.stripArtifacts(response)

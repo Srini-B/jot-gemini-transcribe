@@ -61,6 +61,15 @@ public enum Sarvam {
     }
 
     static func usage(seconds: Double) -> TokenUsage { TokenUsage(audioSeconds: seconds) }
+
+    /// `max_tokens` for a writing call. Omitted, the API stops at 2,048
+    /// tokens, which truncates the rewrite of a long dictation (Indic text
+    /// tokenizes at close to one token a character). The answer is at most
+    /// about the prompt's size, so one token per prompt character is a safe
+    /// ceiling; 65,536 was accepted in a probe (2026-10-03).
+    static func outputBudget(promptCharacters: Int) -> Int {
+        min(32_768, max(4_096, promptCharacters))
+    }
 }
 
 extension GeminiClient {
@@ -121,12 +130,15 @@ extension GeminiClient {
     /// takes text only, and `cleanup` drops them before calling this.
     func sarvamChat(prompt: String, deadline: TimeInterval, stage: UsageStage,
                     jsonObject: Bool = false, jsonSchema: [String: Any]? = nil) async throws -> String {
-        await FXRates.refresh()
+        // Today's rate for the usage row, fetched alongside the call. A row
+        // booked before it lands is back-filled by `UsageMeter`.
+        Task { await FXRates.refresh() }
         var body: [String: Any] = [
             "model": Sarvam.chatModel,
             "messages": [["role": "user", "content": prompt]],
             "reasoning_effort": NSNull(),
             "temperature": 0.1,
+            "max_tokens": Sarvam.outputBudget(promptCharacters: prompt.count),
         ]
         if jsonObject || jsonSchema != nil {
             // `json_schema` is not documented; `json_object` answered valid
@@ -186,10 +198,19 @@ extension GeminiClient {
         _ = try await step("speech-to-text/job/v1/\(jobID)/start", [:])
 
         // 81 s of audio finished in about 6 s; a ten-minute window may take a
-        // minute. Polling is cheap, so it starts quickly and backs off.
-        var wait: TimeInterval = 1
+        // minute. Sarvam's FAQ asks Starter plans to poll no faster than every
+        // 3 s, and a throttled poll waits out the job here rather than letting
+        // the caller's retry start a second job.
+        var wait: TimeInterval = 3
         while true {
-            let status = try await sarvamGet(path: "speech-to-text/job/v1/\(jobID)/status", deadline: min(30, remaining()))
+            let status: [String: Any]
+            do {
+                status = try await sarvamGet(path: "speech-to-text/job/v1/\(jobID)/status", deadline: min(30, remaining()))
+            } catch TranscriptionError.rateLimitedTransient(let retryAfter) {
+                guard Date().timeIntervalSince(started) < deadline else { throw TranscriptionError.timeout }
+                try await Task.sleep(nanoseconds: UInt64(max(wait, retryAfter ?? 0) * 1_000_000_000))
+                continue
+            }
             switch status["job_state"] as? String {
             case "Completed":
                 if let detail = (status["job_details"] as? [[String: Any]])?.first, detail["state"] as? String == "Failed" {
@@ -211,7 +232,10 @@ extension GeminiClient {
             do {
                 download = try await step("speech-to-text/job/v1/download-files", ["job_id": jobID, "files": [outputName]])
                 break
-            } catch TranscriptionError.badRequest(let message) where message.contains("not in COMPLETED") && attempt < 5 {
+            } catch TranscriptionError.badRequest(let message) where message.contains("not in COMPLETED") {
+                // Still pending after the retries is a slow job, not a bad
+                // request: the retry queue keeps a `.network` row.
+                guard attempt < 5 else { throw TranscriptionError.network("sarvam_output_pending") }
                 try await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }

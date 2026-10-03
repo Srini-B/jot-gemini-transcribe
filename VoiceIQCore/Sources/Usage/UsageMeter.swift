@@ -50,8 +50,23 @@ public enum UsageMeter {
         )
         store?.append(record)
         // No rate for the call's day yet: fetch it and give the row its rate.
-        if record.fxRateINR == nil, let store {
-            Task { await FXRates.refresh(); await store.backfillFX() }
+        if record.fxRateINR == nil, let store { scheduleFXBackfill(store) }
+    }
+
+    private static let fxLock = NSLock()
+    nonisolated(unsafe) private static var fxTask: Task<Void, Never>?
+
+    /// One refresh and back-fill at a time: offline, every row of a long
+    /// meeting arrives unrated, and each would otherwise start its own
+    /// Frankfurter request and table scan.
+    private static func scheduleFXBackfill(_ store: UsageStore) {
+        fxLock.withLock {
+            guard fxTask == nil else { return }
+            fxTask = Task {
+                await FXRates.refresh()
+                await store.backfillFX()
+                fxLock.withLock { fxTask = nil }
+            }
         }
     }
 }
