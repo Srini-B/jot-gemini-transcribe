@@ -214,23 +214,18 @@ extension UIDevice {
 /// A list beside its detail where there is room (iPad), a stack elsewhere
 /// (iPhone, and iPad windows too narrow for two columns).
 struct ListDetailNavigation<Sidebar: View, Placeholder: View>: View {
-    @Environment(\.horizontalSizeClass) private var sizeClass
     @ViewBuilder var sidebar: Sidebar
     @ViewBuilder var placeholder: Placeholder
 
     var body: some View {
-        if sizeClass == .regular {
-            NavigationSplitView {
-                sidebar
-                    .modifier(HiddenSidebarTitle())
-                    .navigationSplitViewColumnWidth(min: 320, ideal: 380, max: 440)
-            } detail: {
-                NavigationStack { placeholder }
-            }
-            .navigationSplitViewStyle(.balanced)
-        } else {
-            NavigationStack { sidebar }
+        NavigationSplitView {
+            sidebar
+                .modifier(HiddenSidebarTitle())
+                .navigationSplitViewColumnWidth(min: 320, ideal: 380, max: 440)
+        } detail: {
+            NavigationStack { placeholder }
         }
+        .navigationSplitViewStyle(.balanced)
     }
 }
 

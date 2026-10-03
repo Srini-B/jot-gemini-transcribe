@@ -116,10 +116,14 @@ private struct SessionCard: View {
             }
         } else if session.isActive {
             Text("Dictating")
+        } else if UIDevice.isPad {
+            if #available(iOS 18.0, *) {
+                Text("Tap the mic on the VoiceiQ keyboard, or use VoiceiQ Dictate.")
+            } else {
+                Text("Disconnect any hardware keyboard, then tap the mic on the VoiceiQ keyboard.")
+            }
         } else {
-            Text(UIDevice.isPad
-                 ? "Tap the mic on the VoiceiQ keyboard, or use VoiceiQ Dictate."
-                 : "Tap the mic on the VoiceiQ keyboard, or press the Action button.")
+            Text("Tap the mic on the VoiceiQ keyboard, or press the Action button.")
         }
     }
 }
