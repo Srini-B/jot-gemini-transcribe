@@ -43,7 +43,7 @@ struct MarkdownTableView: View {
         Grid(horizontalSpacing: 0, verticalSpacing: 0) {
             GridRow {
                 ForEach(0..<table.columnCount, id: \.self) { column in
-                    cell(table.header[column], column: column, width: widths[column], font: style.bold)
+                    cell(table.header[column], column: column, width: widths[column], weight: MarkdownStyle.bold)
                 }
             }
             .background(VoiceIQUI.Colors.surfaceContainer)
@@ -51,16 +51,16 @@ struct MarkdownTableView: View {
                 Divider().gridCellColumns(table.columnCount)
                 GridRow {
                     ForEach(0..<table.columnCount, id: \.self) { column in
-                        cell(table.rows[row][column], column: column, width: widths[column], font: style.body)
+                        cell(table.rows[row][column], column: column, width: widths[column], weight: MarkdownStyle.regular)
                     }
                 }
             }
         }
     }
 
-    private func cell(_ text: AttributedString, column: Int, width: CGFloat, font: Font) -> some View {
+    private func cell(_ text: AttributedString, column: Int, width: CGFloat, weight: CGFloat) -> some View {
         let alignment = Alignment(horizontal: horizontalAlignment(column), vertical: .top)
-        return Text(style.styled(text, base: font))
+        return Text(style.styled(text, weight: weight))
             .fixedSize(horizontal: false, vertical: true)
             .frame(width: width - 2 * Self.horizontalPadding, alignment: alignment)
             .padding(.horizontal, Self.horizontalPadding)
@@ -86,11 +86,13 @@ struct MarkdownTableView: View {
     private func columnWidths() -> [CGFloat] {
         var bounds = Array(repeating: ColumnBounds(), count: table.columnCount)
         for column in 0..<table.columnCount {
-            measure(table.header[column], base: style.nsBold, into: &bounds[column])
-            for row in table.rows { measure(row[column], base: style.nsBody, into: &bounds[column]) }
+            measure(table.header[column], weight: MarkdownStyle.bold, into: &bounds[column])
+            for row in table.rows { measure(row[column], weight: MarkdownStyle.regular, into: &bounds[column]) }
         }
+        // A single word longer than the cap (a URL, an identifier) must still
+        // get its minimum, or the table would clip it instead of scrolling.
         let minimums = bounds.map { $0.minimum + 2 * Self.horizontalPadding }
-        let preferreds = bounds.map { min($0.preferred, Self.preferredCap) + 2 * Self.horizontalPadding }
+        let preferreds = bounds.map { max($0.minimum, min($0.preferred, Self.preferredCap)) + 2 * Self.horizontalPadding }
         let minimumSum = minimums.reduce(0, +)
         let preferredSum = preferreds.reduce(0, +)
 
@@ -114,8 +116,8 @@ struct MarkdownTableView: View {
     /// The longest word sets the minimum; the longest line sets the preferred
     /// width. A point of slack keeps SwiftUI's own rounding from wrapping a
     /// word AppKit measured as fitting.
-    private func measure(_ text: AttributedString, base: NSFont, into bounds: inout ColumnBounds) {
-        let measured = style.measured(text, base: base)
+    private func measure(_ text: AttributedString, weight: CGFloat, into bounds: inout ColumnBounds) {
+        let measured = style.measured(text, weight: weight)
         for range in Self.ranges(in: measured.string, separatedBy: .newlines) {
             bounds.preferred = max(bounds.preferred, measured.attributedSubstring(from: range).size().width + 1)
         }

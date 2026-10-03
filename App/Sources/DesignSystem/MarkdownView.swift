@@ -32,7 +32,8 @@ struct MarkdownView: View {
         case .paragraph(_, let text):
             inline(text)
         case .heading(_, let level, let text):
-            inline(text, font: GTFont.flex(headingSize(level), weight: 600))
+            Text(style.styled(text, size: headingSize(level), weight: MarkdownStyle.bold))
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, size * 0.3)
         case .list(_, let items):
             list(items)
@@ -62,8 +63,8 @@ struct MarkdownView: View {
 
     // MARK: - Inline
 
-    private func inline(_ text: AttributedString, font: Font? = nil) -> some View {
-        Text(style.styled(text, base: font ?? style.body))
+    private func inline(_ text: AttributedString) -> some View {
+        Text(style.styled(text))
             .fixedSize(horizontal: false, vertical: true)
     }
 
@@ -84,6 +85,7 @@ struct MarkdownView: View {
                     Text(item.ordered ? "\(item.ordinal)." : "•")
                         .font(style.body)
                         .frame(minWidth: 16, alignment: .trailing)
+                        .opacity(item.continuation ? 0 : 1)
                     inline(item.text)
                 }
                 .padding(.leading, CGFloat(item.depth - 1) * 20)
@@ -97,20 +99,22 @@ struct MarkdownView: View {
 /// font for a bold trait it does not expose, so the faces are set explicitly.
 struct MarkdownStyle {
     let size: CGFloat
-    var body: Font { GTFont.flex(size, weight: 400) }
-    var bold: Font { GTFont.flex(size, weight: 600) }
-    var code: Font { GTFont.sansCode(size - 1, weight: 400) }
-    var nsBody: NSFont { GTFont.nsFlex(size, weight: 400) }
-    var nsBold: NSFont { GTFont.nsFlex(size, weight: 600) }
-    var nsCode: NSFont { GTFont.nsSansCode(size - 1, weight: 400) }
+    static let regular: CGFloat = 400
+    static let bold: CGFloat = 600
 
-    func styled(_ text: AttributedString, base: Font) -> AttributedString {
+    var body: Font { GTFont.flex(size, weight: Self.regular) }
+    var code: Font { GTFont.sansCode(size - 1, weight: Self.regular) }
+
+    /// Sets a font on every run from its inline intent. Bold raises the weight
+    /// and code switches family; both keep the block's `size`, so a bold span
+    /// inside a heading stays heading-sized.
+    func styled(_ text: AttributedString, size: CGFloat? = nil, weight: CGFloat = MarkdownStyle.regular) -> AttributedString {
+        let size = size ?? self.size
         var out = text
         for run in out.runs {
             let intent = run.inlinePresentationIntent ?? []
-            var font = base
-            if intent.contains(.stronglyEmphasized) { font = bold }
-            if intent.contains(.code) { font = code }
+            var font = GTFont.flex(size, weight: intent.contains(.stronglyEmphasized) ? Self.bold : weight)
+            if intent.contains(.code) { font = GTFont.sansCode(size - 1, weight: Self.regular) }
             if intent.contains(.emphasized) { font = font.italic() }
             out[run.range].font = font
             out[run.range].inlinePresentationIntent = nil
@@ -120,13 +124,12 @@ struct MarkdownStyle {
     }
 
     /// The same text as AppKit measures it, for column sizing.
-    func measured(_ text: AttributedString, base: NSFont) -> NSAttributedString {
+    func measured(_ text: AttributedString, weight: CGFloat = MarkdownStyle.regular) -> NSAttributedString {
         let out = NSMutableAttributedString()
         for run in text.runs {
             let intent = run.inlinePresentationIntent ?? []
-            var font = base
-            if intent.contains(.stronglyEmphasized) { font = nsBold }
-            if intent.contains(.code) { font = nsCode }
+            var font = GTFont.nsFlex(size, weight: intent.contains(.stronglyEmphasized) ? Self.bold : weight)
+            if intent.contains(.code) { font = GTFont.nsSansCode(size - 1, weight: Self.regular) }
             out.append(NSAttributedString(string: String(text[run.range].characters), attributes: [.font: font]))
         }
         return out

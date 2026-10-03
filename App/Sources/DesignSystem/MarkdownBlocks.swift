@@ -14,6 +14,9 @@ enum MarkdownBlock: Identifiable {
         let ordinal: Int
         /// 1 for a top-level item, 2 for an item nested one level in.
         let depth: Int
+        /// Text of an item that resumes after its nested list. It keeps the
+        /// item's indent but shows no marker.
+        let continuation: Bool
         let text: AttributedString
     }
 
@@ -115,25 +118,34 @@ enum MarkdownBlock: Identifiable {
     }
 
     /// Each run belongs to its innermost list item. Nested lists may mix
-    /// numbers and bullets, so the list just outside that item decides the marker.
+    /// numbers and bullets, so the list just outside that item decides the
+    /// marker. Runs stay in source order: when an item's text resumes after
+    /// its nested list, that text becomes a separate continuation entry
+    /// instead of being pulled up in front of the nested items.
     private static func listItems(_ runs: [AttributedString.Runs.Run], in source: AttributedString) -> [ListItem] {
-        var runsByItem: [Int: [AttributedString.Runs.Run]] = [:]
-        var order: [(id: Int, ordered: Bool, ordinal: Int, depth: Int)] = []
+        struct Group {
+            let identity: Int, ordered: Bool, ordinal: Int, depth: Int
+            var runs: [AttributedString.Runs.Run]
+        }
+        var groups: [Group] = []
         for run in runs {
             let components = run.presentationIntent?.components ?? []
             let itemIndices = components.indices.filter { if case .listItem = components[$0].kind { return true }; return false }
             guard let index = itemIndices.first, case .listItem(let ordinal) = components[index].kind else { continue }
-            let item = components[index]
-            if runsByItem[item.identity] == nil {
-                var ordered = false
-                if components.indices.contains(index + 1), case .orderedList = components[index + 1].kind { ordered = true }
-                order.append((item.identity, ordered, ordinal, itemIndices.count))
+            let identity = components[index].identity
+            if groups.last?.identity == identity {
+                groups[groups.count - 1].runs.append(run)
+                continue
             }
-            runsByItem[item.identity, default: []].append(run)
+            var ordered = false
+            if components.indices.contains(index + 1), case .orderedList = components[index + 1].kind { ordered = true }
+            groups.append(Group(identity: identity, ordered: ordered, ordinal: ordinal, depth: itemIndices.count, runs: [run]))
         }
-        return order.map { item in
-            ListItem(id: item.id, ordered: item.ordered, ordinal: item.ordinal, depth: item.depth,
-                     text: paragraphs(runsByItem[item.id] ?? [], in: source))
+        var seen: Set<Int> = []
+        return groups.enumerated().map { offset, group in
+            ListItem(id: offset, ordered: group.ordered, ordinal: group.ordinal, depth: group.depth,
+                     continuation: !seen.insert(group.identity).inserted,
+                     text: paragraphs(group.runs, in: source))
         }
     }
 

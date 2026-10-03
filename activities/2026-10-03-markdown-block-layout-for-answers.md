@@ -39,6 +39,20 @@ paragraph spacing it carried.
   gets the same layout with no further change. `MarkdownRenderer` is deleted.
   `RichTextView` stays for the meeting transcript, which is plain text.
 
+PR #4 review (Codex, CodeRabbit) found three defects, all fixed in the
+follow-up commit:
+
+- A bold span inside a heading dropped to body size, because `styled` swapped
+  in a body-sized bold font. `styled` and `measured` now take a size and a
+  weight and build the font per run, so bold only raises the weight.
+- A list item whose text resumed after its nested list was pulled up in front
+  of the nested items, because runs were bucketed by item identity.
+  `listItems` now groups consecutive runs and emits the resumed text as a
+  `continuation` entry with a hidden marker.
+- A table cell holding one word longer than the 320 pt cap got a preferred
+  width below its minimum and clipped instead of scrolling. Preferred width is
+  now clamped to at least the minimum.
+
 Chosen over `NSTextTable` inside the existing `NSTextView`: that needs a
 TextKit 1 fallback, a self-sizing text view for the agent row, and gives no
 control over table styling.
