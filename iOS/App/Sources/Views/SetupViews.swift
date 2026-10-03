@@ -61,7 +61,7 @@ struct PermissionsPanel: View {
                         IconTile(systemImage: "circle.dashed.inset.filled", tint: Theme.Colors.pending, size: 32)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Live Activities are off").font(Theme.Fonts.headline()).foregroundStyle(Theme.Colors.ink)
-                            Text("The Action button needs them to dictate without opening VoiceiQ.")
+                            Text(UIDevice.isPad ? "VoiceiQ Dictate needs them to dictate without opening VoiceiQ." : "The Action button needs them to dictate without opening VoiceiQ.")
                                 .font(Theme.Fonts.footnote()).foregroundStyle(Theme.Colors.muted)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
@@ -173,15 +173,42 @@ struct TryItCard: View {
 private struct KeyboardSwitchSteps: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            step(1, Text("Tap the box below."))
-            step(2, Text("Touch and hold \(Image(systemName: "globe")) at the bottom left of the keyboard."))
-            step(3, Text("Choose **VoiceiQ**, then tap the mic."))
+            NumberedStep(number: 1, text: Text("Tap the box below."))
+            NumberedStep(number: 2, text: Text("Touch and hold \(Image(systemName: "globe")) at the bottom left of the keyboard."))
+            NumberedStep(number: 3, text: Text("Choose **VoiceiQ**, then tap the mic."))
         }
         .font(Theme.Fonts.callout())
         .foregroundStyle(Theme.Colors.ink)
     }
+}
 
-    private func step(_ number: Int, _ text: Text) -> some View {
+/// Dictating on an iPad whose hardware keyboard is attached. iPadOS hides
+/// every on-screen keyboard, VoiceiQ's included, and the keyboard's own
+/// dictation key always starts Apple's dictation. `ToggleDictationIntent`
+/// runs from Control Center, Spotlight or a Full Keyboard Access command
+/// instead, and a result no keyboard typed goes to the clipboard.
+struct HardwareKeyboardSteps: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            NumberedStep(number: 1, text: Text("Add **VoiceiQ Dictate** to Control Center, or press ⌘Space and run **Dictate with VoiceiQ**."))
+            NumberedStep(number: 2, text: Text("Speak, then run it again to stop."))
+            NumberedStep(number: 3, text: Text("Press ⌘V to paste."))
+            Text("To start it with keys of your own, put **Dictate with VoiceiQ** in a shortcut in the Shortcuts app, then assign that shortcut in Settings › Accessibility › Keyboards › Full Keyboard Access › Commands.")
+                .font(Theme.Fonts.footnote())
+                .foregroundStyle(Theme.Colors.muted)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, Theme.Spacing.xs)
+        }
+        .font(Theme.Fonts.callout())
+        .foregroundStyle(Theme.Colors.ink)
+    }
+}
+
+private struct NumberedStep: View {
+    let number: Int
+    let text: Text
+
+    var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.s) {
             Text("\(number)")
                 .font(Theme.Fonts.caption())
@@ -206,6 +233,7 @@ struct KeyboardSetupView: View {
             }
             .padding(.horizontal, Theme.Spacing.page)
             .padding(.vertical, Theme.Spacing.l)
+            .readableWidth()
         }
         .keyboardDismissable()
         .themedBackground()

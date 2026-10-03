@@ -19,13 +19,14 @@ struct OnboardingView: View {
                 OnboardingHeader(step: step.rawValue, total: Step.allCases.count - 1, back: back)
                     .padding(.horizontal, Theme.Spacing.page)
                     .padding(.top, Theme.Spacing.s)
+                    .readableWidth(560)
             }
             ScrollView {
                 page
                     .padding(.horizontal, Theme.Spacing.page)
                     .padding(.top, step == .welcome ? 0 : Theme.Spacing.xl)
                     .padding(.bottom, Theme.Spacing.xl)
-                    .frame(maxWidth: .infinity)
+                    .readableWidth(560)
             }
             .scrollBounceBehavior(.basedOnSize)
             .keyboardDismissable()
@@ -34,6 +35,7 @@ struct OnboardingView: View {
                     .padding(.horizontal, Theme.Spacing.page)
                     .padding(.top, Theme.Spacing.m)
                     .padding(.bottom, Theme.Spacing.s)
+                    .readableWidth(560)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
@@ -162,7 +164,7 @@ private struct WelcomePage: View {
             VStack(alignment: .leading, spacing: Theme.Spacing.l) {
                 FeatureLine(symbol: "mic.fill", text: "Tap the mic on the VoiceiQ keyboard, wherever you type.")
                 FeatureLine(symbol: "text.badge.checkmark", text: "Punctuation, lists and corrections come out right.")
-                FeatureLine(symbol: "key.fill", text: "Runs on your own API key, kept on your iPhone.")
+                FeatureLine(symbol: "key.fill", text: "Runs on your own API key, kept on your \(UIDevice.current.localizedModel).")
             }
             .padding(.horizontal, Theme.Spacing.s)
         }
@@ -211,6 +213,12 @@ private struct TryItPage: View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
             PageTitle(title: "Try it")
             TryItCard()
+            if UIDevice.isPad {
+                VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+                    GroupLabel(text: "Hardware keyboard")
+                    Card { HardwareKeyboardSteps() }
+                }
+            }
         }
     }
 }

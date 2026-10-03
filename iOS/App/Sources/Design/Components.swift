@@ -207,7 +207,66 @@ struct CheckLine: View {
 
 // MARK: - Screens
 
+extension UIDevice {
+    static let isPad = current.userInterfaceIdiom == .pad
+}
+
+/// A list beside its detail where there is room (iPad), a stack elsewhere
+/// (iPhone, and iPad windows too narrow for two columns).
+struct ListDetailNavigation<Sidebar: View, Placeholder: View>: View {
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @ViewBuilder var sidebar: Sidebar
+    @ViewBuilder var placeholder: Placeholder
+
+    var body: some View {
+        if sizeClass == .regular {
+            NavigationSplitView {
+                sidebar
+                    .modifier(HiddenSidebarTitle())
+                    .navigationSplitViewColumnWidth(min: 320, ideal: 380, max: 440)
+            } detail: {
+                NavigationStack { placeholder }
+            }
+            .navigationSplitViewStyle(.balanced)
+        } else {
+            NavigationStack { sidebar }
+        }
+    }
+}
+
+/// The tab bar above already names the page, so the sidebar doesn't repeat it.
+private struct HiddenSidebarTitle: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.toolbar(removing: .title)
+        } else {
+            content
+        }
+    }
+}
+
+/// The detail column before anything is picked.
+struct DetailPlaceholder: View {
+    let systemImage: String
+    let title: String
+
+    var body: some View {
+        VStack(spacing: Theme.Spacing.l) {
+            IconTile(systemImage: systemImage, size: 72)
+            Text(title).font(Theme.Fonts.title2()).foregroundStyle(Theme.Colors.muted)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.Colors.canvas.ignoresSafeArea())
+    }
+}
+
 extension View {
+    /// Caps a page at a comfortable reading width and centers it, so wide
+    /// iPad windows don't stretch cards and lines edge to edge.
+    func readableWidth(_ width: CGFloat = 720) -> some View {
+        frame(maxWidth: width).frame(maxWidth: .infinity)
+    }
+
     /// The canvas behind every page, lists included.
     func themedBackground() -> some View {
         scrollContentBackground(.hidden)

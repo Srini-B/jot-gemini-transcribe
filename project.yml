@@ -12,8 +12,8 @@ options:
 # CURRENT_PROJECT_VERSION is the build number: raise it with every release.
 settings:
   base:
-    MARKETING_VERSION: "0.5.12"
-    CURRENT_PROJECT_VERSION: "37"
+    MARKETING_VERSION: "0.5.13"
+    CURRENT_PROJECT_VERSION: "38"
 
 packages:
   VoiceIQCore:
@@ -141,7 +141,7 @@ targets:
         DEVELOPMENT_TEAM: G8K3545FJ2
         CODE_SIGN_STYLE: Automatic
         SWIFT_VERSION: "5.10"
-        TARGETED_DEVICE_FAMILY: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
       configs:
@@ -184,6 +184,13 @@ targets:
           UIColorName: LaunchBackground
         UIAppFonts: [GoogleSansFlex-Regular.ttf]
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        # iPad runs full screen, in Split View and in Stage Manager windows,
+        # which needs every orientation.
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         UIBackgroundModes: [audio]
         NSSupportsLiveActivities: true
         ITSAppUsesNonExemptEncryption: false
@@ -207,7 +214,7 @@ targets:
         DEVELOPMENT_TEAM: G8K3545FJ2
         CODE_SIGN_STYLE: Automatic
         SWIFT_VERSION: "5.10"
-        TARGETED_DEVICE_FAMILY: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
         APPLICATION_EXTENSION_API_ONLY: YES
         SWIFT_OBJC_BRIDGING_HEADER: iOS/Keyboard/Sources/Keyboard-Bridging-Header.h
       configs:
@@ -256,7 +263,7 @@ targets:
         DEVELOPMENT_TEAM: G8K3545FJ2
         CODE_SIGN_STYLE: Automatic
         SWIFT_VERSION: "5.10"
-        TARGETED_DEVICE_FAMILY: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
         APPLICATION_EXTENSION_API_ONLY: YES
       configs:
         Debug:
