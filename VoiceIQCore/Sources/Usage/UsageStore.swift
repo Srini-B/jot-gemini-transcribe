@@ -57,6 +57,9 @@ public struct UsageRecord: Codable, Equatable, Identifiable, FetchableRecord, Pe
     public var isEstimated: Bool
     /// Paid-tier USD at the time of the call; nil when the model is unpriced.
     public var costUSD: Double?
+    /// Seconds of audio billed, for models priced by audio length. Nil on
+    /// token-priced calls and on audio-priced calls booked before v2.
+    public var audioSeconds: Double?
 
     public init(at: Date = Date(), activity: UsageActivity, stage: UsageStage, model: String,
                 sessionID: String?, usage: TokenUsage) {
@@ -72,11 +75,13 @@ public struct UsageRecord: Codable, Equatable, Identifiable, FetchableRecord, Pe
         // OpenRouter states the charge on every response; the price book is
         // for providers that only report tokens.
         self.costUSD = usage.reportedCostUSD ?? PriceBook.cost(model: model, usage: usage, at: at)
+        self.audioSeconds = usage.audioSeconds
     }
 
     public var usage: TokenUsage {
         TokenUsage(textIn: textIn, audioIn: audioIn, imageIn: imageIn, cachedIn: cachedIn,
-                   textOut: textOut, audioOut: audioOut, thoughtOut: thoughtOut, isEstimated: isEstimated)
+                   textOut: textOut, audioOut: audioOut, thoughtOut: thoughtOut, isEstimated: isEstimated,
+                   audioSeconds: audioSeconds)
     }
     public var activityValue: UsageActivity { UsageActivity(rawValue: activity) ?? .other }
     public var stageValue: UsageStage? { UsageStage(rawValue: stage) }
@@ -130,6 +135,11 @@ public final class UsageStore: @unchecked Sendable {
                 t.column("costUSD", .double)
             }
         }
+        migrator.registerMigration("v2-audioSeconds") { db in
+            try db.alter(table: UsageRecord.databaseTableName) { t in
+                t.add(column: "audioSeconds", .double)
+            }
+        }
         try migrator.migrate(queue)
     }
 
@@ -160,9 +170,11 @@ public final class UsageStore: @unchecked Sendable {
         public var calls: Int
         public var tokensIn: Int
         public var tokensOut: Int
+        /// Seconds of audio billed by length (see `UsageRecord.audioSeconds`).
+        public var audioSeconds: Double
         /// True when any call in the total had no price entry or estimated tokens.
         public var isApproximate: Bool
-        public static let zero = Total(costUSD: 0, calls: 0, tokensIn: 0, tokensOut: 0, isApproximate: false)
+        public static let zero = Total(costUSD: 0, calls: 0, tokensIn: 0, tokensOut: 0, audioSeconds: 0, isApproximate: false)
     }
 
     /// `source` limits every read to that source's models (see
@@ -193,6 +205,7 @@ public final class UsageStore: @unchecked Sendable {
                    COUNT(*) AS calls,
                    COALESCE(SUM(textIn + audioIn + imageIn + cachedIn), 0) AS tokensIn,
                    COALESCE(SUM(textOut + audioOut + thoughtOut), 0) AS tokensOut,
+                   COALESCE(SUM(audioSeconds), 0) AS audioSeconds,
                    MAX(CASE WHEN costUSD IS NULL OR isEstimated THEN 1 ELSE 0 END) AS approx
             FROM usage
             """
@@ -214,7 +227,7 @@ public final class UsageStore: @unchecked Sendable {
                 try Row.fetchAll(db, sql: sql, arguments: arguments).map { row in
                     (row["key"] as String,
                      Total(costUSD: row["cost"], calls: row["calls"], tokensIn: row["tokensIn"],
-                           tokensOut: row["tokensOut"], isApproximate: (row["approx"] as Int? ?? 0) == 1))
+                           tokensOut: row["tokensOut"], audioSeconds: row["audioSeconds"], isApproximate: (row["approx"] as Int? ?? 0) == 1))
                 }
             }
         } catch {

@@ -20,14 +20,18 @@ public struct TokenUsage: Equatable, Sendable, Codable {
     /// USD the provider itself billed for the call, when it says (OpenRouter
     /// does). Takes precedence over the price book.
     public var reportedCostUSD: Double? = nil
+    /// Seconds of audio the call was billed for, on models priced by audio
+    /// length instead of tokens.
+    public var audioSeconds: Double? = nil
 
     public init(textIn: Int = 0, audioIn: Int = 0, imageIn: Int = 0, cachedIn: Int = 0,
                 textOut: Int = 0, audioOut: Int = 0, thoughtOut: Int = 0, isEstimated: Bool = false,
-                reportedCostUSD: Double? = nil) {
+                reportedCostUSD: Double? = nil, audioSeconds: Double? = nil) {
         self.textIn = textIn; self.audioIn = audioIn; self.imageIn = imageIn; self.cachedIn = cachedIn
         self.textOut = textOut; self.audioOut = audioOut; self.thoughtOut = thoughtOut
         self.isEstimated = isEstimated
         self.reportedCostUSD = reportedCostUSD
+        self.audioSeconds = audioSeconds
     }
 
     public var totalIn: Int { textIn + audioIn + imageIn + cachedIn }
@@ -42,7 +46,9 @@ public struct TokenUsage: Equatable, Sendable, Codable {
             thoughtOut: lhs.thoughtOut + rhs.thoughtOut,
             isEstimated: lhs.isEstimated || rhs.isEstimated,
             reportedCostUSD: lhs.reportedCostUSD == nil && rhs.reportedCostUSD == nil
-                ? nil : (lhs.reportedCostUSD ?? 0) + (rhs.reportedCostUSD ?? 0)
+                ? nil : (lhs.reportedCostUSD ?? 0) + (rhs.reportedCostUSD ?? 0),
+            audioSeconds: lhs.audioSeconds == nil && rhs.audioSeconds == nil
+                ? nil : (lhs.audioSeconds ?? 0) + (rhs.audioSeconds ?? 0)
         )
     }
 
@@ -87,7 +93,7 @@ public struct TokenUsage: Equatable, Sendable, Codable {
 
     public static func fromAudioMinutes(seconds: Double, model: String) -> TokenUsage? {
         guard let perMinute = PriceBook.perMinutePrice(for: model) else { return nil }
-        return TokenUsage(reportedCostUSD: seconds / 60 * perMinute)
+        return TokenUsage(reportedCostUSD: seconds / 60 * perMinute, audioSeconds: seconds)
     }
 
     /// Vercel's `/v4/ai/transcription-model` response has no `usage` block;

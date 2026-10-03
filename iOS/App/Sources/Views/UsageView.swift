@@ -83,7 +83,7 @@ struct UsageView: View {
                             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                                 Text("\(record.activityValue.displayName) · \(record.stageValue?.displayName ?? record.stage)")
                                     .font(Theme.Fonts.body()).foregroundStyle(Theme.Colors.ink)
-                                Text("\(record.model) · in \(Self.tokens(record.usage.totalIn)) · out \(Self.tokens(record.usage.totalOut)) · \(record.at.formatted(date: .abbreviated, time: .shortened))")
+                                Text("\(record.model) · \(UsageFormat.measure(record)) · \(record.at.formatted(date: .abbreviated, time: .shortened))")
                                     .font(Theme.Fonts.caption()).foregroundStyle(Theme.Colors.muted)
                             }
                             Spacer()
@@ -117,7 +117,7 @@ struct UsageView: View {
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                 Text(name).font(Theme.Fonts.body()).foregroundStyle(Theme.Colors.ink)
                 Text(detailed
-                     ? "\(total.calls) calls · in \(Self.tokens(total.tokensIn)) · out \(Self.tokens(total.tokensOut))"
+                     ? (["\(total.calls) calls"] + [UsageFormat.measure(total)].compactMap { $0 }).joined(separator: " · ")
                      : "\(total.calls) calls")
                     .font(Theme.Fonts.caption()).foregroundStyle(Theme.Colors.muted)
             }
@@ -141,9 +141,5 @@ struct UsageView: View {
         guard let value else { return "—" }
         let text = value >= 1 ? String(format: "$%.2f", value) : String(format: "$%.4f", value)
         return approximate ? "≈" + text : text
-    }
-
-    static func tokens(_ count: Int) -> String {
-        count >= 10_000 ? String(format: "%.1fk", Double(count) / 1000) : "\(count)"
     }
 }

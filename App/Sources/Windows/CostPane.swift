@@ -124,7 +124,7 @@ struct CostPane: View {
                 Grid(alignment: .leading, horizontalSpacing: VoiceIQUI.Spacing.l, verticalSpacing: 6) {
                     GridRow {
                         header(""); header("Calls")
-                        if detailed { header("Tokens in"); header("Tokens out") }
+                        if detailed { header("Tokens in"); header("Tokens out"); header("Audio") }
                         header("Cost")
                     }
                     ForEach(rows, id: \.0) { name, total in
@@ -132,8 +132,9 @@ struct CostPane: View {
                             Text(name).font(VoiceIQUI.TypeScale.body(grad: grad))
                             cell("\(total.calls)")
                             if detailed {
-                                cell(Self.tokens(total.tokensIn))
-                                cell(Self.tokens(total.tokensOut))
+                                cell(total.tokensIn > 0 ? UsageFormat.tokens(total.tokensIn) : "—")
+                                cell(total.tokensOut > 0 ? UsageFormat.tokens(total.tokensOut) : "—")
+                                cell(total.audioSeconds > 0 ? UsageFormat.audio(total.audioSeconds) : "—")
                             }
                             cell(Self.money(total.costUSD, approximate: total.isApproximate))
                         }
@@ -159,7 +160,7 @@ struct CostPane: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("\(record.activityValue.displayName) · \(record.stageValue?.displayName ?? record.stage)")
                                 .font(VoiceIQUI.TypeScale.body(grad: grad))
-                            Text("\(record.model) · in \(Self.tokens(record.usage.totalIn)) · out \(Self.tokens(record.usage.totalOut)) · \(record.at.formatted(date: .abbreviated, time: .shortened))")
+                            Text("\(record.model) · \(UsageFormat.measure(record)) · \(record.at.formatted(date: .abbreviated, time: .shortened))")
                                 .font(VoiceIQUI.TypeScale.labelSmall(grad: grad))
                                 .foregroundStyle(.secondary)
                         }
@@ -206,9 +207,5 @@ struct CostPane: View {
         guard let value else { return "—" }
         let text = value >= 1 ? String(format: "$%.2f", value) : String(format: "$%.4f", value)
         return approximate ? "≈" + text : text
-    }
-
-    static func tokens(_ count: Int) -> String {
-        count >= 10_000 ? String(format: "%.1fk", Double(count) / 1000) : "\(count)"
     }
 }

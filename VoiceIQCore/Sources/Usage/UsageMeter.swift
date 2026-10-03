@@ -26,6 +26,10 @@ public struct UsageScope: Equatable, Sendable {
 /// `record`.
 public enum UsageMeter {
     @TaskLocal public static var scope: UsageScope?
+    /// Length of the audio a transcription sends. Gateways charge MAI
+    /// Transcribe 2 and OpenAI's transcription models by audio length but
+    /// report only the charge, so the length comes from the sender.
+    @TaskLocal public static var audioSeconds: Double?
 
     /// Set once at launch. Nil (tests, onboarding key checks) means calls are
     /// logged but not stored.
@@ -34,6 +38,8 @@ public enum UsageMeter {
     public static func record(stage: UsageStage, model: String, usage: TokenUsage) {
         // Per-minute models report a charge and no tokens.
         guard !usage.isEmpty || usage.reportedCostUSD != nil else { return }
+        var usage = usage
+        if usage.isEmpty, usage.audioSeconds == nil { usage.audioSeconds = audioSeconds }
         let scope = self.scope ?? UsageScope(activity: .other, sessionID: nil)
         let record = UsageRecord(activity: scope.activity, stage: stage, model: model,
                                  sessionID: scope.sessionID, usage: usage)

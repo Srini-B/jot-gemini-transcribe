@@ -471,7 +471,7 @@ private struct RecordDetailSheet: View {
                     ForEach(calls) { call in
                         GridRow {
                             metaLabel(call.stageValue?.displayName ?? call.stage)
-                            metaValue("\(call.model) · in \(CostPane.tokens(call.usage.totalIn)) · out \(CostPane.tokens(call.usage.totalOut)) · \(CostPane.money(call.costUSD, approximate: call.isEstimated))")
+                            metaValue("\(call.model) · \(UsageFormat.measure(call)) · \(CostPane.money(call.costUSD, approximate: call.isEstimated))")
                         }
                     }
                 }

@@ -368,6 +368,17 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
         config: GeminiConfig, policy: SettingsStore.FormattingPolicy,
         vocabulary: [String], deadline: TimeInterval
     ) async throws -> String {
+        try await UsageMeter.$audioSeconds.withValue(seconds) {
+            try await sendTranscribeRequest(flacData: flacData, seconds: seconds, source: source, config: config,
+                                            policy: policy, vocabulary: vocabulary, deadline: deadline)
+        }
+    }
+
+    private func sendTranscribeRequest(
+        flacData: Data, seconds: Double, source: TranscriptionSource,
+        config: GeminiConfig, policy: SettingsStore.FormattingPolicy,
+        vocabulary: [String], deadline: TimeInterval
+    ) async throws -> String {
         // No dictionary terms: neither gateway documents keyword biasing for
         // this model. The writing rules still get the dictionary.
         if source == .maiTranscribe, let endpoint = settings.maiTranscribeEndpoint {

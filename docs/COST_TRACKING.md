@@ -10,7 +10,16 @@ Each successful model call becomes one `UsageRecord` in
 `~/Library/Application Support/VoiceiQ/usage.sqlite` (GRDB, WAL). Fields:
 time, activity, stage, model, session ID, token counts by modality (text,
 audio, image, cached in; text, audio, thought out), an `isEstimated` flag,
-and `costUSD`.
+`costUSD`, and `audioSeconds`.
+
+`audioSeconds` is the audio a call was billed for, on models priced by audio
+length (ElevenLabs Scribe, OpenAI's transcription models, MAI Transcribe 2).
+It comes from the response when it states the length (`audio_duration_secs`,
+OpenAI's `usage.seconds`), otherwise from `UsageMeter.audioSeconds`, a
+task-local that `GeminiTranscriptionService.sendTranscribe` and MAI meeting
+windows set to the length of the audio they send. `UsageMeter.record` applies
+it only to calls that report no tokens. The column was added in migration
+`v2-audioSeconds`; per-minute calls booked before it have no length.
 
 Activities: `dictation`, `askAnything`, `translate`, `meeting`, `agent`,
 `other`. Stages: `liveTranscribe`, `transcribe`, `cleanup`, `answer`,
@@ -116,4 +125,11 @@ price source (`CostSource.pricingNote`): the active gateway for the selected
 provider, the provider's pricing page for the other, and ElevenLabs' list
 prices on its tab. The iPhone's Cost page has the same three-way toggle.
 `HistoryPane` shows the summed session cost on each row and the detail sheet
-lists each call with its model and token counts.
+lists each call with its model, what it was billed on, and its cost.
+
+`UsageFormat.measure` writes what a call was billed on: "in 1.2k · out 300"
+for token-priced calls, "6m 30s of audio" for audio-priced ones, and "billed
+by audio length" for audio-priced calls booked before `audioSeconds` existed.
+History, the recent-calls lists on both platforms, and the iPhone's breakdown
+rows use it. The Mac's detailed breakdown tables have Tokens in, Tokens out,
+and Audio columns, with "—" where a row has none.
