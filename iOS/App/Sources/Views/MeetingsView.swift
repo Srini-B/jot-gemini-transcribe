@@ -6,7 +6,7 @@ struct MeetingsView: View {
     @State private var meetings: [MeetingMeta] = []
 
     var body: some View {
-        NavigationStack {
+        ListDetailNavigation {
             List {
                 Section {
                     RecorderCard(meetings: model.meetings)
@@ -33,6 +33,8 @@ struct MeetingsView: View {
             .onAppear(perform: reload)
             .onReceive(model.meetings.$phase) { _ in reload() }
             .onReceive(model.meetings.$processing) { _ in reload() }
+        } placeholder: {
+            DetailPlaceholder(systemImage: "doc.text", title: "No meeting selected")
         }
     }
 
@@ -72,7 +74,7 @@ private struct RecorderCard: View {
             .frame(minWidth: 72, minHeight: 72)
             .accessibilityLabel("Record a meeting")
             Text("Record a meeting").font(Theme.Fonts.headline()).foregroundStyle(Theme.Colors.ink)
-            Text("Records the room with your iPhone's mic.")
+            Text("Records the room with your \(UIDevice.current.localizedModel)'s mic.")
                 .font(Theme.Fonts.footnote())
                 .foregroundStyle(Theme.Colors.muted)
                 .multilineTextAlignment(.center)
@@ -112,17 +114,20 @@ private struct RecorderCard: View {
 
 private struct MeetingRow: View {
     let meta: MeetingMeta
+    /// `.increased` while the row is selected in the iPad split view.
+    @Environment(\.backgroundProminence) private var prominence
 
     var body: some View {
+        let selected = prominence == .increased
         HStack(alignment: .top, spacing: Theme.Spacing.m) {
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                 Text(meta.title ?? "Meeting")
                     .font(Theme.Fonts.callout())
-                    .foregroundStyle(Theme.Colors.ink)
+                    .foregroundStyle(selected ? Theme.Colors.onAccent : Theme.Colors.ink)
                     .lineLimit(1)
                 Text("\(meta.startedAt.formatted(date: .abbreviated, time: .shortened)) · \(duration)")
                     .font(Theme.Fonts.caption())
-                    .foregroundStyle(Theme.Colors.muted)
+                    .foregroundStyle(selected ? Theme.Colors.onAccent.opacity(0.8) : Theme.Colors.muted)
             }
             Spacer(minLength: 0)
             status
@@ -165,6 +170,7 @@ private struct MeetingDetail: View {
             }
             .padding(.horizontal, Theme.Spacing.page)
             .padding(.vertical, Theme.Spacing.l)
+            .readableWidth()
         }
         .themedBackground()
         .navigationTitle(notes?.title ?? meta.title ?? "Meeting")

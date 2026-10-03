@@ -10,7 +10,7 @@ struct HistoryView: View {
     private var sections: [HistoryDaySection] { HistoryDaySection.group(records) }
 
     var body: some View {
-        NavigationStack {
+        ListDetailNavigation {
             List {
                 ForEach(sections) { section in
                     Section(section.title) {
@@ -50,6 +50,8 @@ struct HistoryView: View {
             }
             .onAppear(perform: reload)
             .onReceive(NotificationCenter.default.publisher(for: .gtHistoryDidChange).receive(on: RunLoop.main)) { _ in reload() }
+        } placeholder: {
+            DetailPlaceholder(systemImage: "text.alignleft", title: "No dictation selected")
         }
     }
 
@@ -98,20 +100,26 @@ private struct HistoryEmptyState: View {
 
 private struct HistoryRow: View {
     let record: DictationRecord
+    /// `.increased` while the row is selected in the iPad split view, on the
+    /// accent fill.
+    @Environment(\.backgroundProminence) private var prominence
 
     var body: some View {
+        let selected = prominence == .increased
+        let ink = selected ? Theme.Colors.onAccent : Theme.Colors.ink
+        let muted = selected ? Theme.Colors.onAccent.opacity(0.8) : Theme.Colors.muted
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             HStack(alignment: .top, spacing: Theme.Spacing.s) {
                 Text(record.displayText.isEmpty ? statusLabel : record.displayText)
                     .font(Theme.Fonts.callout())
-                    .foregroundStyle(record.displayText.isEmpty ? Theme.Colors.muted : Theme.Colors.ink)
+                    .foregroundStyle(record.displayText.isEmpty ? muted : ink)
                     .lineLimit(3)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 statusView
             }
             Text(meta)
                 .font(Theme.Fonts.caption())
-                .foregroundStyle(Theme.Colors.muted)
+                .foregroundStyle(muted)
         }
         .padding(.vertical, Theme.Spacing.xs)
     }
@@ -182,6 +190,7 @@ private struct HistoryDetail: View {
             }
             .padding(.horizontal, Theme.Spacing.page)
             .padding(.vertical, Theme.Spacing.l)
+            .readableWidth()
         }
         .themedBackground()
         .navigationTitle("Dictation")
