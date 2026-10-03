@@ -1,5 +1,7 @@
+import AppIntents
 import SwiftUI
 import UIKit
+import VoiceIQBridge
 
 @MainActor
 final class AppDelegate: NSObject, UIApplicationDelegate {
@@ -37,5 +39,24 @@ struct VoiceIQMobileApp: App {
             default: break
             }
         }
+    }
+}
+
+/// "Dictate with VoiceiQ" in Spotlight, Siri and the Shortcuts app with no
+/// setup. With an iPad keyboard case attached no on-screen keyboard shows, so
+/// this (or the Control Center control) is how a dictation starts: ⌘Space,
+/// or a Full Keyboard Access command the user binds to it.
+@available(iOS 18.0, *)
+struct VoiceIQShortcuts: AppShortcutsProvider {
+    static var appShortcuts: [AppShortcut] {
+        AppShortcut(
+            intent: ToggleDictationIntent(),
+            phrases: [
+                "Dictate with \(.applicationName)",
+                "Start \(.applicationName) dictation",
+            ],
+            shortTitle: "Dictate",
+            systemImageName: "mic.fill"
+        )
     }
 }

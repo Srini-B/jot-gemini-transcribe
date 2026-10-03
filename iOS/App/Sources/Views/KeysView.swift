@@ -8,6 +8,7 @@ struct KeysView: View {
             ModelKeysForm()
                 .padding(.horizontal, Theme.Spacing.page)
                 .padding(.vertical, Theme.Spacing.l)
+                .readableWidth()
         }
         .keyboardDismissable()
         .themedBackground()
@@ -350,17 +351,17 @@ enum KeySlot: Hashable, CaseIterable {
     var purpose: String {
         switch self {
         case .gemini:
-            return "Google's Gemini API, with a free tier. Stored in your iPhone's Keychain and only ever sent to Google."
+            return "Google's Gemini API, with a free tier. Stored in your \(UIDevice.current.localizedModel)'s Keychain and only ever sent to Google."
         case .openRouter:
-            return "Runs Gemini or OpenAI models through OpenRouter, which has no per-minute tier limits. Stored in your iPhone's Keychain and only ever sent to OpenRouter."
+            return "Runs Gemini or OpenAI models through OpenRouter, which has no per-minute tier limits. Stored in your \(UIDevice.current.localizedModel)'s Keychain and only ever sent to OpenRouter."
         case .vercel:
-            return "Runs Gemini or OpenAI models through Vercel AI Gateway, billed per call. Stored in your iPhone's Keychain and only ever sent to Vercel."
+            return "Runs Gemini or OpenAI models through Vercel AI Gateway, billed per call. Stored in your \(UIDevice.current.localizedModel)'s Keychain and only ever sent to Vercel."
         case .openAI:
-            return "OpenAI's API. Stored in your iPhone's Keychain and only ever sent to OpenAI."
+            return "OpenAI's API. Stored in your \(UIDevice.current.localizedModel)'s Keychain and only ever sent to OpenAI."
         case .tinyFish:
-            return "Lets Ask Anything look up current information on the web. Stored in your iPhone's Keychain and only ever sent to TinyFish."
+            return "Lets Ask Anything look up current information on the web. Stored in your \(UIDevice.current.localizedModel)'s Keychain and only ever sent to TinyFish."
         case .elevenLabs:
-            return "Lets ElevenLabs Scribe transcribe your dictation and meetings instead of the provider's speech model; the provider still applies the writing rules. Stored in your iPhone's Keychain and only ever sent to ElevenLabs."
+            return "Lets ElevenLabs Scribe transcribe your dictation and meetings instead of the provider's speech model; the provider still applies the writing rules. Stored in your \(UIDevice.current.localizedModel)'s Keychain and only ever sent to ElevenLabs."
         case .sarvam:
             return "Lets Sarvam Saaras V4 transcribe your dictation and meetings (Indian languages and English), and Sarvam 105B apply the writing rules. Priced in rupees. Stored in your \(UIDevice.current.localizedModel)'s Keychain and only ever sent to Sarvam."
         }

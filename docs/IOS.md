@@ -162,6 +162,58 @@ dictation, and the result has no host app, so whichever field has the
 VoiceiQ keyboard within two minutes receives it. Keyboard-started sessions
 have no Live Activity.
 
+### iPad
+
+The app and both extensions target iPhone and iPad (`TARGETED_DEVICE_FAMILY`
+`1,2`). The iPhone stays portrait; the iPad supports every orientation, so it
+runs full screen, in Split View and in Stage Manager windows.
+
+Layout follows the horizontal size class, not the device:
+
+- Regular width (an iPad window wide enough): History, Meetings and Settings
+  use `ListDetailNavigation`, a `NavigationSplitView` with the list on the
+  left and the selected item on the right. The sidebar has no title: the
+  tab bar above already names the page. Home puts the session, setup and
+  hardware keyboard cards in one column and Try it, stats and recent
+  dictations in a second.
+- Compact width (iPhone, narrow iPad windows): the iPhone layout, with a
+  `NavigationStack` per tab.
+
+On iPhone the bottom tab bar shrinks to the current tab's icon while a page
+scrolls down (`tabBarMinimizeBehavior(.onScrollDown)`, iOS 26 and later).
+
+Scrolling pages cap their content with `.readableWidth()` (720 pt; Home 1080,
+onboarding 560). The tab bar is the system one, which iPadOS draws at the top.
+Copy that names the device ("Use iPad microphone", "kept on your iPad") reads
+`UIDevice.localizedModel`.
+
+#### Hardware keyboards
+
+With a keyboard case attached, iPadOS shows no on-screen keyboard, VoiceiQ's
+included, and only Apple's own keyboards have hardware layouts. The case's
+dictation key always starts Apple's dictation; apps cannot receive it or
+change what it does. So on iPad the keyboard is not the way in.
+
+The way in is `ToggleDictationIntent`, the same intent as the Action button
+control. `VoiceIQShortcuts` (an `AppShortcutsProvider` in
+`VoiceIQMobileApp.swift`) publishes it as "Dictate with VoiceiQ" with no
+setup, so it runs from:
+
+1. Control Center: the VoiceiQ Dictate control.
+2. Spotlight: ⌘Space, "Dictate with VoiceiQ", Return.
+3. Siri: "Dictate with VoiceiQ".
+4. A key combination of the user's choice: put the action in a shortcut in
+   the Shortcuts app, then assign that shortcut in Settings › Accessibility ›
+   Keyboards › Full Keyboard Access › Commands. iPadOS has no other way to
+   bind a global key to an app action; Full Keyboard Access also draws focus
+   rings while it is on.
+
+Run it once to start and again to stop. No keyboard types the result, so after
+two seconds it goes on the clipboard (the existing `copyIfNotTyped` path) and
+the user presses ⌘V. On iPad, Home, onboarding's Try it page and
+Settings › Dictation show these steps in a "Hardware keyboard" card in place
+of the Action button section.
+
 ### Setup status
 
 `SetupMonitor` (app) publishes `SetupStatus`: microphone permission, whether
@@ -333,4 +385,7 @@ is `false`, so builds skip the export-compliance question.
   next mic tap bounces once to start a new activity.
 - The orange mic dot shows for the whole warm window.
 - The Action button control needs iOS 18 and Live Activities turned on.
+- On an iPad with a keyboard case, a dictation lands on the clipboard, not in
+  the field: iPadOS hides third-party keyboards while a hardware keyboard is
+  attached, so nothing can type it in place.
 - The first dictation after a cold start costs one trip to the app.

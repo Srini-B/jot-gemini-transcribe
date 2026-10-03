@@ -25,6 +25,7 @@ struct RootView: View {
                         .tabItem { Label("Settings", systemImage: "gearshape") }
                         .tag(Tab.settings)
                 }
+                .modifier(MinimizeTabBarOnScroll())
             } else {
                 OnboardingView {
                     MobileSettings.hasCompletedOnboarding = true
@@ -127,6 +128,20 @@ struct BannerView: View {
         .task {
             try? await Task.sleep(for: .seconds(5))
             dismiss()
+        }
+    }
+}
+
+/// The iPhone's bottom tab bar shrinks while the page scrolls down. iPadOS
+/// ignores it: its tab bar sits at the top.
+private struct MinimizeTabBarOnScroll: ViewModifier {
+    /// Enables tab bar minimization on downward scrolling on iOS 26 and later,
+    /// returning the content unchanged on earlier versions.
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.tabBarMinimizeBehavior(.onScrollDown)
+        } else {
+            content
         }
     }
 }

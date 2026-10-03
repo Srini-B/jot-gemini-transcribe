@@ -6,7 +6,7 @@ struct SettingsView: View {
     @EnvironmentObject private var setup: SetupMonitor
 
     var body: some View {
-        NavigationStack {
+        ListDetailNavigation {
             List {
                 Section {
                     VStack(spacing: Theme.Spacing.s) {
@@ -47,6 +47,8 @@ struct SettingsView: View {
             .themedBackground()
             .navigationTitle("Settings")
             .onAppear { setup.refresh() }
+        } placeholder: {
+            DetailPlaceholder(systemImage: "gearshape", title: "No setting selected")
         }
     }
 
@@ -105,7 +107,7 @@ struct DictationSettingsView: View {
                     LabeledContent("Translate to", value: translationTarget)
                 }
                 .onChange(of: translationTarget) { _, value in settings.setTranslationTargetLanguage(value) }
-                Toggle("Use iPhone microphone", isOn: $builtInMic)
+                Toggle("Use \(UIDevice.current.localizedModel) microphone", isOn: $builtInMic)
                     .onChange(of: builtInMic) { _, value in
                         MobileSettings.preferBuiltInMic = value
                         session.setPreferBuiltInMic(value)
@@ -124,13 +126,19 @@ struct DictationSettingsView: View {
             } header: {
                 SettingsSectionHeader("Experimental")
             }
-            Section {
-                Text("Settings › Action Button › Controls › VoiceiQ Dictate. Press it to start dictating in any app and again to stop. It also works from Control Center.")
-                    .font(Theme.Fonts.callout())
-                    .foregroundStyle(Theme.Colors.ink)
-                Button("Open Action Button settings", action: openActionButtonSettings)
-                    .buttonStyle(.compactPrimary)
-            } header: { SettingsSectionHeader("Action button") }
+            if UIDevice.isPad {
+                Section {
+                    HardwareKeyboardSteps()
+                } header: { SettingsSectionHeader("Hardware keyboard") }
+            } else {
+                Section {
+                    Text("Settings › Action Button › Controls › VoiceiQ Dictate. Press it to start dictating in any app and again to stop. It also works from Control Center.")
+                        .font(Theme.Fonts.callout())
+                        .foregroundStyle(Theme.Colors.ink)
+                    Button("Open Action Button settings", action: openActionButtonSettings)
+                        .buttonStyle(.compactPrimary)
+                } header: { SettingsSectionHeader("Action button") }
+            }
         }
         .settingsPage(title: "Dictation")
         // A change made elsewhere (another screen, a migration) must not
@@ -326,7 +334,7 @@ struct PrivacyView: View {
                 LabeledContent("Dictionary", value: "Your iCloud, to sync")
                 LabeledContent("Ask search queries", value: "TinyFish, if its key is saved")
                 LabeledContent("What you type", value: "Never")
-            } header: { SettingsSectionHeader("What leaves your iPhone") }
+            } header: { SettingsSectionHeader("What leaves your \(UIDevice.current.localizedModel)") }
         }
         .settingsPage(title: "Privacy")
         .onAppear {

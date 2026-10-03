@@ -7,6 +7,7 @@ struct HomeView: View {
     @EnvironmentObject private var session: VoiceSession
     @EnvironmentObject private var setup: SetupMonitor
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var stats: HistoryStore.Stats?
     @State private var recent: [DictationRecord] = []
 
@@ -15,21 +16,19 @@ struct HomeView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
                     header
-                    SessionCard()
-                    if !setup.status.isComplete { SetupCard() }
-                    VStack(alignment: .leading, spacing: Theme.Spacing.m) {
-                        GroupLabel(text: "Try it")
-                        TryItCard()
-                    }
-                    if let stats, stats.totalDictations > 0 {
-                        StatsRow(stats: stats)
-                    }
-                    if !recent.isEmpty {
-                        RecentList(records: recent) { tab = .history }
+                    if sizeClass == .regular {
+                        HStack(alignment: .top, spacing: Theme.Spacing.xl) {
+                            VStack(alignment: .leading, spacing: Theme.Spacing.xl) { primary }
+                            VStack(alignment: .leading, spacing: Theme.Spacing.xl) { secondary }
+                        }
+                    } else {
+                        primary
+                        secondary
                     }
                 }
                 .padding(.horizontal, Theme.Spacing.page)
                 .padding(.bottom, Theme.Spacing.xxl)
+                .readableWidth(1080)
             }
             .keyboardDismissable()
             .themedBackground()
@@ -38,6 +37,30 @@ struct HomeView: View {
             .onAppear(perform: refresh)
             .onChange(of: scenePhase) { _, phase in if phase == .active { refresh() } }
             .onReceive(NotificationCenter.default.publisher(for: .gtHistoryDidChange).receive(on: RunLoop.main)) { _ in refresh() }
+        }
+    }
+
+    @ViewBuilder private var primary: some View {
+        SessionCard()
+        if !setup.status.isComplete { SetupCard() }
+        if UIDevice.isPad {
+            VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+                GroupLabel(text: "Hardware keyboard")
+                Card { HardwareKeyboardSteps() }
+            }
+        }
+    }
+
+    @ViewBuilder private var secondary: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+            GroupLabel(text: "Try it")
+            TryItCard()
+        }
+        if let stats, stats.totalDictations > 0 {
+            StatsRow(stats: stats)
+        }
+        if !recent.isEmpty {
+            RecentList(records: recent) { tab = .history }
         }
     }
 
@@ -93,6 +116,12 @@ private struct SessionCard: View {
             }
         } else if session.isActive {
             Text("Dictating")
+        } else if UIDevice.isPad {
+            if #available(iOS 18.0, *) {
+                Text("Tap the mic on the VoiceiQ keyboard, or use VoiceiQ Dictate.")
+            } else {
+                Text("Disconnect any hardware keyboard, then tap the mic on the VoiceiQ keyboard.")
+            }
         } else {
             Text("Tap the mic on the VoiceiQ keyboard, or press the Action button.")
         }
