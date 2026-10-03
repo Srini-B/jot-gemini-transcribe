@@ -236,6 +236,8 @@ struct ListDetailNavigation<Sidebar: View, Placeholder: View>: View {
 
 /// The tab bar above already names the page, so the sidebar doesn't repeat it.
 private struct HiddenSidebarTitle: ViewModifier {
+    /// Removes the sidebar's toolbar title on iOS 18 and later, returning
+    /// the content unchanged on earlier versions.
     func body(content: Content) -> some View {
         if #available(iOS 18.0, *) {
             content.toolbar(removing: .title)
