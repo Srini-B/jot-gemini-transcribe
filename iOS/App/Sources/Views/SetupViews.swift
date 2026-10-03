@@ -5,6 +5,14 @@ import SwiftUI
 struct PermissionsPanel: View {
     @EnvironmentObject private var setup: SetupMonitor
 
+    /// The VoiceiQ Dictate control and its intent need iOS 18. On an older
+    /// iPad, which has no Action button either, the Live Activities card
+    /// would name a feature that does not exist.
+    private static var hasDictateControl: Bool {
+        if #available(iOS 18.0, *) { return true }
+        return false
+    }
+
     var body: some View {
         let status = setup.status
         VStack(spacing: Theme.Spacing.m) {
@@ -55,7 +63,7 @@ struct PermissionsPanel: View {
                 }
             }
 
-            if !status.liveActivitiesEnabled {
+            if !status.liveActivitiesEnabled, !UIDevice.isPad || Self.hasDictateControl {
                 Card {
                     HStack(spacing: Theme.Spacing.m) {
                         IconTile(systemImage: "circle.dashed.inset.filled", tint: Theme.Colors.pending, size: 32)

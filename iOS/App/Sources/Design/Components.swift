@@ -211,16 +211,17 @@ extension UIDevice {
     static let isPad = current.userInterfaceIdiom == .pad
 }
 
-/// A list beside its detail where there is room (iPad), a stack elsewhere
-/// (iPhone, and iPad windows too narrow for two columns).
+/// A list beside its detail where there is room (iPad); the split view collapses
+/// to a stack elsewhere (iPhone, and iPad windows too narrow for two columns).
 struct ListDetailNavigation<Sidebar: View, Placeholder: View>: View {
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @ViewBuilder var sidebar: Sidebar
     @ViewBuilder var placeholder: Placeholder
 
     var body: some View {
         NavigationSplitView {
             sidebar
-                .modifier(HiddenSidebarTitle())
+                .modifier(HiddenSidebarTitle(hidden: sizeClass == .regular))
                 .navigationSplitViewColumnWidth(min: 320, ideal: 380, max: 440)
         } detail: {
             NavigationStack { placeholder }
@@ -229,12 +230,16 @@ struct ListDetailNavigation<Sidebar: View, Placeholder: View>: View {
     }
 }
 
-/// The tab bar above already names the page, so the sidebar doesn't repeat it.
+/// The tab bar above already names the page, so the expanded sidebar doesn't
+/// repeat it. Collapsed (compact width), the sidebar is the page and keeps
+/// its title.
 private struct HiddenSidebarTitle: ViewModifier {
+    let hidden: Bool
+
     /// Removes the sidebar's toolbar title on iOS 18 and later, returning
     /// the content unchanged on earlier versions.
     func body(content: Content) -> some View {
-        if #available(iOS 18.0, *) {
+        if #available(iOS 18.0, *), hidden {
             content.toolbar(removing: .title)
         } else {
             content
