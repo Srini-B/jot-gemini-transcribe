@@ -23,12 +23,13 @@ extension GeminiTranscriptionService {
     }
 
     /// Whether the transcript can still carry "uh" and "um". MAI Transcribe 2
-    /// in its Verbatim style and ElevenLabs in verbatim mode write every one they hear, as does
-    /// Gemini's verbatim mode; OpenAI's transcription model has no smart mode.
+    /// in its Verbatim style, and ElevenLabs and Sarvam in verbatim mode,
+    /// write every one they hear, as does Gemini's verbatim mode; OpenAI's
+    /// transcription model has no smart mode.
     func transcriptKeepsFillers(source: TranscriptionSource, policy: SettingsStore.FormattingPolicy) -> Bool {
         switch source {
         case .maiTranscribe: return settings.maiTranscribeStyle == .verbatim
-        case .elevenLabs: return policy.mode != .smart
+        case .elevenLabs, .sarvam: return policy.mode != .smart
         case .provider:
             return settings.activeRoute.provider == .openAI
                 || policy.mode != .smart

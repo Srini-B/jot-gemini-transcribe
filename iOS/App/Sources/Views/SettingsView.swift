@@ -300,6 +300,7 @@ struct PrivacyView: View {
     private var audioDestination: String {
         switch source {
         case .elevenLabs: return "ElevenLabs, with your key"
+        case .sarvam: return "Sarvam, with your key"
         case .maiTranscribe: return "\(maiHost), then Microsoft"
         case .provider: return route.gateway == .direct ? "\(owner), with your key" : "\(route.endpoint.hostName), then \(owner)"
         }

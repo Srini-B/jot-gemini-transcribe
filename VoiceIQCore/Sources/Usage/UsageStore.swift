@@ -60,9 +60,18 @@ public struct UsageRecord: Codable, Equatable, Identifiable, FetchableRecord, Pe
     /// Seconds of audio billed, for models priced by audio length. Nil on
     /// token-priced calls and on audio-priced calls booked before v2.
     public var audioSeconds: Double?
+    /// INR per USD on the day of the call and the quote's date, so the Cost
+    /// pane can show rupees. Nil until `UsageStore.backfillFX` finds the rate.
+    public var fxRateINR: Double?
+    public var fxDate: String?
+
+    /// A cached quote older than this is not the call's day: leave the rate
+    /// empty and let the back-fill fetch that day's.
+    static let fxFreshness: TimeInterval = 36 * 3600
 
     public init(at: Date = Date(), activity: UsageActivity, stage: UsageStage, model: String,
-                sessionID: String?, usage: TokenUsage) {
+                sessionID: String?, usage: TokenUsage, fx cached: FXQuote? = FXRates.cachedQuote()) {
+        let fx = cached.flatMap { abs(at.timeIntervalSince($0.fetchedAt)) < Self.fxFreshness ? $0 : nil }
         self.id = UUID().uuidString
         self.at = at
         self.activity = activity.rawValue
@@ -73,9 +82,25 @@ public struct UsageRecord: Codable, Equatable, Identifiable, FetchableRecord, Pe
         self.cachedIn = usage.cachedIn; self.textOut = usage.textOut; self.audioOut = usage.audioOut
         self.thoughtOut = usage.thoughtOut; self.isEstimated = usage.isEstimated
         // OpenRouter states the charge on every response; the price book is
-        // for providers that only report tokens.
+        // for providers that only report tokens. A rupee price becomes USD at
+        // the day's rate; without one the row waits for the back-fill.
         self.costUSD = usage.reportedCostUSD ?? PriceBook.cost(model: model, usage: usage, at: at)
+            ?? Self.usd(fromINR: PriceBook.costINR(model: model, usage: usage), fx: fx)
         self.audioSeconds = usage.audioSeconds
+        self.fxRateINR = fx?.inrPerUSD
+        self.fxDate = fx?.date
+    }
+
+    static func usd(fromINR inr: Double?, fx: FXQuote?) -> Double? {
+        guard let inr, let fx else { return nil }
+        return inr / fx.inrPerUSD
+    }
+
+    /// The charge in rupees: Sarvam's list price exactly, every other model
+    /// at the day's rate. Nil until the rate is known.
+    public var costINR: Double? {
+        guard let costUSD, let fxRateINR else { return nil }
+        return costUSD * fxRateINR
     }
 
     public var usage: TokenUsage {
@@ -94,7 +119,7 @@ public extension Notification.Name {
 /// Append-only ledger of model calls, separate from history.sqlite so
 /// deleting a dictation's audio never erases what it cost.
 public final class UsageStore: @unchecked Sendable {
-    private let queue: DatabaseQueue
+    let queue: DatabaseQueue
 
     public init(databaseURL: URL) throws {
         try FileManager.default.createDirectory(
@@ -140,6 +165,12 @@ public final class UsageStore: @unchecked Sendable {
                 t.add(column: "audioSeconds", .double)
             }
         }
+        migrator.registerMigration("v3-fx") { db in
+            try db.alter(table: UsageRecord.databaseTableName) { t in
+                t.add(column: "fxRateINR", .double)
+                t.add(column: "fxDate", .text)
+            }
+        }
         try migrator.migrate(queue)
     }
 
@@ -167,6 +198,8 @@ public final class UsageStore: @unchecked Sendable {
 
     public struct Total: Equatable, Sendable {
         public var costUSD: Double
+        /// Each call at its own day's rate; calls without a rate add nothing.
+        public var costINR: Double
         public var calls: Int
         public var tokensIn: Int
         public var tokensOut: Int
@@ -174,7 +207,10 @@ public final class UsageStore: @unchecked Sendable {
         public var audioSeconds: Double
         /// True when any call in the total had no price entry or estimated tokens.
         public var isApproximate: Bool
-        public static let zero = Total(costUSD: 0, calls: 0, tokensIn: 0, tokensOut: 0, audioSeconds: 0, isApproximate: false)
+        /// True when a priced call has no rate yet, so `costINR` is short.
+        public var fxMissing: Bool
+        public static let zero = Total(costUSD: 0, costINR: 0, calls: 0, tokensIn: 0, tokensOut: 0, audioSeconds: 0,
+                                       isApproximate: false, fxMissing: false)
     }
 
     /// `source` limits every read to that source's models (see
@@ -202,6 +238,8 @@ public final class UsageStore: @unchecked Sendable {
         var sql = """
             SELECT \(keyExpression) AS key,
                    COALESCE(SUM(costUSD), 0) AS cost,
+                   COALESCE(SUM(costUSD * fxRateINR), 0) AS costINR,
+                   MAX(CASE WHEN costUSD IS NOT NULL AND fxRateINR IS NULL THEN 1 ELSE 0 END) AS fxMissing,
                    COUNT(*) AS calls,
                    COALESCE(SUM(textIn + audioIn + imageIn + cachedIn), 0) AS tokensIn,
                    COALESCE(SUM(textOut + audioOut + thoughtOut), 0) AS tokensOut,
@@ -226,8 +264,9 @@ public final class UsageStore: @unchecked Sendable {
             return try queue.read { db in
                 try Row.fetchAll(db, sql: sql, arguments: arguments).map { row in
                     (row["key"] as String,
-                     Total(costUSD: row["cost"], calls: row["calls"], tokensIn: row["tokensIn"],
-                           tokensOut: row["tokensOut"], audioSeconds: row["audioSeconds"], isApproximate: (row["approx"] as Int? ?? 0) == 1))
+                     Total(costUSD: row["cost"], costINR: row["costINR"], calls: row["calls"], tokensIn: row["tokensIn"],
+                           tokensOut: row["tokensOut"], audioSeconds: row["audioSeconds"],
+                           isApproximate: (row["approx"] as Int? ?? 0) == 1, fxMissing: (row["fxMissing"] as Int? ?? 0) == 1))
                 }
             }
         } catch {

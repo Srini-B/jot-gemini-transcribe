@@ -51,7 +51,9 @@ final class AppModel: ObservableObject {
             vercelKey: { KeychainStore.loadVercelKey() },
             openAIKey: { KeychainStore.loadOpenAIKey() },
             elevenLabsKey: { KeychainStore.loadElevenLabsKey() },
+            sarvamKey: { KeychainStore.loadSarvamKey() },
             openAIConfig: { SettingsStore().openAIConfig },
+            writingSource: { SettingsStore().writingSource },
             route: { SettingsStore().activeRoute }
         )
         transcription = GeminiTranscriptionService(client: client)

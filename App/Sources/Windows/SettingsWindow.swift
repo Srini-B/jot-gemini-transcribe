@@ -265,6 +265,7 @@ struct PrivacyPane: View {
     private var audioDestination: String {
         switch source {
         case .elevenLabs: return "Sent to ElevenLabs with your key"
+        case .sarvam: return "Sent to Sarvam with your key"
         case .maiTranscribe: return "Sent to \(maiHost) with your key, then to Microsoft"
         case .provider:
             return route.gateway == .direct
@@ -278,8 +279,10 @@ struct PrivacyPane: View {
         switch source {
         case .provider: break
         case .elevenLabs: names.append("ElevenLabs")
+        case .sarvam: names.append("Sarvam")
         case .maiTranscribe: names += [maiHost, "Microsoft"]
         }
+        if settings.writingSource == .sarvam { names.append("Sarvam") }
         var unique: [String] = []
         for name in names where !unique.contains(name) { unique.append(name) }
         return unique.count == 1 ? unique[0] : unique.dropLast().joined(separator: ", ") + " and " + unique.last!
