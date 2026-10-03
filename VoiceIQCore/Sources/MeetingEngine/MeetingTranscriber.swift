@@ -21,19 +21,22 @@ public struct MeetingTranscriber: Sendable {
         public init(transcribe: String, flash: String) { self.transcribe = transcribe; self.flash = flash }
     }
 
-    /// Who hears the audio: ElevenLabs Scribe or MAI Transcribe 2 when
-    /// Settings picks it as the transcription source, the same as dictation;
-    /// otherwise the provider's meeting routes in order.
+    /// Who hears the audio: ElevenLabs Scribe, MAI Transcribe 2 or Sarvam
+    /// Saaras V4 when Settings picks it as the transcription source, the
+    /// same as dictation; otherwise the provider's meeting routes in order.
     public enum SpeechRoute: Equatable, Sendable {
         case elevenLabs
         /// MAI Transcribe 2 through this gateway.
         case mai(ModelEndpoint)
+        /// Saaras V4's batch job with diarization on.
+        case sarvam
         case model(ModelRoute)
 
         public var label: String {
             switch self {
             case .elevenLabs: return "ElevenLabs"
             case .mai(let via): return "mai/\(via.rawValue)"
+            case .sarvam: return "sarvam"
             case .model(let route): return route.label
             }
         }
@@ -42,6 +45,7 @@ public struct MeetingTranscriber: Sendable {
             switch self {
             case .elevenLabs: return "ElevenLabs"
             case .mai(let via): return "MAI Transcribe 2 via \(via.hostName)"
+            case .sarvam: return "Sarvam Saaras V4"
             case .model(let route): return route.displayName
             }
         }
@@ -52,6 +56,7 @@ public struct MeetingTranscriber: Sendable {
             switch self {
             case .elevenLabs: return "elevenlabs"
             case .mai(let via): return "mai-\(via.rawValue)"
+            case .sarvam: return "sarvam"
             case .model(let route): return "\(route.provider.rawValue)-\(route.gateway.rawValue)"
             }
         }
@@ -61,7 +66,7 @@ public struct MeetingTranscriber: Sendable {
         /// reads the ids off the labels they get.
         var anchorsInAudio: Bool {
             switch self {
-            case .elevenLabs, .mai: return true
+            case .elevenLabs, .mai, .sarvam: return true
             case .model(let route): return route == ModelRoute(provider: .gemini, gateway: .direct)
             }
         }
@@ -98,7 +103,7 @@ public struct MeetingTranscriber: Sendable {
     /// its window must stay well under that.
     static func windowSpeech(_ via: SpeechRoute?) -> Double {
         switch via {
-        case .elevenLabs, .mai: return 600
+        case .elevenLabs, .mai, .sarvam: return 600
         case .model(let route): return route.gateway == .direct ? 600 : 150
         case nil: return 150
         }
@@ -355,6 +360,9 @@ public struct MeetingTranscriber: Sendable {
             return try await UsageMeter.$audioSeconds.withValue(seconds) {
                 try await client.maiDiarize(audio: flac, deadline: 600, via: endpoint, style: SettingsStore().maiTranscribeStyle)
             }
+        case .sarvam:
+            return try await client.sarvamDiarize(audio: flac, audioSeconds: seconds,
+                                                  language: SettingsStore().sarvamLanguage, deadline: 600)
         case .model(let route): via = route
         }
         switch (via.provider, via.gateway) {

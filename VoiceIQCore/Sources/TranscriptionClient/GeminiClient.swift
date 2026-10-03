@@ -49,8 +49,11 @@ public actor GeminiClient {
     let vercelKey: @Sendable () -> String?
     let openAIKey: @Sendable () -> String?
     let elevenLabsKey: @Sendable () -> String?
+    let sarvamKey: @Sendable () -> String?
     /// Read per call, like `provider`, so a model override applies at once.
     let openAIConfig: @Sendable () -> OpenAIConfig
+    /// Read per call: whose model writes (`cleanup`, meeting notes).
+    let writingSource: @Sendable () -> WritingSource
     /// Read per call, so flipping the provider or gateway in Settings takes
     /// effect on the next request without rebuilding the client.
     let route: @Sendable () -> ModelRoute
@@ -61,7 +64,9 @@ public actor GeminiClient {
         vercelKey: @escaping @Sendable () -> String? = { nil },
         openAIKey: @escaping @Sendable () -> String? = { nil },
         elevenLabsKey: @escaping @Sendable () -> String? = { nil },
+        sarvamKey: @escaping @Sendable () -> String? = { nil },
         openAIConfig: @escaping @Sendable () -> OpenAIConfig = { OpenAIConfig() },
+        writingSource: @escaping @Sendable () -> WritingSource = { .provider },
         route: @escaping @Sendable () -> ModelRoute = { ModelRoute(provider: .gemini, gateway: .direct) }
     ) {
         self.session = Self.makeSession()
@@ -70,7 +75,9 @@ public actor GeminiClient {
         self.vercelKey = vercelKey
         self.openAIKey = openAIKey
         self.elevenLabsKey = elevenLabsKey
+        self.sarvamKey = sarvamKey
         self.openAIConfig = openAIConfig
+        self.writingSource = writingSource
         self.route = route
     }
 
@@ -130,8 +137,12 @@ public actor GeminiClient {
         let route = route()
         // Callers check `writingModelHearsAudio`; a recording reaching an
         // OpenAI writing model would be dropped and the prompt would lie.
-        if audioFLAC != nil, !route.provider.writingModelHearsAudio {
+        if audioFLAC != nil, !route.provider.writingModelHearsAudio || writingSource() == .sarvam {
             throw TranscriptionError.badRequest("writing model takes no audio")
+        }
+        if writingSource() == .sarvam {
+            // Text only: `sarvam-105b` takes no images, so screenshots stay here.
+            return try await sarvamChat(prompt: prompt, deadline: deadline, stage: stage, jsonSchema: jsonSchema)
         }
         switch (route.provider, route.gateway) {
         case (.gemini, .direct): break
@@ -293,7 +304,9 @@ public actor GeminiClient {
             throw TranscriptionError.network("non-http")
         }
         switch http.statusCode {
-        case 200:
+        // Sarvam answers 202 Accepted when it creates a batch job.
+        case 200,
+             202 where via == .sarvam:
             // Every billed call passes through here, so this is the one place
             // usage is read. Both envelopes are tried; a body with neither is
             // simply not metered.
@@ -304,6 +317,9 @@ public actor GeminiClient {
             // No usage block, and the price depends on the request's options:
             // `elevenLabsTranscribe` books it.
             case .elevenLabs: nil
+            // Chat reports OpenAI-shaped usage; speech-to-text has none and
+            // `sarvamTranscribe` books it by audio length.
+            case .sarvam: TokenUsage.fromOpenAI(data)
             }
             if let usage {
                 UsageMeter.record(stage: stage, model: modelLabel, usage: usage)
@@ -327,6 +343,11 @@ public actor GeminiClient {
             // so the recording stays queued until credits are added.
             Log.transcription.error("GeminiClient: 402 on \(path, privacy: .public) — \(Self.errorMessage(from: data) ?? "no detail", privacy: .private)")
             throw TranscriptionError.network("gateway_insufficient_credits")
+        case 403 where via == .sarvam:
+            // Sarvam answers 403 `invalid_api_key_error` for a bad key
+            // (checked 2026-10-03); 401 is not used.
+            Log.transcription.error("GeminiClient: 403 on \(path, privacy: .public) via sarvam — \(Self.errorMessage(from: data) ?? "no detail", privacy: .private)")
+            throw TranscriptionError.auth
         case 403, 404:
             // Key authenticated but this model is not available to it — gated,
             // renamed, or unknown. "Fix your key" would misdirect — name the
@@ -352,7 +373,8 @@ public actor GeminiClient {
                                       isRetryAfter429: true, via: via, extraHeaders: extraHeaders)
             }
             // OpenAI answers 429 `insufficient_quota` when the account has no
-            // credit left: the same situation as a gateway's 402.
+            // credit left, Sarvam 429 `insufficient_quota_error`: the same
+            // situation as a gateway's 402.
             if let body = String(data: data, encoding: .utf8), body.contains("insufficient_quota") {
                 throw TranscriptionError.network("gateway_insufficient_credits")
             }
@@ -365,9 +387,9 @@ public actor GeminiClient {
             }
             throw TranscriptionError.rateLimitedTransient(retryAfter: retryAfter)
         case 400,
-             422 where via == .elevenLabs:
+             422 where via == .elevenLabs || via == .sarvam:
             // Permanent: malformed request — retrying is pointless. ElevenLabs
-            // reports schema validation as 422.
+            // and Sarvam report schema validation as 422.
             let message = Self.errorMessage(from: data) ?? "http_\(http.statusCode)"
             Log.transcription.error("GeminiClient: \(http.statusCode) — \(message, privacy: .private)")
             throw TranscriptionError.badRequest(message)
@@ -548,6 +570,10 @@ public actor GeminiClient {
         case .elevenLabs:
             if let key = elevenLabsKey() {
                 request.setValue(key, forHTTPHeaderField: "xi-api-key")
+            }
+        case .sarvam:
+            if let key = sarvamKey() {
+                request.setValue(key, forHTTPHeaderField: "api-subscription-key")
             }
         }
     }
