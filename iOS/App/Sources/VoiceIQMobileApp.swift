@@ -54,7 +54,6 @@ struct VoiceIQShortcuts: AppShortcutsProvider {
             phrases: [
                 "Dictate with \(.applicationName)",
                 "Start \(.applicationName) dictation",
-                "Stop \(.applicationName) dictation",
             ],
             shortTitle: "Dictate",
             systemImageName: "mic.fill"
